@@ -1,0 +1,32 @@
+export interface Chapter {
+  id: string;
+  seriesId: string;
+  number: number;
+  title?: string;
+  images: string[];
+  publishAt?: any;
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface Series {
+  id: string;
+  title: string;
+  alternativeTitles: string[];
+  cover: string;
+  banner: string;
+  author: string;
+  artist: string;
+  synopsis: string;
+  genres: string[];
+  tags: string[];
+  isHero?: boolean;
+  isFeatured?: boolean;
+  status: string;
+  rating: number;
+  views?: number;
+  type: string;
+  chapters?: Chapter[];
+  createdAt: any;
+  updatedAt: any;
+}

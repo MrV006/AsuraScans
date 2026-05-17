@@ -1,0 +1,181 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() { return isSignedIn() && (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) || request.auth.token.email == 'amirrezaveisi45@gmail.com' || request.auth.token.email == 'Mr.V@admin.com'); }
+
+    function isValidUser(data) {
+      let hasReq = data.keys().hasAll(['displayName', 'createdAt', 'updatedAt']);
+      return hasReq &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 50 &&
+             data.get('avatarUrl', '') is string && data.get('avatarUrl', '').size() <= 500 &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    match /{path=**}/chapters/{chapterId} {
+      allow read: if true;
+    }
+
+    match /users/{userId} {
+      allow get: if true; 
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidUser(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidUser(incoming()) && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatarUrl', 'updatedAt']) && incoming().updatedAt == request.time && incoming().createdAt == existing().createdAt;
+      
+      function isValidBookmark(data) {
+        return data.keys().hasAll(['seriesId', 'createdAt']) &&
+               data.seriesId is string && isValidId(data.seriesId) &&
+               data.createdAt is timestamp;
+      }
+      
+      match /bookmarks/{seriesId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow create: if isSignedIn() && request.auth.uid == userId && isValidId(seriesId) && isValidBookmark(incoming()) && incoming().seriesId == seriesId && incoming().createdAt == request.time && exists(/databases/$(database)/documents/series/$(seriesId));
+        allow delete: if isSignedIn() && request.auth.uid == userId;
+      }
+      
+      function isValidHistory(data) {
+         return data.keys().hasAll(['seriesId', 'chapterId', 'chapterNumber', 'updatedAt']) &&
+                data.seriesId is string && isValidId(data.seriesId) &&
+                data.chapterId is string && isValidId(data.chapterId) &&
+                data.chapterNumber is number &&
+                data.updatedAt is timestamp;
+      }
+
+      match /history/{seriesId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow create: if isSignedIn() && request.auth.uid == userId && isValidId(seriesId) && isValidHistory(incoming()) && incoming().seriesId == seriesId && incoming().updatedAt == request.time && exists(/databases/$(database)/documents/series/$(seriesId));
+        allow update: if isSignedIn() && request.auth.uid == userId && isValidId(seriesId) && isValidHistory(incoming()) && incoming().seriesId == seriesId && incoming().updatedAt == request.time && incoming().diff(existing()).affectedKeys().hasOnly(['chapterId', 'chapterNumber', 'updatedAt']);
+        allow delete: if isSignedIn() && request.auth.uid == userId;
+      }
+      function isValidNotification(data) {
+        return data.keys().hasAll(['type', 'title', 'body', 'link', 'createdAt', 'read']) &&
+               data.type is string &&
+               data.title is string &&
+               data.body is string &&
+               data.link is string &&
+               data.createdAt is timestamp &&
+               data.read is bool;
+      }
+
+      match /notifications/{notificationId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow update: if isSignedIn() && request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+        allow create: if isAdmin() && isValidNotification(incoming()) && incoming().createdAt == request.time;
+        allow delete: if false;
+      }
+    }
+
+    function isValidRating(data) {
+       return data.keys().hasAll(['seriesId', 'userId', 'rating', 'updatedAt']) &&
+              data.seriesId is string && isValidId(data.seriesId) &&
+              data.userId is string && isValidId(data.userId) &&
+              data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+              data.updatedAt is timestamp;
+    }
+
+    match /ratings/{ratingId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.auth.uid == incoming().userId && ratingId == incoming().seriesId + "_" + request.auth.uid && isValidRating(incoming()) && incoming().updatedAt == request.time && exists(/databases/$(database)/documents/series/$(incoming().seriesId));
+      allow update: if isSignedIn() && request.auth.uid == existing().userId && incoming().userId == existing().userId && incoming().seriesId == existing().seriesId && isValidRating(incoming()) && incoming().updatedAt == request.time && incoming().diff(existing()).affectedKeys().hasOnly(['rating', 'updatedAt']);
+      allow delete: if isSignedIn() && request.auth.uid == existing().userId;
+    }
+
+    match /admins/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    function isValidSeries(data) {
+      let hasReq = data.keys().hasAll(['title', 'cover', 'author', 'artist', 'synopsis', 'genres', 'status', 'type', 'createdAt', 'updatedAt']);
+      return hasReq &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.cover is string && data.cover.size() <= 500 &&
+             data.get('banner', '') is string && data.get('banner', '').size() <= 500 &&
+             data.author is string && data.author.size() <= 100 &&
+             data.artist is string && data.artist.size() <= 100 &&
+             data.synopsis is string && data.synopsis.size() <= 5000 &&
+             data.genres is list && data.genres.size() <= 20 && (data.genres.size() == 0 || data.genres[0] is string) &&
+             data.get('tags', []) is list && data.get('tags', []).size() <= 20 && (data.get('tags', []).size() == 0 || data.get('tags', [])[0] is string) &&
+             data.status is string && data.status.size() <= 20 &&
+             data.get('rating', 0) is number &&
+             data.type is string && data.type.size() <= 50 &&
+             data.get('alternativeTitles', []) is list && data.get('alternativeTitles', []).size() <= 10 && (data.get('alternativeTitles', []).size() == 0 || data.get('alternativeTitles', [])[0] is string) &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    match /series/{seriesId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidId(seriesId) && isValidSeries(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(seriesId) && isValidSeries(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
+      allow delete: if isAdmin();
+
+      function isValidChapter(data) {
+        let hasReq = data.keys().hasAll(['seriesId', 'number', 'images', 'createdAt', 'updatedAt']);
+        return hasReq &&
+               data.seriesId is string && data.seriesId == seriesId &&
+               data.number is number &&
+               data.get('title', '') is string && data.get('title', '').size() <= 200 &&
+               data.images is list && data.images.size() <= 200 && (data.images.size() == 0 || data.images[0] is string) &&
+               data.createdAt is timestamp &&
+               data.updatedAt is timestamp;
+      }
+      
+      match /chapters/{chapterId} {
+        allow read: if true;
+        allow create: if isAdmin() && isValidId(chapterId) && isValidId(seriesId) && isValidChapter(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time && exists(/databases/$(database)/documents/series/$(seriesId));
+        allow update: if isAdmin() && isValidId(chapterId) && isValidId(seriesId) && isValidChapter(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && incoming().seriesId == existing().seriesId;
+        allow delete: if isAdmin();
+      }
+    }
+
+    function isValidComment(data) {
+      let hasReq = data.keys().hasAll(['seriesId', 'authorId', 'content', 'createdAt', 'updatedAt']);
+      return hasReq &&
+             data.seriesId is string && isValidId(data.seriesId) &&
+             data.get('chapterId', '') is string && data.get('chapterId', '').size() <= 128 &&
+             data.authorId is string &&
+             data.content is string && data.content.size() > 0 && data.content.size() <= 1000 &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    match /comments/{commentId} {
+      allow get: if true;
+      allow list: if true;
+      
+      allow create: if isSignedIn() && isValidId(commentId) && isValidComment(incoming()) &&
+                    incoming().authorId == request.auth.uid &&
+                    incoming().createdAt == request.time &&
+                    incoming().updatedAt == request.time &&
+                    exists(/databases/$(database)/documents/series/$(incoming().seriesId)); 
+
+      allow update: if isSignedIn() && isValidId(commentId) && isValidComment(incoming()) &&
+                    (
+                      isAdmin() || 
+                      (
+                        incoming().authorId == request.auth.uid &&
+                        existing().authorId == request.auth.uid &&
+                        incoming().diff(existing()).affectedKeys().hasOnly(['content', 'updatedAt'])
+                      )
+                    ) &&
+                    incoming().updatedAt == request.time &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().seriesId == existing().seriesId &&
+                    incoming().get('chapterId', '') == existing().get('chapterId', '');
+
+      allow delete: if isSignedIn() && (isAdmin() || existing().authorId == request.auth.uid);
+    }
+  }
+}

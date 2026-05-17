@@ -1,11 +1,23 @@
-<div align="center">
+# پروژه کمیک و مانگا (Manga & Comic Reader)
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+## ✅ کارهایی که انجام شده (Completed Tasks)
+- طراحی و پیاده‌سازی صفحه اصلی (Hero Carousel و بخش Featured)
+- داشبورد پنل ادمین (Admin Panel Dashboard)
+- اضافه کردن و مدیریت کمیک‌ها (آپلود عکس، تگ‌ها، ژانرها و غیره)
+- تعیین کردن کمیک‌ها برای نمایش در اسلایدر بالا (Hero) و بخش پیشنهادها (Featured)
+- مرتب‌سازی پیشرفته صفحات کمیک با درگ و دراپ (Drag & Drop Image Reordering)
+- آپلود گروهی و استخراج خودکار فایل‌های Zip (Bulk Image / Zip Upload)
+- زمان‌بندی انتشار چپترها (Scheduled Publishing - انتشار در تاریخ و ساعت خاص)
+- ساخت بخش پیشرفته مدیریت تکسونومی / ژانرها (Taxonomy & Genres Management در پنل)
+- سیستم آمار و آنالیز (Advanced Analytics): اضافه شدن نمودار رشد کاربران و لیست پربازدیدترین‌ها بر اساس دیتابیس واقعی
+- شمارش واقعی ویو (Views) برای کمیک‌ها و چپترها
+- بخش نظارت بر کاربران (Moderation & Reports): ریپورت کامنت‌های نامناسب، ریپورت مشکلات چپتر، مسدود(بن) کردن کاربرها
+- تنظیمات عمومی سایت (Site Settings): حالت تعمیرات، تنظیمات SEO و شبکه‌های اجتماعی از پنل ادمین
 
-  <h1>Built with AI Studio</h2>
+## 📝 کارهایی که پیشنهاد می‌شود انجام دهیم (To Do / Next Ideas)
+1. **لیست‌های بوکمارک پیشرفته (Advanced Bookmark Lists):** امکان ساخت لیست‌های شخصی مثل "در حال خواندن"، "بعدا می‌خوانم" و "تمام شده".
+2. **سیستم نوتیفیکیشن قوی‌تر (Notifications):** گرفتن هشدار درون برنامه‌ای (و ایمیل) وقتی که چپتر جدیدی برای کامیک‌های بوکمارک‌شده می‌آید.
+3. **دانلود چپتر برای خواندن آفلاین (Download / Offline Mode):** گزینه‌ای برای دانلود و ذخیره چپتر روی دستگاه کاربر.
+4. **امتیازدهی پیشرفته (Star Ratings):** اجازه به کاربران که از ۱ تا ۵ ستاره به کمیک‌ها امتیاز دهند.
+5. **بهینه‌سازی تصاویر (Image Optimization):** پیاده‌سازی Lazy Loading هوشمند برای کم‌تر شدن مصرف اینترنت در خواندن کمیک‌های طولانی.
 
-  <p>The fastest path from prompt to production with Gemini.</p>
-
-  <a href="https://aistudio.google.com/apps">Start building</a>
-
-</div>

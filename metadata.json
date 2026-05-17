@@ -1,0 +1,8 @@
+{
+  "name": "AsuraClone",
+  "description": "A high-quality manga and manhwa reading website similar to Asura Scans.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,97 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with public info",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["displayName", "createdAt", "updatedAt"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Admin privileges indicator",
+      "type": "object",
+      "properties": {
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["createdAt"]
+    },
+    "Series": {
+      "title": "Series",
+      "description": "A manga/manhwa series",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "alternativeTitles": { "type": "array", "items": { "type": "string" } },
+        "cover": { "type": "string" },
+        "banner": { "type": "string" },
+        "author": { "type": "string" },
+        "artist": { "type": "string" },
+        "synopsis": { "type": "string" },
+        "genres": { "type": "array", "items": { "type": "string" } },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string" },
+        "rating": { "type": "number" },
+        "type": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["title", "cover", "author", "artist", "synopsis", "genres", "status", "type", "createdAt", "updatedAt"]
+    },
+    "Chapter": {
+      "title": "Chapter",
+      "description": "A chapter of a series",
+      "type": "object",
+      "properties": {
+        "seriesId": { "type": "string" },
+        "number": { "type": "number" },
+        "title": { "type": "string" },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["seriesId", "number", "images", "createdAt", "updatedAt"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "A comment on a series or chapter",
+      "type": "object",
+      "properties": {
+        "seriesId": { "type": "string" },
+        "chapterId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["seriesId", "authorId", "content", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Public user profiles"
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/Admin" },
+      "description": "List of admin users"
+    },
+    "/series/{seriesId}": {
+      "schema": { "$ref": "#/entities/Series" },
+      "description": "Manga and manhwa series"
+    },
+    "/series/{seriesId}/chapters/{chapterId}": {
+      "schema": { "$ref": "#/entities/Chapter" },
+      "description": "Chapters of a specific series"
+    },
+    "/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/Comment" },
+      "description": "Comments left on chapters or series"
+    }
+  }
+}
