@@ -1,62 +1,45 @@
-import { collection, doc, writeBatch, serverTimestamp } from 'firebase/firestore';
-import { db } from './firebase';
+import { apiClient } from './apiClient';
 import { mockSeries } from './data';
-
-enum OperationType { WRITE = 'write' }
-interface FirestoreErrorInfo { error: string; operationType: OperationType; path: string | null; authInfo: any; }
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {},
-    operationType,
-    path
-  };
-  throw new Error(JSON.stringify(errInfo));
-}
 
 export async function seedDatabase() {
   try {
-    const batch = writeBatch(db);
-    
-    for (const series of mockSeries) {
-      const seriesRef = doc(collection(db, 'series'), series.id);
-      batch.set(seriesRef, {
-        title: series.title,
-        alternativeTitles: series.alternativeTitles || [],
-        cover: series.cover,
-        banner: series.banner,
-        author: series.author,
-        artist: series.artist,
-        synopsis: series.synopsis,
-        genres: series.genres || [],
-        tags: series.tags || [],
-        status: series.status || 'Ongoing',
-        rating: series.rating || 0,
-        type: series.type || 'Manhwa',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+    const list = mockSeries.map(series => ({
+      id: series.id,
+      title: series.title,
+      alternativeTitles: series.alternativeTitles || [],
+      cover: series.cover,
+      banner: series.banner,
+      author: series.author,
+      artist: series.artist,
+      synopsis: series.synopsis,
+      genres: series.genres || [],
+      tags: series.tags || [],
+      status: series.status || 'Ongoing',
+      rating: series.rating || 0,
+      type: series.type || 'Manhwa',
+      chapters: series.chapters?.map(ch => ({
+        id: ch.id,
+        number: ch.number,
+        title: ch.title || '',
+        images: ch.images || []
+      })) || []
+    }));
 
-      if (series.chapters) {
-        for (const ch of series.chapters) {
-          const chapterRef = doc(collection(db, `series/${series.id}/chapters`), ch.id);
-          batch.set(chapterRef, {
-            seriesId: series.id,
-            number: ch.number,
-            title: ch.title || '',
-            images: ch.images || [],
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-        }
-      }
+    const result = await apiClient.seedDatabase({
+      series: list,
+      admins: [
+        "amirrezaveisi45@gmail.com",
+        "Mr.V@admin.com"
+      ]
+    });
+
+    if (result.success) {
+      alert('Database seeded successfully on local/cPanel SQL Server!');
+    } else {
+      alert('Seed failed. Server message: ' + (result.error || 'Unknown error'));
     }
-
-    await batch.commit();
-    alert('Database seeded successfully!');
-  } catch (error) {
+  } catch (error: any) {
     console.error(error);
-    alert('Seed failed. You might not have admin permission. Add your UID to /admins collection in Firestore.');
+    alert('Seed failed: ' + error.message);
   }
 }

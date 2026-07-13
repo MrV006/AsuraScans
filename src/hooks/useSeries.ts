@@ -1,38 +1,44 @@
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, getDocs, limit, doc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { Series, Chapter } from '../lib/types';
+import { apiClient, getSocketInstance } from '../lib/apiClient';
+import { Series } from '../lib/types';
 
 export function useSeriesList() {
   const [series, setSeries] = useState<Series[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const q = query(collection(db, 'series'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      try {
-        const seriesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Series));
-        const fullList = await Promise.all(seriesList.map(async (s) => {
-          const chaptersQ = query(collection(db, `series/${s.id}/chapters`), orderBy('number', 'desc'), limit(2));
-          const chaptersSnap = await getDocs(chaptersQ);
-          return {
-            ...s,
-            chapters: chaptersSnap.docs.map(c => ({ id: c.id, ...c.data() } as Chapter))
-          };
-        }));
-        setSeries(fullList);
-        setLoading(false);
-      } catch (err: any) {
-        setError(err.message);
-        setLoading(false);
-      }
-    }, (err) => {
+  const fetchSeries = async () => {
+    try {
+      const data = await apiClient.getSeries();
+      const fullList = await Promise.all(data.map(async (s: any) => {
+        const chapters = await apiClient.getChapters(s.id);
+        return {
+          ...s,
+          chapters: chapters.slice(0, 2)
+        };
+      }));
+      setSeries(fullList);
+      setLoading(false);
+    } catch (err: any) {
       setError(err.message);
       setLoading(false);
-    });
+    }
+  };
 
-    return () => unsubscribe();
+  useEffect(() => {
+    fetchSeries();
+    
+    // Listen for websocket updates for real-time reactivity
+    const socket = getSocketInstance();
+    socket.on("series:updated", fetchSeries);
+    socket.on("series:deleted", fetchSeries);
+    socket.on("database:seeded", fetchSeries);
+
+    return () => {
+      socket.off("series:updated", fetchSeries);
+      socket.off("series:deleted", fetchSeries);
+      socket.off("database:seeded", fetchSeries);
+    };
   }, []);
 
   return { series, loading, error };
@@ -42,32 +48,43 @@ export function useSeriesOverview(id?: string) {
   const [series, setSeries] = useState<Series | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchOverview = async () => {
     if (!id) {
       setLoading(false);
       return;
     }
-    const docRef = doc(db, 'series', id);
-    const unsubSeries = onSnapshot(docRef, async (docSnap) => {
-      if (!docSnap.exists()) {
-        setSeries(null);
-        setLoading(false);
-        return;
+    try {
+      const s = await apiClient.getSeriesById(id);
+      if (s) {
+        const chapters = await apiClient.getChapters(id);
+        s.chapters = chapters;
       }
-      const s = { id: docSnap.id, ...docSnap.data() } as Series;
-      
-      const chaptersQ = query(collection(db, `series/${id}/chapters`), orderBy('number', 'desc'));
-      const chaptersSnap = await getDocs(chaptersQ);
-      s.chapters = chaptersSnap.docs.map(c => ({ id: c.id, ...c.data() } as Chapter));
       setSeries(s);
       setLoading(false);
-    }, (err) => {
+    } catch (err) {
       console.error(err);
       setLoading(false);
-    });
+    }
+  };
 
-    return () => unsubSeries();
+  useEffect(() => {
+    fetchOverview();
+
+    const socket = getSocketInstance();
+    const handleUpdate = (data: any) => {
+      if (data.seriesId === id) {
+        fetchOverview();
+      }
+    };
+
+    socket.on("series:updated", handleUpdate);
+    socket.on("chapters:updated", handleUpdate);
+
+    return () => {
+      socket.off("series:updated", handleUpdate);
+      socket.off("chapters:updated", handleUpdate);
+    };
   }, [id]);
 
-  return { series, loading };
+  return { series, loading, mutate: fetchOverview };
 }

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, setDoc, deleteDoc, serverTimestamp, getDocs, getDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { apiClient, getSocketInstance } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 import { Series } from '../lib/types';
 
@@ -23,44 +22,53 @@ export function useBookmarks() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchBookmarks = async () => {
     if (!user) {
       setBookmarks([]);
       setLoading(false);
       return;
     }
+    try {
+      const data = await apiClient.getBookmarks(user.uid);
+      const fullList = await Promise.all(
+        data.map(async (b: any) => {
+          const s = await apiClient.getSeriesById(b.seriesId);
+          return {
+            seriesId: b.seriesId,
+            createdAt: b.createdAt,
+            seriesData: s || undefined
+          };
+        })
+      );
+      setBookmarks(fullList);
+      setLoading(false);
+    } catch (e) {
+      console.error("Error loading bookmarks via API", e);
+      setLoading(false);
+    }
+  };
 
-    const q = query(collection(db, `users/${user.uid}/bookmarks`), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      try {
-        const list = snapshot.docs.map(d => ({ ...d.data() } as Bookmark));
-        
-        // Fetch series data for each bookmark
-        const fullList = await Promise.all(list.map(async (b) => {
-          const sdoc = await getDoc(doc(db, 'series', b.seriesId));
-          if (sdoc.exists()) {
-            b.seriesData = { id: sdoc.id, ...sdoc.data() } as Series;
-          }
-          return b;
-        }));
-        setBookmarks(fullList);
-        setLoading(false);
-      } catch (e) {
-        console.error("Error loading bookmarks", e);
-        setLoading(false);
+  useEffect(() => {
+    fetchBookmarks();
+
+    const socket = getSocketInstance();
+    const handleUpdate = (data: any) => {
+      if (data.userId === user?.uid) {
+        fetchBookmarks();
       }
-    });
+    };
 
-    return () => unsubscribe();
+    socket.on("bookmarks:updated", handleUpdate);
+
+    return () => {
+      socket.off("bookmarks:updated", handleUpdate);
+    };
   }, [user]);
 
   const addBookmark = async (seriesId: string) => {
     if (!user) return false;
     try {
-      await setDoc(doc(db, `users/${user.uid}/bookmarks`, seriesId), {
-        seriesId,
-        createdAt: serverTimestamp()
-      });
+      await apiClient.toggleBookmark(user.uid, seriesId);
       return true;
     } catch (e) {
       console.error(e);
@@ -71,7 +79,7 @@ export function useBookmarks() {
   const removeBookmark = async (seriesId: string) => {
     if (!user) return false;
     try {
-      await deleteDoc(doc(db, `users/${user.uid}/bookmarks`, seriesId));
+      await apiClient.toggleBookmark(user.uid, seriesId);
       return true;
     } catch (e) {
       console.error(e);
@@ -91,50 +99,58 @@ export function useHistory() {
   const [history, setHistory] = useState<ReadingHistory[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchHistory = async () => {
     if (!user) {
       setHistory([]);
       setLoading(false);
       return;
     }
+    try {
+      const data = await apiClient.getHistory(user.uid);
+      const fullList = await Promise.all(
+        data.map(async (h: any) => {
+          const s = await apiClient.getSeriesById(h.seriesId);
+          return {
+            seriesId: h.seriesId,
+            chapterId: h.chapterId,
+            chapterNumber: h.chapterNumber,
+            updatedAt: h.updatedAt,
+            seriesData: s || undefined
+          };
+        })
+      );
+      setHistory(fullList);
+      setLoading(false);
+    } catch (e) {
+      console.error("Error loading history via API", e);
+      setLoading(false);
+    }
+  };
 
-    const q = query(collection(db, `users/${user.uid}/history`), orderBy('updatedAt', 'desc'));
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      try {
-        const list = snapshot.docs.map(d => ({ ...d.data() } as ReadingHistory));
-        
-        // Fetch series data for each history item
-        const fullList = await Promise.all(list.map(async (h) => {
-          const sdoc = await getDoc(doc(db, 'series', h.seriesId));
-          if (sdoc.exists()) {
-            h.seriesData = { id: sdoc.id, ...sdoc.data() } as Series;
-          }
-          return h;
-        }));
-        
-        setHistory(fullList);
-        setLoading(false);
-      } catch (e) {
-        console.error("Error loading history", e);
-        setLoading(false);
+  useEffect(() => {
+    fetchHistory();
+
+    const socket = getSocketInstance();
+    const handleUpdate = (data: any) => {
+      if (data.userId === user?.uid) {
+        fetchHistory();
       }
-    });
+    };
 
-    return () => unsubscribe();
+    socket.on("history:updated", handleUpdate);
+
+    return () => {
+      socket.off("history:updated", handleUpdate);
+    };
   }, [user]);
 
   const updateHistory = async (seriesId: string, chapterId: string, chapterNumber: number) => {
     if (!user) return false;
     try {
-      await setDoc(doc(db, `users/${user.uid}/history`, seriesId), {
-        seriesId,
-        chapterId,
-        chapterNumber,
-        updatedAt: serverTimestamp()
-      });
+      await apiClient.updateHistory(user.uid, { seriesId, chapterId, chapterNumber });
       return true;
     } catch (e) {
-      console.error("Error updating history:", e);
+      console.error("Error updating history via API:", e);
       return false;
     }
   };

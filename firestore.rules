@@ -91,6 +91,16 @@ service cloud.firestore {
       allow delete: if isSignedIn() && request.auth.uid == existing().userId;
     }
 
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /reports/{reportId} {
+      allow read, write: if isAdmin();
+      allow create: if true; // anyone can create a report, maybe should be isSignedIn()? Yes, we want to allow users to report
+    }
+
     match /admins/{userId} {
       allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       allow write: if isAdmin();
@@ -118,7 +128,8 @@ service cloud.firestore {
     match /series/{seriesId} {
       allow read: if true;
       allow create: if isAdmin() && isValidId(seriesId) && isValidSeries(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
-      allow update: if isAdmin() && isValidId(seriesId) && isValidSeries(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
+      allow update: if (isAdmin() && isValidId(seriesId) && isValidSeries(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time) || 
+                       (incoming().diff(existing()).affectedKeys().hasOnly(['views']) && incoming().views is number);
       allow delete: if isAdmin();
 
       function isValidChapter(data) {
@@ -135,7 +146,8 @@ service cloud.firestore {
       match /chapters/{chapterId} {
         allow read: if true;
         allow create: if isAdmin() && isValidId(chapterId) && isValidId(seriesId) && isValidChapter(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time && exists(/databases/$(database)/documents/series/$(seriesId));
-        allow update: if isAdmin() && isValidId(chapterId) && isValidId(seriesId) && isValidChapter(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && incoming().seriesId == existing().seriesId;
+        allow update: if (isAdmin() && isValidId(chapterId) && isValidId(seriesId) && isValidChapter(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && incoming().seriesId == existing().seriesId) ||
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['views']) && incoming().views is number);
         allow delete: if isAdmin();
       }
     }
@@ -145,8 +157,11 @@ service cloud.firestore {
       return hasReq &&
              data.seriesId is string && isValidId(data.seriesId) &&
              data.get('chapterId', '') is string && data.get('chapterId', '').size() <= 128 &&
+             data.get('parentId', '') is string && data.get('parentId', '').size() <= 128 &&
              data.authorId is string &&
              data.content is string && data.content.size() > 0 && data.content.size() <= 1000 &&
+             data.get('likes', []) is list && data.get('likes', []).size() <= 10000 &&
+             data.get('dislikes', []) is list && data.get('dislikes', []).size() <= 10000 &&
              data.createdAt is timestamp &&
              data.updatedAt is timestamp;
     }
@@ -168,9 +183,12 @@ service cloud.firestore {
                         incoming().authorId == request.auth.uid &&
                         existing().authorId == request.auth.uid &&
                         incoming().diff(existing()).affectedKeys().hasOnly(['content', 'updatedAt'])
+                      ) ||
+                      (
+                        incoming().diff(existing()).affectedKeys().hasOnly(['likes', 'dislikes'])
                       )
                     ) &&
-                    incoming().updatedAt == request.time &&
+                    (incoming().diff(existing()).affectedKeys().hasOnly(['likes', 'dislikes']) || incoming().updatedAt == request.time) &&
                     incoming().createdAt == existing().createdAt &&
                     incoming().seriesId == existing().seriesId &&
                     incoming().get('chapterId', '') == existing().get('chapterId', '');

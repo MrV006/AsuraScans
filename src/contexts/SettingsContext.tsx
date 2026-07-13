@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { apiClient, getSocketInstance } from '../lib/apiClient';
 
 interface SiteSettings {
   maintenanceMode: boolean;
@@ -10,16 +9,20 @@ interface SiteSettings {
   githubUrl: string;
   seoKeywords: string;
   seoDescription: string;
+  featuredType?: string;
+  activeAnnouncement?: string;
+  siteName?: string;
 }
 
 const defaultSettings: SiteSettings = {
   maintenanceMode: false,
-  aboutText: "Read the latest top-tier manhwa, manhua, and manga with high-quality translations. Updated daily.",
+  aboutText: "به جدیدترین مرجع ترجمه مانهوا، مانهوا و مانگا با کیفیت بالا خوش آمدید. آپدیت روزانه.",
   twitterUrl: "#",
   discordUrl: "#",
   githubUrl: "#",
-  seoKeywords: "manga, manhwa, manhua, webtoon, read comics",
-  seoDescription: "Read the latest top-tier manhwa, manhua, and manga with high-quality translations."
+  seoKeywords: "manga, manhwa, manhua, webtoon, read comics, مانهوا, مانگا",
+  seoDescription: "به جدیدترین مرجع ترجمه مانهوا، مانهوا و مانگا با کیفیت بالا خوش آمدید.",
+  siteName: "AsuraClone"
 };
 
 interface SettingsContextType {
@@ -39,27 +42,36 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [genres, setGenres] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const unsubSettings = onSnapshot(doc(db, "settings", "global"), (docSnap) => {
-      if (docSnap.exists()) {
-        setSettings({ ...defaultSettings, ...docSnap.data() });
+  const fetchSettingsAndTaxonomy = async () => {
+    try {
+      const globalSet = await apiClient.getSettings('global');
+      if (globalSet) {
+        setSettings({ ...defaultSettings, ...globalSet });
       }
-    });
 
-    const unsubTaxonomy = onSnapshot(doc(db, "settings", "taxonomy"), (docSnap) => {
-      if (docSnap.exists() && docSnap.data().genres) {
-        setGenres(docSnap.data().genres);
+      const taxSet = await apiClient.getSettings('taxonomy');
+      if (taxSet && taxSet.genres) {
+        setGenres(taxSet.genres);
       } else {
         setGenres([
           "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Isekai", "Magic", "Martial Arts", "Mecha", "Mystery", "Psychological", "Romance", "School Life", "Sci-Fi", "Shoujo", "Shounen", "Slice of Life", "Sports", "Supernatural", "Tragedy"
         ]);
       }
       setLoading(false);
-    });
+    } catch (err) {
+      console.error("Error loading settings via API Client:", err);
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSettingsAndTaxonomy();
+
+    const socket = getSocketInstance();
+    socket.on("settings:updated", fetchSettingsAndTaxonomy);
 
     return () => {
-      unsubSettings();
-      unsubTaxonomy();
+      socket.off("settings:updated", fetchSettingsAndTaxonomy);
     };
   }, []);
 

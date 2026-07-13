@@ -19,10 +19,11 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, X } from 'lucide-react';
 
 interface SortableItemProps {
+  key?: string | number;
   id: string;
   url: string;
   index: number;
-  onRemove: (id: string) => void;
+  onRemove: () => void;
 }
 
 function SortableItem({ id, url, index, onRemove }: SortableItemProps) {
@@ -51,7 +52,7 @@ function SortableItem({ id, url, index, onRemove }: SortableItemProps) {
       <div className="flex-1 font-mono text-xs text-zinc-400 truncate px-2">
          {url}
       </div>
-      <button type="button" onClick={() => onRemove(id)} className="p-2 text-red-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
+      <button type="button" onClick={onRemove} className="p-2 text-red-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
         <X size={20} />
       </button>
     </div>
@@ -71,19 +72,21 @@ export function SortableImageList({ images, onChange }: SortableImageListProps) 
     })
   );
 
+  const itemIds = React.useMemo(() => images.map((url, index) => `${url}-${index}`), [images]);
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
 
     if (over && active.id !== over.id) {
-      const oldIndex = images.indexOf(active.id as string);
-      const newIndex = images.indexOf(over.id as string);
+      const oldIndex = itemIds.indexOf(active.id as string);
+      const newIndex = itemIds.indexOf(over.id as string);
       
       onChange(arrayMove(images, oldIndex, newIndex));
     }
   };
   
-  const handleRemove = (urlToRemove: string) => {
-    onChange(images.filter(url => url !== urlToRemove));
+  const handleRemove = (indexToRemove: number) => {
+    onChange(images.filter((_, index) => index !== indexToRemove));
   };
 
   if (images.length === 0) return null;
@@ -97,13 +100,16 @@ export function SortableImageList({ images, onChange }: SortableImageListProps) 
         onDragEnd={handleDragEnd}
       >
         <SortableContext
-          items={images}
+          items={itemIds}
           strategy={verticalListSortingStrategy}
         >
           <div className="flex flex-col gap-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-            {images.map((url, index) => (
-              <SortableItem key={url} id={url} url={url} index={index} onRemove={handleRemove} />
-            ))}
+            {images.map((url, index) => {
+              const uniqueId = `${url}-${index}`;
+              return (
+                <SortableItem key={uniqueId} id={uniqueId} url={url} index={index} onRemove={() => handleRemove(index)} />
+              );
+            })}
           </div>
         </SortableContext>
       </DndContext>

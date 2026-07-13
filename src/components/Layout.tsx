@@ -2,10 +2,14 @@ import { ReactNode, useEffect } from 'react';
 import { Navbar } from './Navbar';
 import { Github, Twitter, MessageCircle } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import { motion, AnimatePresence } from 'motion/react';
+import { useAuth } from '../contexts/AuthContext';
 
 export function Layout({ children }: { children: ReactNode }) {
   const { settings, genres } = useSettings();
+  const { isSimulatingUser, setIsSimulatingUser } = useAuth();
+  const location = useLocation();
 
   useEffect(() => {
     document.title = 'ASURA SCANS CLONE';
@@ -33,10 +37,43 @@ export function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex flex-col min-h-screen">
+      {isSimulatingUser && (
+        <div className="fixed bottom-6 left-4 right-4 md:left-auto md:right-6 md:max-w-md bg-amber-500 text-black text-xs font-black z-[100] rounded-2xl p-4 shadow-2xl border border-amber-600/30 flex flex-col gap-3.5 animate-fade-in" dir="rtl">
+          <div className="flex items-start gap-2.5">
+            <span className="relative flex h-2.5 w-2.5 mt-1 flex-shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-black opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-black"></span>
+            </span>
+            <div className="flex-1">
+              <h4 className="font-black text-sm text-black mb-1 font-sans">حالت شبیه‌ساز فعال است</h4>
+              <p className="text-black/85 leading-relaxed text-xs font-medium">
+                شما کل سایت (از جمله پرداخت چپترها) را مانند یک کاربر معمولی بدون نقش و دسترسی مشاهده می‌کنید.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-3 border-t border-black/15 pt-3">
+            <button
+              onClick={() => setIsSimulatingUser(false)}
+              className="w-full bg-black hover:bg-zinc-900 text-amber-500 transition-colors px-4 py-2.5 rounded-xl font-black text-xs text-center shadow-lg"
+            >
+              خروج از شبیه‌ساز و بازگشت به مدیریت
+            </button>
+          </div>
+        </div>
+      )}
       <Navbar />
-      <main className="flex-grow pt-16 selection:bg-[var(--color-asura-accent)] selection:text-white">
-        {children}
-      </main>
+      <AnimatePresence mode="wait">
+        <motion.main 
+          key={location.pathname}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -10 }}
+          transition={{ duration: 0.2 }}
+          className="flex-grow pt-16 selection:bg-[var(--color-asura-accent)] selection:text-white"
+        >
+          {children}
+        </motion.main>
+      </AnimatePresence>
       
       <footer className="bg-[#0f0f12] border-t border-white/5 mt-20 py-12">
         <div className="max-w-7xl mx-auto px-4 md:px-8 grid grid-cols-1 md:grid-cols-4 gap-8">

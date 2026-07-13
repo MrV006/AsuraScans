@@ -1,18 +1,13 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Layout } from '../components/Layout';
-import { useSeriesList } from '../hooks/useSeries';
-import { Search as SearchIcon, Filter, X, Star } from 'lucide-react';
+import { Search as SearchIcon, X, Star, Layers, Sparkles, Check, BookOpen, Filter, ArrowUpDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { SeriesCardSkeleton } from '../components/Skeletons';
+import { apiClient } from '../lib/apiClient';
+import { Series } from '../lib/types';
 
 export default function Search() {
-  const { series, loading, error } = useSeriesList();
-  
-  const ALL_GENRES = useMemo(() => Array.from(new Set(series.flatMap(s => s.genres || []))).sort(), [series]);
-  const ALL_TAGS = useMemo(() => Array.from(new Set(series.flatMap(s => s.tags || []))).sort(), [series]);
-  const ALL_STATUSES = useMemo(() => Array.from(new Set(series.map(s => s.status || 'Ongoing'))).sort(), [series]);
-
   const [searchParams, setSearchParams] = useSearchParams();
   const q = searchParams.get('q') || '';
   
@@ -20,9 +15,79 @@ export default function Search() {
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedStatus, setSelectedStatus] = useState<string>('');
+  const [selectedType, setSelectedType] = useState<string>('');
   const [sortBy, setSortBy] = useState<string>('newest');
   
-  const [showFilters, setShowFilters] = useState(true);
+  const [results, setResults] = useState<Series[]>([]);
+  const [allSeries, setAllSeries] = useState<Series[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
+
+  // Dynamic filter lists from all series to populate the Bento UI
+  const ALL_GENRES = useMemo(() => {
+    const list = Array.from(new Set(allSeries.flatMap(s => s.genres || []))).sort();
+    return list.length > 0 ? list : ['Action', 'Fantasy', 'Adventure', 'Comedy', 'Drama', 'Martial Arts', 'Rebirth', 'System', 'Magic', 'School Life'];
+  }, [allSeries]);
+
+  const ALL_TAGS = useMemo(() => {
+    const list = Array.from(new Set(allSeries.flatMap(s => s.tags || []))).sort();
+    return list.length > 0 ? list : ['Overpowered', 'Regression', 'Dungeon', 'Monsters', 'Tower', 'Revenge', 'Leveling', 'Guilds'];
+  }, [allSeries]);
+
+  const ALL_STATUSES = useMemo(() => {
+    const list = Array.from(new Set(allSeries.map(s => s.status || 'Ongoing'))).sort();
+    return list.length > 0 ? list : ['Ongoing', 'Completed', 'Hiatus'];
+  }, [allSeries]);
+
+  const ALL_TYPES = useMemo(() => {
+    const list = Array.from(new Set(allSeries.map(s => s.type || 'Manhwa'))).sort();
+    return list.length > 0 ? list : ['Manhwa', 'Manhua', 'Manga'];
+  }, [allSeries]);
+
+  // Load all series once to discover tags, statuses, and genres
+  useEffect(() => {
+    apiClient.getSeries()
+      .then(data => {
+        setAllSeries(data);
+      })
+      .catch(err => console.error("Error loading taxonomy", err));
+  }, []);
+
+  // Fetch filtered results from backend whenever filter state changes
+  useEffect(() => {
+    setSearching(true);
+    const delayDebounceFn = setTimeout(() => {
+      apiClient.getSeries({
+        q: query,
+        genres: selectedGenres,
+        tags: selectedTags,
+        status: selectedStatus,
+        type: selectedType,
+        sortBy: sortBy
+      })
+      .then(data => {
+        setResults(data);
+        setSearching(false);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error("Search failed", err);
+        setSearching(false);
+        setLoading(false);
+      });
+    }, 250); // Small debounce
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [query, selectedGenres, selectedTags, selectedStatus, selectedType, sortBy]);
+
+  // Update URL query param if main search query is entered
+  useEffect(() => {
+    if (query) {
+      setSearchParams({ q: query });
+    } else {
+      setSearchParams({});
+    }
+  }, [query]);
 
   const toggleGenre = (g: string) => {
     setSelectedGenres(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
@@ -32,246 +97,323 @@ export default function Search() {
     setSelectedTags(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
   };
 
-  const getTimestamp = (val: any) => {
-    if (!val) return 0;
-    if (val.toMillis) return val.toMillis();
-    if (val.seconds) return val.seconds * 1000;
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string') return new Date(val).getTime();
-    return 0;
+  const clearFilters = () => {
+    setSelectedGenres([]);
+    setSelectedTags([]);
+    setSelectedStatus('');
+    setSelectedType('');
+    setQuery('');
   };
 
-  const results = useMemo(() => {
-    if (loading) return [];
-    let filtered = series.filter(s => {
-      // Search text (title, author, artist)
-      const qLower = query.toLowerCase();
-      const matchText = !query || 
-                        s.title.toLowerCase().includes(qLower) || 
-                        (s.author && s.author.toLowerCase().includes(qLower)) || 
-                        (s.artist && s.artist.toLowerCase().includes(qLower));
-      
-      const matchGenre = selectedGenres.length === 0 || selectedGenres.every(g => (s.genres || []).includes(g));
-      const matchTag = selectedTags.length === 0 || selectedTags.every(t => (s.tags || []).includes(t));
-      const matchStatus = !selectedStatus || s.status === selectedStatus;
-
-      return matchText && matchGenre && matchTag && matchStatus;
-    });
-
-    filtered.sort((a, b) => {
-      if (sortBy === 'newest') {
-        return getTimestamp(b.createdAt) - getTimestamp(a.createdAt);
-      }
-      if (sortBy === 'oldest') {
-        return getTimestamp(a.createdAt) - getTimestamp(b.createdAt);
-      }
-      if (sortBy === 'rating' || sortBy === 'views') {
-        return (b.rating || 0) - (a.rating || 0);
-      }
-      return 0;
-    });
-
-    return filtered;
-  }, [series, query, selectedGenres, selectedTags, selectedStatus, sortBy, loading]);
-
+  // Pagination for results display
   const [page, setPage] = useState(1);
   const itemsPerPage = 20;
 
   useEffect(() => {
     setPage(1);
-  }, [query, selectedGenres, selectedTags, selectedStatus, sortBy]);
+  }, [query, selectedGenres, selectedTags, selectedStatus, selectedType, sortBy]);
 
   const displayedResults = useMemo(() => {
     return results.slice(0, page * itemsPerPage);
   }, [results, page]);
 
-  const clearFilters = () => {
-    setSelectedGenres([]);
-    setSelectedTags([]);
-    setSelectedStatus('');
-    setPage(1);
-  };
+  // Infinite scroll
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!loadMoreRef.current) return;
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting && displayedResults.length < results.length) {
+          setPage(prev => prev + 1);
+        }
+      },
+      { rootMargin: '100px' }
+    );
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [displayedResults.length, results.length]);
 
   return (
     <Layout>
-      <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 md:py-12">
-        <div className="flex flex-col md:flex-row gap-8">
-          {/* Filters Sidebar */}
-          <div className={`w-full md:w-64 shrink-0 flex flex-col gap-6 ${showFilters ? 'block' : 'hidden md:flex'}`}>
-            <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/5">
-                <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-                  <Filter size={16} className="text-[var(--color-asura-accent-light)]" />
-                  Filters
-                </h3>
-                {(selectedGenres.length > 0 || selectedTags.length > 0 || selectedStatus) && (
-                  <button onClick={clearFilters} className="text-[10px] uppercase font-bold text-red-400 hover:text-red-300 transition-colors">
-                    Clear
-                  </button>
-                )}
-              </div>
-
-              {/* Status */}
-              <div className="mb-6">
-                <h4 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-3">Status</h4>
-                <select 
-                  value={selectedStatus}
-                  onChange={(e) => setSelectedStatus(e.target.value)}
-                  className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-[var(--color-asura-accent)]/50"
-                >
-                  <option value="">All Statuses</option>
-                  {ALL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-
-              {/* Genres */}
-              <div className="mb-6">
-                <h4 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-3">Genres</h4>
-                <div className="flex flex-wrap gap-2">
-                  {ALL_GENRES.map(g => (
-                    <button
-                      key={g}
-                      onClick={() => toggleGenre(g)}
-                      className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider transition-colors border ${selectedGenres.includes(g) ? 'bg-[var(--color-asura-accent)] text-white border-[var(--color-asura-accent)]' : 'bg-white/5 text-zinc-400 border-white/5 hover:border-[var(--color-asura-accent)]/50'}`}
-                    >
-                      {g}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Tags */}
-              <div>
-                <h4 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-3">Tags & Themes</h4>
-                <div className="flex flex-wrap gap-2">
-                  {ALL_TAGS.map(t => (
-                    <button
-                      key={t}
-                      onClick={() => toggleTag(t)}
-                      className={`text-[10px] font-bold px-2 py-1 rounded tracking-wider transition-colors border ${selectedTags.includes(t) ? 'bg-indigo-900/50 text-indigo-200 border-indigo-500/50' : 'bg-transparent text-zinc-500 border-white/10 hover:border-indigo-500/30'}`}
-                    >
-                      #{t}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+      <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 md:py-12" dir="rtl">
+        
+        {/* Header Title */}
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 pb-4 border-b border-white/5">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight flex items-center gap-3">
+              <span className="w-2 h-8 bg-[var(--color-asura-accent)] rounded-full"></span>
+              فیلتر و جستجوی پیشرفته مانهوا
+            </h1>
+            <p className="text-zinc-500 text-xs mt-1.5 font-bold uppercase tracking-wider">
+              آرشیو کامل را با فیلترهای چندگانه و هوشمند کاوش کنید
+            </p>
           </div>
+          
+          {(selectedGenres.length > 0 || selectedTags.length > 0 || selectedStatus || selectedType || query) && (
+            <button 
+              onClick={clearFilters}
+              className="mt-4 md:mt-0 px-4 py-2 text-xs font-black uppercase tracking-wider bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl border border-red-500/20 transition-all duration-200"
+            >
+              پاک کردن همه فیلترها ({selectedGenres.length + selectedTags.length + (selectedStatus ? 1 : 0) + (selectedType ? 1 : 0)})
+            </button>
+          )}
+        </div>
 
-          {/* Search & Results */}
-          <div className="flex-1">
-            <h2 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-2 mb-6">
-              <span className="w-1.5 h-6 bg-[var(--color-asura-accent)] rounded-full"></span>
-              Advanced Search
-            </h2>
-
-            <div className="flex gap-4 mb-8">
-              <div className="relative flex-1">
+        {/* Bento Grid Filters */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-10">
+          
+          {/* Bento Card 1: Main Search & Type Selector (6 cols) */}
+          <div className="md:col-span-6 bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-5 flex flex-col justify-between shadow-xl relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-[var(--color-asura-accent)]/5 rounded-full blur-2xl group-hover:bg-[var(--color-asura-accent)]/10 transition-colors"></div>
+            
+            <div className="z-10">
+              <div className="flex items-center gap-2 mb-3 text-white">
+                <SearchIcon className="text-[var(--color-asura-accent-light)]" size={18} />
+                <span className="text-xs font-black uppercase tracking-wider">جستجوی متنی</span>
+              </div>
+              <div className="relative">
                 <input 
                   type="text" 
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search by title, author, or artist..." 
-                  className="w-full bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-xl pl-12 pr-4 py-3 text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50 transition-colors shadow-lg"
+                  placeholder="نام اثر، نام طراح یا نویسنده را تایپ کنید..." 
+                  className="w-full bg-black/40 border border-white/10 rounded-xl pl-4 pr-10 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-[var(--color-asura-accent)]/50 transition-all shadow-inner text-right"
                 />
-                <SearchIcon className="absolute left-4 top-3.5 text-zinc-500" size={20} />
+                <SearchIcon className="absolute right-3.5 top-3.5 text-zinc-500" size={16} />
                 {query && (
-                  <button onClick={() => setQuery('')} className="absolute right-4 top-3.5 text-zinc-500 hover:text-white">
-                    <X size={18} />
+                  <button onClick={() => setQuery('')} className="absolute left-3 top-3.5 text-zinc-500 hover:text-white transition-colors">
+                    <X size={16} />
                   </button>
                 )}
               </div>
-              <button 
-                onClick={() => setShowFilters(!showFilters)}
-                className="md:hidden bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-xl px-4 flex items-center justify-center text-zinc-400 hover:text-white"
-              >
-                <Filter size={20} />
-              </button>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
-              <div className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
-                {loading ? 'Searching...' : `Found ${results.length} series`}
-              </div>
-              <div className="flex items-center gap-3 w-full sm:w-auto">
-                <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest whitespace-nowrap">Sort By</span>
-                <select 
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-lg px-3 py-2 text-xs font-bold text-white uppercase tracking-wider focus:outline-none focus:border-[var(--color-asura-accent)]/50 flex-1 sm:flex-none cursor-pointer"
+            <div className="mt-6 pt-4 border-t border-white/5 z-10">
+              <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block mb-2.5">نوع اثر (Type)</span>
+              <div className="grid grid-cols-4 gap-2">
+                <button
+                  onClick={() => setSelectedType('')}
+                  className={`text-xs font-bold py-2 rounded-xl border transition-all duration-200 ${!selectedType ? 'bg-[var(--color-asura-accent)] text-white border-[var(--color-asura-accent)] shadow-lg shadow-[var(--color-asura-accent)]/20' : 'bg-black/20 text-zinc-400 border-white/5 hover:border-white/10 hover:bg-white/5'}`}
                 >
-                  <option value="newest">Newest</option>
-                  <option value="views">Most Viewed</option>
-                  <option value="rating">Highest Rating</option>
-                  <option value="oldest">Oldest</option>
-                </select>
+                  همه
+                </button>
+                {ALL_TYPES.map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setSelectedType(t)}
+                    className={`text-xs font-bold py-2 rounded-xl border transition-all duration-200 ${selectedType === t ? 'bg-[var(--color-asura-accent)] text-white border-[var(--color-asura-accent)] shadow-lg shadow-[var(--color-asura-accent)]/20' : 'bg-black/20 text-zinc-400 border-white/5 hover:border-white/10 hover:bg-white/5'}`}
+                  >
+                    {t === 'Manhwa' ? 'مانهوا' : t === 'Manga' ? 'مانگا' : t === 'Manhua' ? 'مانها' : t}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Bento Card 2: Status & Advanced Sorting (6 cols) */}
+          <div className="md:col-span-6 bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-5 flex flex-col justify-between shadow-xl relative overflow-hidden group">
+            <div className="absolute top-0 left-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl group-hover:bg-indigo-500/10 transition-colors"></div>
+            
+            <div className="z-10">
+              <div className="flex items-center gap-2 mb-3 text-white">
+                <Layers className="text-[var(--color-asura-accent-light)]" size={18} />
+                <span className="text-xs font-black uppercase tracking-wider">وضعیت انتشار</span>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                <button
+                  onClick={() => setSelectedStatus('')}
+                  className={`text-xs font-bold py-2 rounded-xl border transition-all duration-200 ${!selectedStatus ? 'bg-[var(--color-asura-accent)] text-white border-[var(--color-asura-accent)] shadow-lg shadow-[var(--color-asura-accent)]/20' : 'bg-black/20 text-zinc-400 border-white/5 hover:border-white/10 hover:bg-white/5'}`}
+                >
+                  همه وضعیت‌ها
+                </button>
+                {ALL_STATUSES.map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setSelectedStatus(s)}
+                    className={`text-xs font-bold py-2 rounded-xl border transition-all duration-200 ${selectedStatus === s ? 'bg-[var(--color-asura-accent)] text-white border-[var(--color-asura-accent)] shadow-lg shadow-[var(--color-asura-accent)]/20' : 'bg-black/20 text-zinc-400 border-white/5 hover:border-white/10 hover:bg-white/5'}`}
+                  >
+                    {s === 'Ongoing' ? 'درحال انتشار' : s === 'Completed' ? 'پایان یافته' : s === 'Hiatus' ? 'وقفه' : s}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {loading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                {Array(10).fill(0).map((_, i) => <SeriesCardSkeleton key={i} />)}
-              </div>
-            ) : results.length > 0 ? (
-              <>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {displayedResults.map(series => (
-                    <Link to={`/series/${series.id}`} key={series.id} className="bg-white/5 border border-white/5 rounded-xl overflow-hidden group flex flex-col hover:border-[var(--color-asura-accent)]/50 transition-colors relative h-full">
-                      <div className="relative aspect-[2/3] overflow-hidden bg-zinc-800 shrink-0">
-                        <img src={series.cover} alt={series.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-80"></div>
-                        <div className="absolute inset-0 bg-[var(--color-asura-accent)]/20 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        
-                        <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1">
-                          <Star size={10} className="text-yellow-500 fill-yellow-500" />
-                          {series.rating}
-                        </div>
-
-                        <div className="absolute bottom-2 left-2 right-2">
-                           <div className="flex flex-wrap gap-1 mb-1">
-                              {series.genres.slice(0, 2).map(g => (
-                                <span key={g} className="bg-[var(--color-asura-accent)] text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-widest">{g}</span>
-                              ))}
-                           </div>
-                        </div>
-                      </div>
-                      <div className="p-3 flex-grow flex flex-col bg-[var(--color-asura-card)]">
-                        <h3 className="text-xs font-bold text-white line-clamp-2 group-hover:text-[var(--color-asura-accent)] transition-colors">
-                          {series.title}
-                        </h3>
-                        <p className="text-[10px] text-zinc-500 mt-1 truncate">
-                          {series.author}
-                        </p>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-                
-                {displayedResults.length < results.length && (
-                  <div className="mt-8 flex justify-center">
-                    <button 
-                      onClick={() => setPage(page + 1)}
-                      className="bg-white/5 hover:bg-white/10 border border-white/10 px-8 py-3 rounded-lg text-sm font-bold text-white uppercase tracking-wider transition-colors"
-                    >
-                      Load More
-                    </button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-12 flex flex-col items-center justify-center text-center">
-                <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center text-zinc-600 mb-4">
-                  <SearchIcon size={32} />
-                </div>
-                <h3 className="text-lg font-bold text-white mb-2">No results found</h3>
-                <p className="text-sm text-zinc-500">Try adjusting your filters or search query.</p>
-                <button onClick={clearFilters} className="mt-6 text-[10px] font-bold uppercase tracking-widest text-[var(--color-asura-accent-light)] hover:text-white transition-colors">
-                  Clear All Filters
+            <div className="mt-6 pt-4 border-t border-white/5 z-10">
+              <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block mb-2.5">مرتب‌سازی هوشمند نتایج</span>
+              <div className="grid grid-cols-4 gap-2">
+                <button
+                  onClick={() => setSortBy('newest')}
+                  className={`text-xs font-bold py-2 rounded-xl border transition-all duration-200 ${sortBy === 'newest' ? 'bg-zinc-800 text-white border-zinc-700 shadow-lg' : 'bg-black/20 text-zinc-400 border-white/5 hover:border-white/10 hover:bg-white/5'}`}
+                >
+                  جدیدترین
+                </button>
+                <button
+                  onClick={() => setSortBy('views')}
+                  className={`text-xs font-bold py-2 rounded-xl border transition-all duration-200 ${sortBy === 'views' ? 'bg-zinc-800 text-white border-zinc-700 shadow-lg' : 'bg-black/20 text-zinc-400 border-white/5 hover:border-white/10 hover:bg-white/5'}`}
+                >
+                  پربازدیدترین
+                </button>
+                <button
+                  onClick={() => setSortBy('rating')}
+                  className={`text-xs font-bold py-2 rounded-xl border transition-all duration-200 ${sortBy === 'rating' ? 'bg-zinc-800 text-white border-zinc-700 shadow-lg' : 'bg-black/20 text-zinc-400 border-white/5 hover:border-white/10 hover:bg-white/5'}`}
+                >
+                  محبوب‌ترین
+                </button>
+                <button
+                  onClick={() => setSortBy('oldest')}
+                  className={`text-xs font-bold py-2 rounded-xl border transition-all duration-200 ${sortBy === 'oldest' ? 'bg-zinc-800 text-white border-zinc-700 shadow-lg' : 'bg-black/20 text-zinc-400 border-white/5 hover:border-white/10 hover:bg-white/5'}`}
+                >
+                  قدیمی‌ترین
                 </button>
               </div>
-            )}
+            </div>
+          </div>
+
+          {/* Bento Card 3: Genres Selection (Full width Bento Card, 12 cols) */}
+          <div className="md:col-span-12 bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-5 shadow-xl relative overflow-hidden">
+            <div className="flex items-center gap-2 mb-4 text-white">
+              <BookOpen className="text-[var(--color-asura-accent-light)]" size={18} />
+              <span className="text-xs font-black uppercase tracking-wider">انتخاب ژانرها (امکان انتخاب همزمان چندگانه)</span>
+            </div>
+            
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-10 gap-2">
+              {ALL_GENRES.map(g => {
+                const isSelected = selectedGenres.includes(g);
+                return (
+                  <button
+                    key={g}
+                    onClick={() => toggleGenre(g)}
+                    className={`text-xs font-bold py-2.5 px-3 rounded-xl border flex items-center justify-between transition-all duration-200 ${isSelected ? 'bg-[var(--color-asura-accent)]/20 border-[var(--color-asura-accent)] text-[var(--color-asura-accent-light)] font-black' : 'bg-black/20 text-zinc-400 border-white/5 hover:bg-white/5 hover:border-white/10'}`}
+                  >
+                    <span>{g}</span>
+                    {isSelected && <Check size={12} className="text-[var(--color-asura-accent-light)] shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Bento Card 4: Tags Selection (Full width Bento Card, 12 cols) */}
+          <div className="md:col-span-12 bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-5 shadow-xl relative overflow-hidden">
+            <div className="flex items-center gap-2 mb-3.5 text-white">
+              <Sparkles className="text-indigo-400" size={18} />
+              <span className="text-xs font-black uppercase tracking-wider">برچسب‌ها و موضوعات</span>
+            </div>
+            
+            <div className="flex flex-wrap gap-2">
+              {ALL_TAGS.map(t => {
+                const isSelected = selectedTags.includes(t);
+                return (
+                  <button
+                    key={t}
+                    onClick={() => toggleTag(t)}
+                    className={`text-xs font-bold px-3.5 py-2 rounded-full border transition-all duration-200 flex items-center gap-1.5 ${isSelected ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-md font-black' : 'bg-black/20 text-zinc-500 border-white/5 hover:text-zinc-300 hover:border-white/10'}`}
+                  >
+                    <span>#{t}</span>
+                    {isSelected && <Check size={10} className="text-indigo-400 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+        </div>
+
+        {/* Results Info Section */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+          <div className="text-xs font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+            <Filter size={14} className="text-[var(--color-asura-accent-light)]" />
+            {searching ? 'در حال جستجو و فیلتر...' : `یافت شده: ${results.length} اثر`}
+          </div>
+          
+          <div className="text-[10px] text-zinc-600 font-bold uppercase tracking-wider">
+            نتایج از سرور مرکزی لود می‌شوند
           </div>
         </div>
+
+        {/* Results Display */}
+        {searching && results.length === 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {Array(10).fill(0).map((_, i) => <SeriesCardSkeleton key={i} />)}
+          </div>
+        ) : results.length > 0 ? (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              {displayedResults.map(s => (
+                <Link 
+                  to={`/series/${s.id}`} 
+                  key={s.id} 
+                  className="bg-white/5 border border-white/5 rounded-2xl overflow-hidden group flex flex-col hover:border-[var(--color-asura-accent)]/50 transition-all duration-300 relative h-full hover:translate-y-[-4px] shadow-lg hover:shadow-black/40"
+                >
+                  <div className="relative aspect-[2/3] overflow-hidden bg-zinc-800 shrink-0">
+                    <img 
+                      src={s.cover} 
+                      alt={s.title} 
+                      loading="lazy" 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-90"></div>
+                    <div className="absolute inset-0 bg-[var(--color-asura-accent)]/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    
+                    <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-1.5 py-0.5 rounded-lg flex items-center gap-1">
+                      <Star size={10} className="text-yellow-500 fill-yellow-500" />
+                      {s.rating || '5.0'}
+                    </div>
+
+                    <div className="absolute bottom-2 right-2 left-2 flex flex-wrap gap-1">
+                      {s.genres.slice(0, 2).map(g => (
+                        <span key={g} className="bg-[var(--color-asura-accent)] text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-widest text-white">
+                          {g}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  
+                  <div className="p-4 flex-grow flex flex-col justify-between bg-[var(--color-asura-card)]">
+                    <div>
+                      <h3 className="text-xs font-black text-white line-clamp-2 group-hover:text-[var(--color-asura-accent-light)] transition-colors text-right">
+                        {s.title}
+                      </h3>
+                      <p className="text-[10px] text-zinc-500 mt-1 truncate text-right">
+                        {s.author || 'ناشناس'}
+                      </p>
+                    </div>
+                    
+                    <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-white/5 text-[10px]">
+                      <span className="text-zinc-500 font-bold">
+                        {s.type === 'Manhwa' ? 'مانهوا' : s.type === 'Manga' ? 'مانگا' : s.type === 'Manhua' ? 'مانها' : s.type}
+                      </span>
+                      <span className={`font-black ${s.status === 'Ongoing' ? 'text-green-400' : 'text-zinc-400'}`}>
+                        {s.status === 'Ongoing' ? 'درحال انتشار' : s.status === 'Completed' ? 'پایان یافته' : s.status}
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+            
+            {displayedResults.length < results.length && (
+              <div className="mt-12 flex justify-center pb-8" ref={loadMoreRef}>
+                <div className="w-8 h-8 border-4 border-slate-700 border-t-[var(--color-asura-accent)] rounded-full animate-spin"></div>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-16 flex flex-col items-center justify-center text-center shadow-lg">
+            <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center text-zinc-600 mb-4">
+              <SearchIcon size={32} />
+            </div>
+            <h3 className="text-lg font-black text-white mb-2">اثری پیدا نشد</h3>
+            <p className="text-sm text-zinc-500">فیلترها یا عبارت جستجو را تغییر دهید تا نتایج بهتری پیدا کنید.</p>
+            <button 
+              onClick={clearFilters} 
+              className="mt-6 px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-light)] transition-colors rounded-xl shadow-lg"
+            >
+              پاک کردن فیلترها و شروع مجدد
+            </button>
+          </div>
+        )}
+
       </div>
     </Layout>
   );

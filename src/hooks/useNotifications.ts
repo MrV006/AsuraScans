@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { apiClient, getSocketInstance } from '../lib/apiClient';
 
 export interface Notification {
   id: string;
@@ -25,41 +24,55 @@ export function useNotifications() {
       return;
     }
 
-    const q = query(
-      collection(db, `users/${user.uid}/notifications`),
-      orderBy('createdAt', 'desc')
-    );
+    const fetchNotifications = async () => {
+      try {
+        const data = await apiClient.getNotifications(user.uid);
+        if (Array.isArray(data)) {
+          setNotifications(data);
+          const unreads = data.filter((n: any) => !n.read).length;
+          setUnreadCount(unreads);
+        }
+      } catch (err) {
+        console.error("Failed to load notifications:", err);
+      }
+    };
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Notification);
-      setNotifications(list);
-      setUnreadCount(list.filter(n => !n.read).length);
-    });
+    fetchNotifications();
 
-    return () => unsubscribe();
+    const socket = getSocketInstance();
+    socket.emit("join-room", `user:${user.uid}`);
+
+    const handleNewNotification = (notif: Notification) => {
+      setNotifications(prev => [notif, ...prev]);
+      setUnreadCount(prev => prev + 1);
+    };
+
+    socket.on("notification:new", handleNewNotification);
+
+    return () => {
+      socket.off("notification:new", handleNewNotification);
+      socket.emit("leave-room", `user:${user.uid}`);
+    };
   }, [user]);
 
   const markAsRead = async (notificationId: string) => {
-    if (!user) return;
     try {
-      await updateDoc(doc(db, `users/${user.uid}/notifications`, notificationId), {
-        read: true
-      });
-    } catch (e) {
-      console.error("Error marking notification as read", e);
+      await apiClient.markNotificationAsRead(notificationId);
+      setNotifications(prev => prev.map(n => n.id === notificationId ? { ...n, read: true } : n));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (err) {
+      console.error("Failed to mark notification as read:", err);
     }
   };
 
   const markAllAsRead = async () => {
     if (!user) return;
     try {
-      const unreadIds = notifications.filter(n => !n.read).map(n => n.id);
-      const promises = unreadIds.map(id => 
-        updateDoc(doc(db, `users/${user.uid}/notifications`, id), { read: true })
-      );
-      await Promise.all(promises);
-    } catch (e) {
-      console.error("Error marking all notifications as read", e);
+      await apiClient.markAllNotificationsAsRead(user.uid);
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      setUnreadCount(0);
+    } catch (err) {
+      console.error("Failed to mark all notifications as read:", err);
     }
   };
 

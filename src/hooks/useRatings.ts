@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc, serverTimestamp, getDocs } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { apiClient, getSocketInstance } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 
 export interface Rating {
@@ -14,36 +13,52 @@ export function useRatings(seriesId?: string) {
   const { user } = useAuth();
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // User's rating for the specific series
   const [userRating, setUserRating] = useState<number | null>(null);
 
-  useEffect(() => {
+  const fetchRatings = async () => {
     if (!seriesId) {
       setRatings([]);
       setLoading(false);
       return;
     }
-
-    const q = query(collection(db, 'ratings'), where('seriesId', '==', seriesId));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(d => d.data() as Rating);
+    try {
+      const data = await apiClient.getRatings(seriesId);
+      const list = data.map((r: any) => ({
+        seriesId: r.seriesId,
+        userId: r.userId,
+        rating: r.score, // score mapped to rating
+        updatedAt: r.createdAt
+      }));
       setRatings(list);
       
       if (user) {
-        const myRating = list.find(r => r.userId === user.uid);
+        const myRating = list.find((r: any) => r.userId === user.uid);
         setUserRating(myRating ? myRating.rating : null);
       } else {
         setUserRating(null);
       }
-      
       setLoading(false);
-    }, (err) => {
-      console.error(err);
+    } catch (e) {
+      console.error(e);
       setLoading(false);
-    });
+    }
+  };
 
-    return () => unsubscribe();
+  useEffect(() => {
+    fetchRatings();
+
+    const socket = getSocketInstance();
+    const handleUpdate = (data: any) => {
+      if (data.seriesId === seriesId) {
+        fetchRatings();
+      }
+    };
+
+    socket.on("ratings:updated", handleUpdate);
+
+    return () => {
+      socket.off("ratings:updated", handleUpdate);
+    };
   }, [seriesId, user]);
 
   const averageRating = ratings.length > 0 
@@ -53,13 +68,7 @@ export function useRatings(seriesId?: string) {
   const submitRating = async (ratingValue: number) => {
     if (!user || !seriesId) return false;
     try {
-      const ratingId = `${seriesId}_${user.uid}`;
-      await setDoc(doc(db, 'ratings', ratingId), {
-        seriesId,
-        userId: user.uid,
-        rating: ratingValue,
-        updatedAt: serverTimestamp()
-      });
+      await apiClient.rateSeries(seriesId, user.uid, ratingValue);
       return true;
     } catch (e) {
       console.error("Error submitting rating:", e);
@@ -68,15 +77,8 @@ export function useRatings(seriesId?: string) {
   };
 
   const removeRating = async () => {
-    if (!user || !seriesId) return false;
-    try {
-      const ratingId = `${seriesId}_${user.uid}`;
-      await deleteDoc(doc(db, 'ratings', ratingId));
-      return true;
-    } catch (e) {
-      console.error(e);
-      return false;
-    }
+    // Unused or soft remove by setting rating as null/0
+    return submitRating(0);
   };
 
   return { ratings, averageRating, userRating, loading, submitRating, removeRating };

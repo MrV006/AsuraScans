@@ -44,7 +44,7 @@ export function SeriesDetailSkeleton() {
   return (
     <div className="animate-pulse">
       <div className="relative w-full h-[300px] md:h-[400px] overflow-hidden bg-zinc-900 border-b border-white/5"></div>
-      <div className="max-w-7xl mx-auto px-4 md:px-8 -mt-32 md:-mt-48 relative z-10 pb-12">
+      <div className="max-w-7xl mx-auto px-4 md:px-8 -mt-32 md:-mt-48 relative z-10 pb-12 text-right" dir="rtl">
         <div className="flex flex-col md:flex-row gap-8">
           <div className="w-48 md:w-64 shrink-0 mx-auto md:mx-0">
             <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-zinc-800 shadow-2xl border border-white/10"></div>
@@ -54,14 +54,14 @@ export function SeriesDetailSkeleton() {
             </div>
           </div>
           <div className="flex-1 pt-4 md:pt-16">
-            <div className="flex gap-2 mb-4">
+            <div className="flex justify-start gap-2 mb-4">
               <div className="w-16 h-4 bg-zinc-700/50 rounded"></div>
               <div className="w-16 h-4 bg-zinc-700/50 rounded"></div>
             </div>
             <div className="w-3/4 h-12 bg-zinc-700/50 rounded mb-2"></div>
             <div className="w-1/2 h-4 bg-zinc-700/50 rounded mb-8"></div>
             
-            <div className="flex gap-6 mb-8">
+            <div className="flex justify-start gap-6 mb-8">
               <div className="w-16 h-8 bg-zinc-700/50 rounded"></div>
               <div className="w-16 h-8 bg-zinc-700/50 rounded"></div>
             </div>
@@ -74,3 +74,38 @@ export function SeriesDetailSkeleton() {
     </div>
   );
 }
+
+export function HeroSkeleton() {
+  return (
+    <div className="relative w-full overflow-hidden bg-[var(--color-asura-dark)] animate-pulse">
+      <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-asura-dark)]/80 via-transparent to-[var(--color-asura-dark)] z-10 pointer-events-none"></div>
+      <div className="h-[400px] md:h-[500px] bg-zinc-900/40 relative">
+        <div className="absolute bottom-0 left-0 w-full p-6 md:p-12 z-20 max-w-7xl mx-auto flex gap-8 items-end">
+          {/* Cover Poster Skeleton (Visible on md+) */}
+          <div className="hidden md:block w-48 h-64 shrink-0 rounded-lg bg-zinc-800 border border-white/5 relative -bottom-6"></div>
+          
+          {/* Details Skeleton */}
+          <div className="flex-1 pb-6 md:pb-12">
+            {/* Genre Badges */}
+            <div className="flex gap-2 mb-4">
+              <div className="w-16 h-4 bg-zinc-700/50 rounded"></div>
+              <div className="w-16 h-4 bg-zinc-700/50 rounded"></div>
+              <div className="w-16 h-4 bg-zinc-700/50 rounded"></div>
+            </div>
+            {/* Title */}
+            <div className="w-2/3 h-12 bg-zinc-700/50 rounded mb-3"></div>
+            {/* Synopsis lines */}
+            <div className="space-y-2 mb-6">
+              <div className="h-3.5 bg-zinc-700/30 rounded w-full"></div>
+              <div className="h-3.5 bg-zinc-700/30 rounded w-5/6"></div>
+              <div className="h-3.5 bg-zinc-700/30 rounded w-2/3"></div>
+            </div>
+            {/* CTA Button */}
+            <div className="w-32 h-10 bg-zinc-700/50 rounded-lg"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+

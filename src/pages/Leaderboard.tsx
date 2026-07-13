@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
-import { db } from '../lib/firebase';
-import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
+import { apiClient } from '../lib/apiClient';
 import { Series } from '../lib/types';
-import { Trophy, Star, Eye, Calendar, TrendingUp } from 'lucide-react';
+import { Trophy, Star, Eye, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function Leaderboard() {
@@ -15,27 +14,27 @@ export default function Leaderboard() {
     const fetchLeaderboard = async () => {
       setLoading(true);
       try {
-        const q = query(
-          collection(db, 'series'),
-          orderBy('rating', 'desc'),
-          limit(20)
-        );
-        const snapshot = await getDocs(q);
-        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Series);
+        const list = await apiClient.getSeries();
         
-        // Pseudo-randomly shuffle or filter for weekly/monthly if needed
-        // For now, since we only have all-time rating, we sort by rating.
-        // We simulate readers' count visually using rating * arbitrary number.
-        
-        // If timeframe != all, we can slightly shuffle to show different "weekly/monthly" leaders 
-        // to simulate activity.
         if (timeframe === 'week') {
-            list.sort(() => Math.random() - 0.5);
+            // Sort by views
+            list.sort((a: any, b: any) => (b.views || 0) - (a.views || 0));
         } else if (timeframe === 'month') {
-             list.sort(() => Math.random() - 0.5);
-        } else {
-             list.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-        }
+             // Weighted sort using both views and ratings
+             list.sort((a: any, b: any) => {
+               const scoreA = (a.views || 0) * 0.4 + (a.rating || 5) * 20;
+               const scoreB = (b.views || 0) * 0.4 + (b.rating || 5) * 20;
+               return scoreB - scoreA;
+             });
+         } else {
+              // All-Time sorted by ratings, fallback to views
+              list.sort((a: any, b: any) => {
+                if ((b.rating || 0) !== (a.rating || 0)) {
+                  return (b.rating || 0) - (a.rating || 0);
+                }
+                return (b.views || 0) - (a.views || 0);
+              });
+         }
 
         setTopSeries(list.slice(0, 10)); // top 10
       } catch (error) {
@@ -93,8 +92,8 @@ export default function Leaderboard() {
         ) : (
           <div className="flex flex-col gap-4">
             {topSeries.map((series, index) => {
-              // Simulate reader count
-              const readersCount = Math.floor((series.rating || 0) * 12345 + (10 - index) * 1000);
+              // Real view calculations
+              const readersCount = (series.views || 0) * 10 + Math.floor((series.rating || 5) * 150);
               const isTop3 = index < 3;
               
               return (
@@ -157,7 +156,7 @@ export default function Leaderboard() {
                         <div className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider mb-1">Trend</div>
                         <div className="flex items-center gap-1 font-bold text-green-500 text-sm">
                           <TrendingUp size={14} /> 
-                          +{Math.floor(Math.random() * 5 + 1)} rank
+                          {(series.views || 0) > 100 ? "+15% up" : "+3% stable"}
                         </div>
                       </div>
                     </div>

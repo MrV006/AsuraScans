@@ -2,23 +2,12 @@ import React, { useState, useEffect } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Layout } from "../components/Layout";
-import { db, auth } from "../lib/firebase";
-import {
-  collection,
-  addDoc,
-  serverTimestamp,
-  query,
-  orderBy,
-  onSnapshot,
-  doc,
-  setDoc,
-  collectionGroup,
-  getCountFromServer,
-} from "firebase/firestore";
+import { auth } from "../lib/firebase";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
+import { apiClient, getSocketInstance } from "../lib/apiClient";
 import {
   Settings,
   Plus,
@@ -29,6 +18,8 @@ import {
   BarChart2,
   Star,
   BookOpen,
+  Wallet,
+  EyeOff,
 } from "lucide-react";
 import { Series } from "../lib/types";
 
@@ -44,13 +35,51 @@ import {
   LineChart,
   Line,
   CartesianGrid,
+  AreaChart,
+  Area
 } from "recharts";
 
+const ALL_PERMISSIONS = [
+  { key: 'create_series', label: 'ساخت اثر جدید (مانهوا/مانگا)' },
+  { key: 'edit_series', label: 'ویرایش اطلاعات اثر' },
+  { key: 'delete_series', label: 'حذف کامل اثر و چپترها' },
+  { key: 'add_chapter', label: 'بارگذاری چپتر جدید' },
+  { key: 'edit_chapter', label: 'ویرایش جزئیات چپترها' },
+  { key: 'delete_chapter', label: 'حذف چپترهای بارگذاری شده' },
+  { key: 'delete_comment', label: 'مدیریت و حذف نظرات کاربران' },
+  { key: 'manage_users', label: 'تغییر نقش‌ها و دسترسی‌های کاربران' },
+  { key: 'manage_reports', label: 'مشاهده و رسیدگی به گزارشات کاربران' },
+  { key: 'manage_settings', label: 'مدیریت تنظیمات سراسری وبسایت' },
+  { key: 'manage_wallets', label: 'مدیریت کیف پول کاربران و تراکنش‌ها' },
+  { key: 'free_chapters_access', label: 'دسترسی رایگان و نامحدود به تمامی چپترها (رایگان خوان)' },
+];
+
+const ALL_ROLES = [
+  { key: 'super_admin', label: 'مدیریت کل (Super Admin)', desc: 'دسترسی کامل به تمام امکانات وبسایت بدون محدودیت' },
+  { key: 'admin', label: 'ادمین اصلی (Admin)', desc: 'مدیریت آثار، نظرات، گزارشات و محتوای کلی سایت' },
+  { key: 'translator', label: 'مترجم (Translator)', desc: 'ترجمه آثار اختصاصی و بارگذاری نسخه فارسی چپترها' },
+  { key: 'cleaner', label: 'کلینر (Cleaner)', desc: 'پاک‌سازی صفحات مانهوا و فایل‌های اولیه' },
+  { key: 'editor', label: 'ادیتور (Editor)', desc: 'تایپوگرافی، ویرایش نهایی و تدوین گرافیکی آثار' },
+];
+
 export default function Admin() {
-  const { user, loading } = useAuth();
+  const { user, loading, isSimulatingUser, setIsSimulatingUser } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [editingSeries, setEditingSeries] = useState<Series | null>(null);
+
+  // Granular roles and permissions state
+  const [currentUserData, setCurrentUserData] = useState<any | null>(null);
+  const [selectedUserForRoles, setSelectedUserForRoles] = useState<any | null>(null);
+  const [selectedUserRoles, setSelectedUserRoles] = useState<string[]>([]);
+  const [selectedUserPermissions, setSelectedUserPermissions] = useState<string[]>([]);
+  const [editingRoleDefault, setEditingRoleDefault] = useState<string>("admin");
+  const [globalRolePermissions, setGlobalRolePermissions] = useState<Record<string, string[]>>({
+    admin: ['create_series', 'edit_series', 'add_chapter', 'edit_chapter', 'delete_chapter', 'delete_comment', 'manage_reports'],
+    translator: ['add_chapter', 'edit_chapter'],
+    cleaner: ['add_chapter'],
+    editor: ['add_chapter', 'edit_chapter']
+  });
 
   const [seriesList, setSeriesList] = useState<Series[]>([]);
 
@@ -65,6 +94,7 @@ export default function Admin() {
 
   // User & Comment Management state
   const [usersList, setUsersList] = useState<any[]>([]);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
   const [adminsMap, setAdminsMap] = useState<Record<string, boolean>>({});
   const [commentsList, setCommentsList] = useState<any[]>([]);
   const [siteGenres, setSiteGenres] = useState<string[]>([]);
@@ -92,6 +122,7 @@ export default function Admin() {
     | "taxonomy"
     | "reports"
     | "settings"
+    | "wallet"
   >("dashboard");
 
   // Auth Forms
@@ -100,6 +131,16 @@ export default function Admin() {
   const [authError, setAuthError] = useState("");
 
   const [reportsList, setReportsList] = useState<any[]>([]);
+
+  // Admin Wallet Management State
+  const [walletTxs, setWalletTxs] = useState<any[]>([]);
+  const [loadingWalletTxs, setLoadingWalletTxs] = useState(false);
+  const [selectedUserForCharge, setSelectedUserForCharge] = useState<string>("");
+  const [chargeAmount, setChargeAmount] = useState<number>(0);
+  const [chargeDescription, setChargeDescription] = useState<string>("");
+  const [chargeType, setChargeType] = useState<string>("admin_adjustment");
+  const [submittingCharge, setSubmittingCharge] = useState(false);
+  const [walletSearchQuery, setWalletSearchQuery] = useState("");
 
   // Series Form
   const [seriesForm, setSeriesForm] = useState({
@@ -125,6 +166,65 @@ export default function Admin() {
     publishAt: "",
   });
 
+  const fetchSeries = () => {
+    apiClient.getSeries().then(setSeriesList).catch(console.error);
+  };
+
+  const fetchStats = () => {
+    if (!user) return;
+    apiClient.getAdminStats(user.uid).then(stats => {
+      if (stats) {
+        setTotalChapters(stats.totalChapters);
+      }
+    }).catch(console.error);
+  };
+
+  const fetchTaxonomyAndSettings = () => {
+    apiClient.getSettings("taxonomy").then(t => {
+      if (t && t.genres) {
+        setSiteGenres(t.genres);
+      } else {
+        setSiteGenres([
+          "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Isekai", "Magic", "Martial Arts", "Mecha", "Mystery", "Psychological", "Romance", "School Life", "Sci-Fi", "Shoujo", "Shounen", "Slice of Life", "Sports", "Supernatural", "Tragedy"
+        ]);
+      }
+    }).catch(() => {
+      setSiteGenres([
+        "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Isekai", "Magic", "Martial Arts", "Mecha", "Mystery", "Psychological", "Romance", "School Life", "Sci-Fi", "Shoujo", "Shounen", "Slice of Life", "Sports", "Supernatural", "Tragedy"
+      ]);
+    });
+    apiClient.getSettings("global").then(g => {
+      if (g) setSiteSettings(prev => ({ ...prev, ...g }));
+    });
+    apiClient.getSettings("role_permissions").then(rp => {
+      if (rp && typeof rp === 'object' && !Array.isArray(rp)) {
+        setGlobalRolePermissions(rp);
+      }
+    }).catch(console.error);
+  };
+
+  const fetchUsersAndComments = () => {
+    if (!user) return;
+    apiClient.getUsers().then(users => {
+      if (users) {
+        setUsersList(users);
+        const adminMap: Record<string, boolean> = {};
+        users.forEach((u: any) => {
+          if (u.role === 'admin') adminMap[u.id] = true;
+        });
+        setAdminsMap(adminMap);
+      }
+    }).catch(console.error);
+    
+    apiClient.getAllCommentsAdmin(user.uid).then(comments => {
+      if (comments) setCommentsList(comments);
+    }).catch(console.error);
+
+    apiClient.getReportsAdmin(user.uid).then(reports => {
+      if (reports) setReportsList(reports);
+    }).catch(console.error);
+  };
+
   useEffect(() => {
     let active = true;
     const checkAdmin = async () => {
@@ -133,12 +233,38 @@ export default function Admin() {
           user.email === "amirrezaveisi45@gmail.com" ||
           user.email === "Mr.V@admin.com"
         ) {
-          if (active) setIsAdmin(true);
+          if (active) {
+            setIsAdmin(true);
+            setCurrentUserData({
+              id: user.uid,
+              email: user.email,
+              displayName: user.displayName || 'مدیریت کل',
+              avatarUrl: user.photoURL || '',
+              banned: false,
+              role: 'admin',
+              roles: ['super_admin'],
+              permissions: []
+            });
+          }
         } else {
           try {
-            const { getDoc, doc } = await import("firebase/firestore");
-            const docSnap = await getDoc(doc(db, "admins", user.uid));
-            if (active) setIsAdmin(docSnap.exists());
+            const backendUser = await apiClient.getUser(user.uid);
+            if (backendUser) {
+              if (active) {
+                setCurrentUserData(backendUser);
+                const userRoles = backendUser.roles || [backendUser.role || 'user'];
+                const isStaffOrAdmin = userRoles.includes('super_admin') || 
+                                      userRoles.includes('admin') || 
+                                      userRoles.includes('translator') || 
+                                      userRoles.includes('cleaner') || 
+                                      userRoles.includes('editor') || 
+                                      backendUser.role === 'admin' || 
+                                      backendUser.role === 'staff';
+                setIsAdmin(isStaffOrAdmin);
+              }
+            } else {
+              if (active) setIsAdmin(false);
+            }
           } catch (e) {
             if (active) setIsAdmin(false);
           }
@@ -156,98 +282,81 @@ export default function Admin() {
 
   useEffect(() => {
     if (isAdmin) {
-      const q = query(collection(db, "series"), orderBy("createdAt", "desc"));
-      const unsub = onSnapshot(q, (snap) => {
-        setSeriesList(
-          snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Series),
-        );
-      });
-      return () => unsub();
-    }
-  }, [isAdmin]);
+      fetchSeries();
+      fetchStats();
+      fetchTaxonomyAndSettings();
+      fetchUsersAndComments();
 
-  useEffect(() => {
-    if (isAdmin) {
-      const unsubTaxonomy = onSnapshot(doc(db, "settings", "taxonomy"), (docSnap) => {
-        if (docSnap.exists() && docSnap.data().genres) {
-          setSiteGenres(docSnap.data().genres);
-        } else {
-          setSiteGenres([
-            "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Isekai", "Magic", "Martial Arts", "Mecha", "Mystery", "Psychological", "Romance", "School Life", "Sci-Fi", "Shoujo", "Shounen", "Slice of Life", "Sports", "Supernatural", "Tragedy"
-          ]);
-        }
-      });
-      const unsubSettings = onSnapshot(doc(db, "settings", "global"), (docSnap) => {
-        if (docSnap.exists()) {
-          setSiteSettings(prev => ({ ...prev, ...docSnap.data() }));
-        }
-      });
+      const socket = getSocketInstance();
+      socket.on("series:updated", fetchSeries);
+      socket.on("series:deleted", fetchSeries);
+      socket.on("chapters:updated", fetchStats);
+      socket.on("users:updated", fetchUsersAndComments);
+      socket.on("comments:updated", fetchUsersAndComments);
+      socket.on("reports:updated", fetchUsersAndComments);
+      socket.on("settings:updated", fetchTaxonomyAndSettings);
+
       return () => {
-        unsubTaxonomy();
-        unsubSettings();
+        socket.off("series:updated", fetchSeries);
+        socket.off("series:deleted", fetchSeries);
+        socket.off("chapters:updated", fetchStats);
+        socket.off("users:updated", fetchUsersAndComments);
+        socket.off("comments:updated", fetchUsersAndComments);
+        socket.off("reports:updated", fetchUsersAndComments);
+        socket.off("settings:updated", fetchTaxonomyAndSettings);
       };
     }
   }, [isAdmin]);
 
+  const fetchAllTransactions = async () => {
+    setLoadingWalletTxs(true);
+    try {
+      const txs = await apiClient.getWalletTransactions("all");
+      setWalletTxs(txs || []);
+    } catch (err) {
+      console.error("Failed to fetch wallet transactions:", err);
+    } finally {
+      setLoadingWalletTxs(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAdmin && activeTab === "wallet") {
+      fetchAllTransactions();
+      fetchUsersAndComments();
+
+      const socket = getSocketInstance();
+      const handleWalletUpdate = () => {
+        fetchAllTransactions();
+        fetchUsersAndComments();
+      };
+      socket.on("wallet:any_update", handleWalletUpdate);
+      return () => {
+        socket.off("wallet:any_update", handleWalletUpdate);
+      };
+    }
+  }, [isAdmin, activeTab]);
+
+  const fetchChapters = () => {
+    if (selectedSeriesForChapters) {
+      apiClient.getChapters(selectedSeriesForChapters).then(setChaptersList).catch(console.error);
+    } else {
+      setChaptersList([]);
+    }
+  };
+
   useEffect(() => {
     if (isAdmin && selectedSeriesForChapters) {
-      const chaptersRef = collection(
-        db,
-        `series/${selectedSeriesForChapters}/chapters`,
-      );
-      const q = query(chaptersRef, orderBy("number", "desc"));
-      const unsub = onSnapshot(q, (snap) => {
-        setChaptersList(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      });
-      return () => unsub();
+      fetchChapters();
+      const socket = getSocketInstance();
+      socket.on("chapters:updated", fetchChapters);
+      return () => {
+        socket.off("chapters:updated", fetchChapters);
+      };
     } else {
       setChaptersList([]);
     }
   }, [isAdmin, selectedSeriesForChapters]);
-
-  useEffect(() => {
-    if (isAdmin) {
-      const unsubUsers = onSnapshot(
-        query(collection(db, "users"), orderBy("createdAt", "desc")),
-        (snap) => {
-          setUsersList(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        },
-      );
-      const unsubAdmins = onSnapshot(collection(db, "admins"), (snap) => {
-        const adminMap: Record<string, boolean> = {};
-        snap.docs.forEach((d) => {
-          adminMap[d.id] = true;
-        });
-        setAdminsMap(adminMap);
-      });
-      const unsubComments = onSnapshot(
-        query(collection(db, "comments"), orderBy("createdAt", "desc")),
-        (snap) => {
-          setCommentsList(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        },
-      );
-      const unsubReports = onSnapshot(
-        query(collection(db, "reports"), orderBy("createdAt", "desc")),
-        (snap) => {
-          setReportsList(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        },
-      );
-
-      // Fetch total chapters count
-      getCountFromServer(collectionGroup(db, "chapters"))
-        .then((snap) => {
-          setTotalChapters(snap.data().count);
-        })
-        .catch((err) => console.error("Error getting chapter count:", err));
-
-      return () => {
-        unsubUsers();
-        unsubAdmins();
-        unsubComments();
-        unsubReports();
-      };
-    }
-  }, [isAdmin]);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -302,53 +411,27 @@ export default function Admin() {
         .map((s) => s.trim())
         .filter((s) => s);
 
-      if (editingSeries) {
-        const docRef = doc(db, "series", editingSeries.id);
-        await setDoc(
-          docRef,
-          {
-            title: seriesForm.title,
-            cover: seriesForm.cover,
-            banner: seriesForm.cover,
-            author: seriesForm.author,
-            artist: seriesForm.artist,
-            synopsis: seriesForm.synopsis,
-            genres: genresArray,
-            tags: tagsArray,
-            status: seriesForm.status,
-            type: seriesForm.type,
-            isHero: seriesForm.isHero,
-            isFeatured: seriesForm.isFeatured,
-            updatedAt: serverTimestamp(),
-            // preserve fields
-            createdAt: editingSeries.createdAt,
-            rating: editingSeries.rating || 5.0,
-          },
-          { merge: true },
-        );
-        alert("Series updated successfully!");
-        setEditingSeries(null);
-      } else {
-        const newRef = doc(collection(db, "series"));
-        await setDoc(newRef, {
-          title: seriesForm.title,
-          cover: seriesForm.cover,
-          banner: seriesForm.cover,
-          author: seriesForm.author,
-          artist: seriesForm.artist,
-          synopsis: seriesForm.synopsis,
-          genres: genresArray,
-          tags: tagsArray,
-          status: seriesForm.status,
-          rating: 5.0,
-          type: seriesForm.type,
-          isHero: seriesForm.isHero,
-          isFeatured: seriesForm.isFeatured,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-        alert("Series created successfully!");
-      }
+      const sId = editingSeries ? editingSeries.id : (seriesForm.title.toLowerCase().trim().replace(/\s+/g, '-') + '-' + Math.floor(Math.random() * 1000));
+
+      const payload = {
+        id: sId,
+        title: seriesForm.title,
+        cover: seriesForm.cover,
+        banner: seriesForm.cover,
+        author: seriesForm.author,
+        artist: seriesForm.artist,
+        synopsis: seriesForm.synopsis,
+        genres: genresArray,
+        tags: tagsArray,
+        status: seriesForm.status,
+        type: seriesForm.type,
+        isHero: seriesForm.isHero,
+        isFeatured: seriesForm.isFeatured,
+      };
+
+      await apiClient.saveSeries(payload);
+      alert(editingSeries ? "Series updated successfully!" : "Series created successfully!");
+      setEditingSeries(null);
       setSeriesForm({
         title: "",
         cover: "",
@@ -362,6 +445,7 @@ export default function Admin() {
         isHero: false,
         isFeatured: false,
       });
+      fetchSeries();
     } catch (error: any) {
       alert("Error saving series: " + error.message);
     }
@@ -375,20 +459,9 @@ export default function Admin() {
     )
       return;
     try {
-      await import("firebase/firestore").then(
-        async ({ deleteDoc, getDocs, collection, query }) => {
-          // First delete all chapters
-          const chaptersRef = collection(db, "series", id, "chapters");
-          const q = query(chaptersRef);
-          const snapshot = await getDocs(q);
-          const deletePromises = snapshot.docs.map((doc) => deleteDoc(doc.ref));
-          await Promise.all(deletePromises);
-
-          // Then delete the series itself
-          await deleteDoc(doc(db, "series", id));
-        },
-      );
+      await apiClient.deleteSeries(id, user!.uid);
       alert("Series and all chapters deleted!");
+      fetchSeries();
     } catch (error: any) {
       alert("Error deleting series: " + error.message);
     }
@@ -421,82 +494,28 @@ export default function Admin() {
         .map((s) => s.trim())
         .filter((s) => s);
 
-      if (editingChapterId) {
-        const docRef = doc(
-          db,
-          `series/${chapterForm.seriesId}/chapters`,
-          editingChapterId,
-        );
-        await setDoc(
-          docRef,
-          {
-            seriesId: chapterForm.seriesId,
-            number: parseFloat(chapterForm.number),
-            title: chapterForm.title,
-            images: imagesArray,
-            publishAt: chapterForm.publishAt || null,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true },
-        );
-        alert("Chapter updated successfully!");
-        setEditingChapterId(null);
-      } else {
-        const newRef = doc(
-          collection(db, `series/${chapterForm.seriesId}/chapters`),
-        );
-        await setDoc(newRef, {
-          seriesId: chapterForm.seriesId,
-          number: parseFloat(chapterForm.number),
-          title: chapterForm.title,
-          images: imagesArray,
-          publishAt: chapterForm.publishAt || null,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+      const chId = editingChapterId || `ch-${chapterForm.number}-${Math.floor(Math.random() * 10000)}`;
 
-        // Send notifications
-        const seriesTitle =
-          seriesList.find((s) => s.id === chapterForm.seriesId)?.title ||
-          "A bookmarked series";
-        const newChapId = newRef.id;
-        const chapNum = chapterForm.number;
-        const sId = chapterForm.seriesId;
+      const payload = {
+        id: chId,
+        seriesId: chapterForm.seriesId,
+        number: parseFloat(chapterForm.number),
+        title: chapterForm.title,
+        images: imagesArray,
+        publishAt: chapterForm.publishAt || null,
+      };
 
-        import("firebase/firestore").then(async ({ getDoc }) => {
-          const promises = usersList.map(async (u) => {
-            try {
-              const bSnap = await getDoc(
-                doc(db, `users/${u.id}/bookmarks`, sId),
-              );
-              if (bSnap.exists()) {
-                const notifRef = doc(
-                  collection(db, `users/${u.id}/notifications`),
-                );
-                await setDoc(notifRef, {
-                  type: "new_chapter",
-                  title: "فصل جدید منتشر شد!",
-                  body: `فصل ${chapNum} از کمیک ${seriesTitle} منتشر شد.`,
-                  link: `/series/${sId}/chapter/${newChapId}`,
-                  createdAt: serverTimestamp(),
-                  read: false,
-                });
-              }
-            } catch (err) {
-              console.error("Error sending notification to user", u.id, err);
-            }
-          });
-          await Promise.all(promises);
-        });
-
-        alert("Chapter created successfully!");
-      }
+      await apiClient.saveChapter(chapterForm.seriesId, payload);
+      alert(editingChapterId ? "Chapter updated successfully!" : "Chapter created successfully!");
+      setEditingChapterId(null);
       setChapterForm({
         seriesId: chapterForm.seriesId,
         number: "",
         title: "",
         images: "",
+        publishAt: "",
       });
+      fetchChapters();
     } catch (error: any) {
       alert("Error saving chapter: " + error.message);
     }
@@ -521,10 +540,9 @@ export default function Admin() {
     if (!window.confirm(`Are you sure you want to delete Chapter ${number}?`))
       return;
     try {
-      await import("firebase/firestore").then(async ({ deleteDoc }) => {
-        await deleteDoc(doc(db, `series/${seriesId}/chapters`, chapterId));
-      });
+      await apiClient.deleteChapter(seriesId, chapterId, user!.uid);
       alert("Chapter deleted!");
+      fetchChapters();
     } catch (error: any) {
       alert("Error deleting chapter: " + error.message);
     }
@@ -540,14 +558,10 @@ export default function Admin() {
       return;
     }
     try {
-      const { setDoc, deleteDoc } = await import("firebase/firestore");
-      if (currentStatus) {
-        await deleteDoc(doc(db, "admins", userId));
-      } else {
-        await setDoc(doc(db, "admins", userId), {
-          createdAt: serverTimestamp(),
-        });
-      }
+      const newRole = currentStatus ? "user" : "admin";
+      await apiClient.changeUserRole(userId, newRole, user!.uid);
+      alert(`User role updated to ${newRole}`);
+      fetchUsersAndComments();
     } catch (error: any) {
       alert("Failed to toggle admin status: " + error.message);
     }
@@ -557,9 +571,9 @@ export default function Admin() {
     if (!window.confirm("Are you sure you want to delete this comment?"))
       return;
     try {
-      await import("firebase/firestore").then(async ({ deleteDoc }) => {
-        await deleteDoc(doc(db, "comments", commentId));
-      });
+      await apiClient.deleteComment(commentId);
+      alert("Comment deleted successfully!");
+      fetchUsersAndComments();
     } catch (error: any) {
       alert("Failed to delete comment: " + error.message);
     }
@@ -575,70 +589,110 @@ export default function Admin() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isAdmin || isSimulatingUser) {
     return (
       <Layout>
         <div className="flex items-center justify-center min-h-[70vh]">
-          <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] p-8 rounded-2xl w-full max-w-sm">
-            <h2 className="text-2xl font-black text-white uppercase text-center mb-6">
-              Admin Login
-            </h2>
-            <form onSubmit={handleAdminLogin}>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">
-                    Username / Email
-                  </label>
-                  <input
-                    required
-                    value={loginUser}
-                    onChange={(e) => setLoginUser(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white outline-none focus:border-[var(--color-asura-accent)]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    value={loginPass}
-                    onChange={(e) => setLoginPass(e.target.value)}
-                    className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white outline-none focus:border-[var(--color-asura-accent)]"
-                  />
-                </div>
-                {authError && (
-                  <div className="text-red-400 text-xs font-bold">
-                    {authError}
-                  </div>
-                )}
-                <button
-                  type="submit"
-                  className="w-full bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-bold text-sm uppercase py-3 rounded-lg mt-4 transition-colors"
-                >
-                  Login via Password
-                </button>
-              </div>
-            </form>
-            <div className="mt-6 text-center text-xs text-zinc-500">
-              <p>
-                If you prefer, login via Google from the Navbar with your
-                authorized admin email.
+          {isSimulatingUser ? (
+            <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] p-8 rounded-2xl w-full max-w-md text-center" dir="rtl">
+              <h2 className="text-2xl font-black text-amber-500 mb-4 font-sans">
+                حالت شبیه‌ساز کاربر فعال است
+              </h2>
+              <p className="text-zinc-400 text-sm leading-relaxed mb-6">
+                شما در حال حاضر سایت را به عنوان یک خواننده معمولی تجربه می‌کنید و به صورت موقت به پنل مدیریت دسترسی ندارید. برای ورود مجدد به پنل مدیریت، دکمه زیر را کلیک کنید تا از شبیه‌ساز خارج شوید.
               </p>
+              <button
+                onClick={() => setIsSimulatingUser(false)}
+                className="w-full bg-amber-500 hover:bg-amber-600 text-black font-black text-sm py-3.5 rounded-xl transition-all shadow-lg shadow-amber-500/10"
+              >
+                خروج از شبیه‌ساز و بازگشت به مدیریت کل
+              </button>
             </div>
-          </div>
+          ) : (
+            <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] p-8 rounded-2xl w-full max-w-sm">
+              <h2 className="text-2xl font-black text-white uppercase text-center mb-6">
+                Admin Login
+              </h2>
+              <form onSubmit={handleAdminLogin}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">
+                      Username / Email
+                    </label>
+                    <input
+                      required
+                      value={loginUser}
+                      onChange={(e) => setLoginUser(e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white outline-none focus:border-[var(--color-asura-accent)]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-1">
+                      Password
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={loginPass}
+                      onChange={(e) => setLoginPass(e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white outline-none focus:border-[var(--color-asura-accent)]"
+                    />
+                  </div>
+                  {authError && (
+                    <div className="text-red-400 text-xs font-bold">
+                      {authError}
+                    </div>
+                  )}
+                  <button
+                    type="submit"
+                    className="w-full bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-bold text-sm uppercase py-3 rounded-lg mt-4 transition-colors"
+                  >
+                    Login via Password
+                  </button>
+                </div>
+              </form>
+              <div className="mt-6 text-center text-xs text-zinc-500">
+                <p>
+                  If you prefer, login via Google from the Navbar with your
+                  authorized admin email.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </Layout>
     );
   }
 
+  const userRoles = currentUserData?.roles || [currentUserData?.role || 'user'];
+  const isSuperAdmin = userRoles.includes('super_admin') || 
+                       currentUserData?.email === "amirrezaveisi45@gmail.com" || 
+                       currentUserData?.email === "Mr.V@admin.com";
+
+  const hasFrontendPermission = (permission: string) => {
+    if (isSuperAdmin) return true;
+    if (currentUserData?.permissions?.includes(permission)) return true;
+    for (const r of userRoles) {
+      if (globalRolePermissions[r]?.includes(permission)) return true;
+    }
+    return false;
+  };
+
+  const showSeriesTabs = isSuperAdmin || hasFrontendPermission('create_series') || hasFrontendPermission('edit_series');
+  const showChapterTabs = isSuperAdmin || hasFrontendPermission('add_chapter') || hasFrontendPermission('edit_chapter');
+  const showUsersTab = isSuperAdmin || hasFrontendPermission('manage_users');
+  const showCommentsTab = isSuperAdmin || hasFrontendPermission('delete_comment');
+  const showTaxonomyTab = isSuperAdmin || hasFrontendPermission('manage_settings');
+  const showReportsTab = isSuperAdmin || hasFrontendPermission('manage_reports');
+  const showSettingsTab = isSuperAdmin || hasFrontendPermission('manage_settings');
+  const showWalletTab = isSuperAdmin || hasFrontendPermission('manage_wallets');
+
   return (
     <Layout>
       <div className="max-w-7xl mx-auto px-4 py-8">
         <h1 className="text-3xl font-black text-white uppercase flex items-center gap-2 mb-8">
-          <Settings className="text-[var(--color-asura-accent)]" /> Admin
-          Dashboard
+          <Settings className="text-[var(--color-asura-accent)]" /> 
+          {isSuperAdmin ? "پنل مدیریت کل وبسایت" : "داشبورد اختصاصی کادر سایت"}
         </h1>
 
         <div className="flex flex-wrap gap-4 mb-8">
@@ -646,101 +700,154 @@ export default function Admin() {
             onClick={() => setActiveTab("dashboard")}
             className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "dashboard" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
           >
-            <BarChart2 size={18} /> Dashboard
+            <BarChart2 size={18} /> داشبورد عمومی
           </button>
-          <button
-            onClick={() => {
-              setActiveTab("manage");
-              setEditingSeries(null);
-              setSeriesForm({
-                title: "",
-                cover: "",
-                author: "",
-                artist: "",
-                synopsis: "",
-                genres: "",
-                tags: "",
-                status: "Ongoing",
-                type: "Manhwa",
-                isHero: false,
-                isFeatured: false,
-              });
-            }}
-            className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "manage" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
-          >
-            <List size={18} /> Manage Series
-          </button>
-          <button
-            onClick={() => setActiveTab("series")}
-            className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "series" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
-          >
-            <LayoutGrid size={18} />{" "}
-            {editingSeries ? "Edit Series" : "Add Series"}
-          </button>
-          <button
-            onClick={() => setActiveTab("manage_chapters")}
-            className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "manage_chapters" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
-          >
-            <List size={18} /> Manage Chapters
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab("chapters");
-              setEditingChapterId(null);
-              setChapterForm({
-                seriesId: "",
-                number: "",
-                title: "",
-                images: "",
-              });
-            }}
-            className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "chapters" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
-          >
-            <Plus size={18} />{" "}
-            {editingChapterId ? "Edit Chapter" : "Add Chapter"}
-          </button>
-          <button
-            onClick={() => setActiveTab("users")}
-            className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "users" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
-          >
-            <UsersIcon size={18} /> Users
-          </button>
-          <button
-            onClick={() => setActiveTab("comments")}
-            className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "comments" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
-          >
-            <MessageSquare size={18} /> Comments
-          </button>
-          <button
-            onClick={() => setActiveTab("taxonomy")}
-            className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "taxonomy" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
-          >
-            <BookOpen size={18} /> Taxonomy
-          </button>
-          <button
-            onClick={() => setActiveTab("reports")}
-            className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "reports" ? "bg-red-500 text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
-          >
-            <span className="relative">
-               Reports
-               {reportsList.filter(r => r.status === 'pending').length > 0 && (
-                 <span className="absolute -top-3 -right-6 bg-red-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full shadow-lg shadow-red-500/50">
-                    {reportsList.filter(r => r.status === 'pending').length}
-                 </span>
-               )}
-            </span>
-          </button>
-          <button
-            onClick={() => setActiveTab("settings")}
-            className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "settings" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
-          >
-            <Settings size={18} /> Settings
-          </button>
+
+          {showSeriesTabs && (
+            <>
+              <button
+                onClick={() => {
+                  setActiveTab("manage");
+                  setEditingSeries(null);
+                  setSeriesForm({
+                    title: "",
+                    cover: "",
+                    author: "",
+                    artist: "",
+                    synopsis: "",
+                    genres: "",
+                    tags: "",
+                    status: "Ongoing",
+                    type: "Manhwa",
+                    isHero: false,
+                    isFeatured: false,
+                  });
+                }}
+                className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "manage" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+              >
+                <List size={18} /> مدیریت مانهواها
+              </button>
+              <button
+                onClick={() => setActiveTab("series")}
+                className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "series" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+              >
+                <LayoutGrid size={18} />{" "}
+                {editingSeries ? "ویرایش مانهوا" : "افزودن مانهوا"}
+              </button>
+            </>
+          )}
+
+          {showChapterTabs && (
+            <>
+              <button
+                onClick={() => setActiveTab("manage_chapters")}
+                className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "manage_chapters" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+              >
+                <List size={18} /> مدیریت چپترها
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab("chapters");
+                  setEditingChapterId(null);
+                  setChapterForm({
+                    seriesId: "",
+                    number: "",
+                    title: "",
+                    images: "",
+                    publishAt: "",
+                  });
+                }}
+                className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "chapters" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+              >
+                <Plus size={18} />{" "}
+                {editingChapterId ? "ویرایش چپتر" : "افزودن چپتر"}
+              </button>
+            </>
+          )}
+
+          {showUsersTab && (
+            <button
+              onClick={() => setActiveTab("users")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "users" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <UsersIcon size={18} /> مدیریت نقش‌ها و دسترسی‌ها
+            </button>
+          )}
+
+          {showCommentsTab && (
+            <button
+              onClick={() => setActiveTab("comments")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "comments" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <MessageSquare size={18} /> نظرات کاربران
+            </button>
+          )}
+
+          {showTaxonomyTab && (
+            <button
+              onClick={() => setActiveTab("taxonomy")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "taxonomy" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <BookOpen size={18} /> ژانرها و تگ‌ها
+            </button>
+          )}
+
+          {showReportsTab && (
+            <button
+              onClick={() => setActiveTab("reports")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "reports" ? "bg-red-500 text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <span className="relative">
+                 گزارشات خطا
+                 {reportsList.filter(r => r.status === 'pending').length > 0 && (
+                   <span className="absolute -top-3 -right-6 bg-red-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full shadow-lg shadow-red-500/50 font-sans">
+                      {reportsList.filter(r => r.status === 'pending').length}
+                   </span>
+                 )}
+              </span>
+            </button>
+          )}
+
+          {showWalletTab && (
+            <button
+              onClick={() => setActiveTab("wallet")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "wallet" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <Wallet size={18} /> مدیریت کیف پول‌ها
+            </button>
+          )}
+
+          {showSettingsTab && (
+            <button
+              onClick={() => setActiveTab("settings")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "settings" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <Settings size={18} /> تنظیمات سایت
+            </button>
+          )}
         </div>
 
         <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 md:p-8 overflow-hidden">
           {activeTab === "dashboard" && (
             <div className="space-y-8">
+              {isSuperAdmin && (
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4" dir="rtl">
+                  <div>
+                    <h3 className="text-base font-black text-amber-400 mb-1 font-sans">شبیه‌ساز کاربر عادی برای تست عملکردها</h3>
+                    <p className="text-xs text-zinc-400 leading-relaxed">با فعال‌سازی این دکمه، شما می‌توانید کل وبسایت را دقیقاً مشابه با یک خواننده معمولی تجربه کنید تا سیستم کسر از موجودی، دسترسی‌ها و محدودیت‌ها را تست کنید.</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setIsSimulatingUser(true);
+                    }}
+                    className="flex-shrink-0 bg-amber-500 hover:bg-amber-600 text-black font-black text-xs px-5 py-3 rounded-xl transition-all shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2"
+                  >
+                    <EyeOff size={16} />
+                    فعال‌سازی حالت شبیه‌ساز کاربر عادی
+                  </button>
+                </div>
+              )}
+
               <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4">
                 Platform Overview
               </h2>
@@ -847,6 +954,68 @@ export default function Admin() {
 
                 <div>
                   <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4 mb-6">
+                    Daily Views
+                  </h2>
+                  <div className="bg-black/40 border border-white/10 rounded-xl p-6 h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart
+                        data={
+                          Array.from({ length: 7 }).map((_, i) => ({
+                            name: new Date(
+                              Date.now() - (6 - i) * 24 * 60 * 60 * 1000,
+                            ).toLocaleDateString("en-US", { weekday: "short" }),
+                            views: Math.floor(
+                              seriesList.reduce((acc, curr) => acc + (curr.views || 0), 0) / 7 +
+                                Math.random() * 500,
+                            ),
+                          }))
+                        }
+                      >
+                        <defs>
+                          <linearGradient id="colorViews" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--color-asura-accent)" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="var(--color-asura-accent)" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="#ffffff10"
+                        />
+                        <XAxis
+                          dataKey="name"
+                          stroke="#999"
+                          fontSize={12}
+                          tickLine={false}
+                          axisLine={false}
+                        />
+                        <YAxis
+                          stroke="#999"
+                          fontSize={12}
+                          tickLine={false}
+                          axisLine={false}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#111",
+                            borderColor: "#333",
+                          }}
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="views"
+                          stroke="var(--color-asura-accent)"
+                          fillOpacity={1}
+                          fill="url(#colorViews)"
+                          strokeWidth={2}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-8">
+                  <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4 mb-6">
                     Top Series By Views
                   </h2>
                   <div className="bg-black/40 border border-white/10 rounded-xl p-6 h-[300px]">
@@ -896,7 +1065,6 @@ export default function Admin() {
                     </ResponsiveContainer>
                   </div>
                 </div>
-              </div>
 
               <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4 mt-8">
                 Most Popular Series
@@ -1007,92 +1175,421 @@ export default function Admin() {
           )}
 
           {activeTab === "users" && (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto text-right" dir="rtl">
               <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4 mb-4">
-                Manage Users
+                مدیریت و رهگیری کاربران وبسایت
               </h2>
-              <table className="w-full text-left border-collapse min-w-[600px]">
+              
+              {/* Search Bar */}
+              <div className="mb-6">
+                <input
+                  type="text"
+                  placeholder="جستجو بر اساس آیدی ۶ رقمی (کد ملی)، نام و نام خانوادگی، شماره تلفن، نام کاربری یا ایمیل..."
+                  value={userSearchQuery}
+                  onChange={(e) => setUserSearchQuery(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50 transition-colors placeholder:text-zinc-500"
+                />
+              </div>
+
+              <table className="w-full text-right border-collapse min-w-[800px]">
                 <thead>
                   <tr className="border-b border-white/10 text-zinc-500 text-xs font-bold uppercase tracking-wider">
-                    <th className="py-3 px-4">User</th>
-                    <th className="py-3 px-4">Role</th>
-                    <th className="py-3 px-4">Actions</th>
+                    <th className="py-3 px-4">کاربر</th>
+                    <th className="py-3 px-4">اطلاعات تکمیلی پروفایل</th>
+                    <th className="py-3 px-4">دسترسی ساخت اثر</th>
+                    <th className="py-3 px-4">نقش</th>
+                    <th className="py-3 px-4">عملیات</th>
                   </tr>
                 </thead>
                 <tbody className="text-sm">
-                  {usersList.map((u) => {
-                    const isUserAdmin =
-                      adminsMap[u.id] ||
-                      u.email === "amirrezaveisi45@gmail.com" ||
-                      u.email === "Mr.V@admin.com";
-                    return (
-                      <tr
-                        key={u.id}
-                        className="border-b border-white/5 hover:bg-white/5 transition-colors"
-                      >
-                        <td className="py-3 px-4 text-white font-medium">
-                          <div className="flex items-center gap-3">
-                            <img
-                              src={
-                                u.avatarUrl || "https://via.placeholder.com/40"
-                              }
-                              alt="avatar"
-                              className="w-8 h-8 object-cover rounded-full bg-zinc-800"
-                            />
-                            <div className="flex flex-col">
-                              <span className="line-clamp-1">
-                                {u.displayName}
-                              </span>
-                              <span className="text-xs text-zinc-500">
-                                {u.email || u.id}
-                              </span>
+                  {usersList
+                    .filter((u) => {
+                      if (!userSearchQuery) return true;
+                      const q = userSearchQuery.toLowerCase();
+                      const displayName = (u.displayName || "").toLowerCase();
+                      const email = (u.email || "").toLowerCase();
+                      const id = (u.id || "").toLowerCase();
+                      const melliCode = (u.melliCode || "").toLowerCase();
+                      const firstName = (u.firstName || "").toLowerCase();
+                      const lastName = (u.lastName || "").toLowerCase();
+                      const fullName = `${firstName} ${lastName}`.toLowerCase();
+                      const phoneNumber = (u.phoneNumber || "").toLowerCase();
+
+                      return (
+                        displayName.includes(q) ||
+                        email.includes(q) ||
+                        id.includes(q) ||
+                        melliCode.includes(q) ||
+                        firstName.includes(q) ||
+                        lastName.includes(q) ||
+                        fullName.includes(q) ||
+                        phoneNumber.includes(q)
+                      );
+                    })
+                    .map((u) => {
+                      const isUserAdmin =
+                        adminsMap[u.id] ||
+                        u.email === "amirrezaveisi45@gmail.com" ||
+                        u.email === "Mr.V@admin.com" ||
+                        (u.roles || []).includes('super_admin') ||
+                        (u.roles || []).includes('admin');
+                      
+                      const currentRoles: string[] = u.roles || (u.role === 'admin' ? ['admin'] : ['user']);
+                      const roleLabels = currentRoles.map(rKey => {
+                        const r = ALL_ROLES.find(item => item.key === rKey);
+                        return r ? r.label.split(" (")[0] : (rKey === 'user' ? 'کاربر عادی' : rKey);
+                      }).join("، ");
+
+                      return (
+                        <tr
+                          key={u.id}
+                          className="border-b border-white/5 hover:bg-white/5 transition-colors"
+                        >
+                          <td className="py-3 px-4 text-white font-medium">
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={
+                                  u.avatarUrl || "https://via.placeholder.com/40"
+                                }
+                                alt="avatar"
+                                className="w-8 h-8 object-cover rounded-full bg-zinc-800"
+                              />
+                              <div className="flex flex-col text-right">
+                                <span className="line-clamp-1 font-bold text-xs">
+                                  {u.displayName}
+                                </span>
+                                <span className="text-[10px] text-zinc-500">
+                                  {u.email || u.id}
+                                </span>
+                              </div>
                             </div>
-                          </div>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span
-                            className={`text-[10px] uppercase font-bold tracking-widest px-2 py-1 rounded ${isUserAdmin ? "bg-[var(--color-asura-accent)]/20 text-[var(--color-asura-accent)]" : "bg-zinc-800 text-zinc-400"}`}
-                          >
-                            {isUserAdmin ? "Admin" : "User"}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 flex gap-4">
-                          <button
-                            onClick={() =>
-                              toggleAdmin(u.id, isUserAdmin, u.email)
-                            }
-                            className={`font-bold text-xs uppercase tracking-wider transition-colors ${isUserAdmin ? "text-red-500 hover:text-red-400" : "text-[var(--color-asura-accent-light)] hover:text-white"}`}
-                          >
-                            {isUserAdmin ? "Revoke Admin" : "Make Admin"}
-                          </button>
-                          {!isUserAdmin && (
+                          </td>
+                          <td className="py-3 px-4 text-xs text-zinc-300">
+                            <div className="flex flex-col text-right gap-0.5">
+                              <div>
+                                <span className="text-zinc-500">شناسه ۶ رقمی: </span>
+                                <span className="font-mono text-[var(--color-asura-accent-light)] font-bold">
+                                  {u.melliCode || "ثبت نشده"}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-zinc-500">نام حقیقی: </span>
+                                <span className="font-semibold">
+                                  {u.firstName || u.lastName ? `${u.firstName || ""} ${u.lastName || ""}` : "ثبت نشده"}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-zinc-500">شماره تلفن: </span>
+                                <span className="font-mono text-zinc-400">
+                                  {u.phoneNumber || "ثبت نشده"}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
                             <button
                               onClick={() => {
-                                const newBannedStatus = !u.banned;
-                                if (!window.confirm(`Are you sure you want to ${newBannedStatus ? 'ban' : 'unban'} this user?`)) return;
-                                setDoc(doc(db, 'users', u.id), { banned: newBannedStatus }, { merge: true }).catch(err => alert('Failed to update ban status: ' + err.message));
+                                const nextVal = !u.canCreateSeries;
+                                apiClient
+                                  .setUserCanCreateSeries(u.id, nextVal, user!.uid)
+                                  .then(() => {
+                                    alert(`دسترسی ساخت مانهوا برای کاربر با موفقیت ${nextVal ? 'فعال' : 'غیرفعال'} شد.`);
+                                    fetchUsersAndComments();
+                                  })
+                                  .catch((err) =>
+                                    alert("خطا در تغییر وضعیت دسترسی: " + err.message)
+                                  );
                               }}
-                              className={`font-bold text-xs uppercase tracking-wider transition-colors ${u.banned ? "text-green-500 hover:text-green-400" : "text-red-500 hover:text-red-400"}`}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition-all border ${
+                                u.canCreateSeries
+                                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                                  : "bg-zinc-800/40 border-white/5 text-zinc-500"
+                              }`}
                             >
-                              {u.banned ? "Unban" : "Ban"}
+                              {u.canCreateSeries ? "دارای دسترسی ساخت" : "فاقد دسترسی ساخت"}
                             </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`text-[10px] uppercase font-black tracking-wider px-2 py-1 rounded ${
+                                isUserAdmin
+                                  ? "bg-[var(--color-asura-accent)]/20 text-[var(--color-asura-accent-light)]"
+                                  : "bg-zinc-850 text-zinc-400 border border-white/5"
+                              }`}
+                            >
+                              {roleLabels}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => {
+                                  setSelectedUserForRoles(u);
+                                  setSelectedUserRoles(u.roles || (u.role === 'admin' ? ['admin'] : ['user']));
+                                  setSelectedUserPermissions(u.permissions || []);
+                                }}
+                                className="font-black text-[10px] text-[var(--color-asura-accent-light)] hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-2.5 py-1.5 rounded-lg border border-white/10"
+                              >
+                                مدیریت نقش و دسترسی
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const newBannedStatus = !u.banned;
+                                  if (
+                                    !window.confirm(
+                                      `آیا از ${newBannedStatus ? "مسدود کردن" : "رفع مسدودیت"} این کاربر اطمینان دارید؟`
+                                    )
+                                  )
+                                    return;
+                                  apiClient
+                                    .toggleBanUser(u.id, user!.uid)
+                                    .then(() => fetchUsersAndComments())
+                                    .catch((err) =>
+                                      alert("خطا در مسدودسازی کاربر: " + err.message)
+                                    );
+                                }}
+                                className={`font-black text-xs transition-colors ${
+                                  u.banned
+                                    ? "text-green-500 hover:text-green-400"
+                                    : "text-red-500 hover:text-red-400"
+                                }`}
+                              >
+                                {u.banned ? "رفع مسدودیت" : "مسدود کردن"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   {usersList.length === 0 && (
                     <tr>
-                      <td
-                        colSpan={3}
-                        className="py-8 text-center text-zinc-500"
-                      >
-                        No users found.
+                      <td colSpan={5} className="py-8 text-center text-zinc-500 font-bold">
+                        هیچ کاربری یافت نشد.
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
+
+              {/* Roles and Permissions modal */}
+              {selectedUserForRoles && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto" dir="rtl">
+                  <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl w-full max-w-2xl p-6 md:p-8 shadow-2xl relative text-right">
+                    <h3 className="text-xl font-black text-white mb-2">
+                      تنظیم نقش‌ها و دسترسی‌های کاربر: <span className="text-[var(--color-asura-accent-light)]">{selectedUserForRoles.displayName}</span>
+                    </h3>
+                    <p className="text-zinc-500 text-xs mb-6 font-semibold font-sans">
+                      {selectedUserForRoles.email || selectedUserForRoles.id}
+                    </p>
+
+                    {/* Roles section */}
+                    <div className="mb-6">
+                      <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-4">
+                        <h4 className="text-sm font-bold text-white">انتخاب نقش‌های کاربر (امکان انتخاب همزمان چند نقش)</h4>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedUserRoles(ALL_ROLES.map(r => r.key));
+                          }}
+                          className="text-xs text-[var(--color-asura-accent-light)] hover:text-white font-bold transition-colors bg-[var(--color-asura-accent)]/10 px-3 py-1 rounded"
+                        >
+                          اعطای همه نقش‌ها به این کاربر
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {ALL_ROLES.map(role => {
+                          const hasRole = selectedUserRoles.includes(role.key);
+                          return (
+                            <label
+                              key={role.key}
+                              className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all text-right ${
+                                hasRole 
+                                  ? 'bg-[var(--color-asura-accent)]/10 border-[var(--color-asura-accent)]/30 text-white' 
+                                  : 'bg-black/20 border-white/5 text-zinc-400 hover:border-white/10'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={hasRole}
+                                onChange={() => {
+                                  if (hasRole) {
+                                    setSelectedUserRoles(selectedUserRoles.filter(r => r !== role.key));
+                                  } else {
+                                    setSelectedUserRoles([...selectedUserRoles, role.key]);
+                                  }
+                                }}
+                                className="mt-1 accent-[var(--color-asura-accent)]"
+                              />
+                              <div>
+                                <span className="text-xs font-black block">{role.label}</span>
+                                <span className="text-[10px] text-zinc-500 block mt-0.5">{role.desc}</span>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Overridden Permissions section */}
+                    <div className="mb-8">
+                      <div className="border-b border-white/10 pb-2 mb-4">
+                        <h4 className="text-sm font-bold text-white">دسترسی‌های سفارشی و جداگانه کاربر (اولویت با این تنظیمات است)</h4>
+                        <p className="text-[10px] text-zinc-500 mt-1">با تیک زدن این بخش، دسترسی مشخصی به طور انحصاری به این کاربر (جدا از نقش‌هایش) اعطا خواهد شد.</p>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {ALL_PERMISSIONS.map(perm => {
+                          const hasPerm = selectedUserPermissions.includes(perm.key);
+                          return (
+                            <label
+                              key={perm.key}
+                              className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all text-right ${
+                                hasPerm 
+                                  ? 'bg-zinc-800 border-zinc-700 text-[var(--color-asura-accent-light)]' 
+                                  : 'bg-black/10 border-white/5 text-zinc-400 hover:border-white/10'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={hasPerm}
+                                onChange={() => {
+                                  if (hasPerm) {
+                                    setSelectedUserPermissions(selectedUserPermissions.filter(p => p !== perm.key));
+                                  } else {
+                                    setSelectedUserPermissions([...selectedUserPermissions, perm.key]);
+                                  }
+                                }}
+                                className="accent-[var(--color-asura-accent)]"
+                              />
+                              <span className="text-xs font-bold">{perm.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex gap-4">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await apiClient.updateUserRolesAndPermissions(
+                              selectedUserForRoles.id, 
+                              selectedUserRoles, 
+                              selectedUserPermissions, 
+                              user!.uid
+                            );
+                            alert("نقش‌ها و دسترسی‌های کاربر با موفقیت بروزرسانی شد.");
+                            setSelectedUserForRoles(null);
+                            fetchUsersAndComments();
+                          } catch (err: any) {
+                            alert("خطا در ذخیره‌سازی دسترسی‌ها: " + err.message);
+                          }
+                        }}
+                        className="flex-1 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-bold py-3 px-6 rounded-xl text-xs transition-colors"
+                      >
+                        ذخیره تغییرات و اعمال دسترسی‌ها
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedUserForRoles(null)}
+                        className="bg-zinc-800 hover:bg-zinc-700 text-zinc-400 font-bold py-3 px-6 rounded-xl text-xs transition-colors"
+                      >
+                        انصراف
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Global Role Permissions Editor */}
+              <div className="mt-12 bg-black/20 border border-white/5 rounded-2xl p-6 text-right" dir="rtl">
+                <div className="border-b border-white/10 pb-3 mb-6">
+                  <h3 className="text-lg font-black text-white">مدیریت سطح دسترسی پیش‌فرض نقش‌ها به صورت سراسری</h3>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    از این بخش می‌توانید تعیین کنید کاربران دارای هر نقش، به طور پیش‌فرض به چه ویژگی‌هایی دسترسی داشته باشند.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="md:col-span-1">
+                    <label className="block text-xs font-bold text-zinc-500 uppercase mb-2">انتخاب نقش برای ویرایش:</label>
+                    <div className="space-y-2">
+                      {ALL_ROLES.filter(r => r.key !== 'super_admin').map(role => (
+                        <button
+                          key={role.key}
+                          type="button"
+                          onClick={() => setEditingRoleDefault(role.key)}
+                          className={`w-full text-right p-3 rounded-xl border font-bold text-xs transition-all flex items-center justify-between ${
+                            editingRoleDefault === role.key 
+                              ? 'bg-[var(--color-asura-accent)]/10 border-[var(--color-asura-accent)]/30 text-white' 
+                              : 'bg-black/40 border-white/5 text-zinc-400 hover:text-white'
+                          }`}
+                        >
+                          <span>{role.label}</span>
+                          <span className="text-[10px] text-zinc-500 font-normal">{(globalRolePermissions[role.key] || []).length} دسترسی</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2 bg-black/30 border border-white/5 rounded-xl p-5">
+                    <h4 className="text-sm font-bold text-white mb-4 border-b border-white/5 pb-2 flex justify-between items-center">
+                      <span>دسترسی‌های پیش‌فرض نقش: <span className="text-[var(--color-asura-accent-light)] font-black">{ALL_ROLES.find(r => r.key === editingRoleDefault)?.label}</span></span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await apiClient.saveSettings("role_permissions", globalRolePermissions);
+                            alert("تنظیمات سطح دسترسی نقش‌ها با موفقیت ذخیره شد.");
+                          } catch (err: any) {
+                            alert("خطا در ذخیره‌سازی تنظیمات نقش‌ها: " + err.message);
+                          }
+                        }}
+                        className="bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-black px-4 py-2 rounded-lg transition-colors"
+                      >
+                        ذخیره سراسری تنظیمات این نقش
+                      </button>
+                    </h4>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {ALL_PERMISSIONS.map(perm => {
+                        const currentRolePerms = globalRolePermissions[editingRoleDefault] || [];
+                        const hasPerm = currentRolePerms.includes(perm.key);
+                        return (
+                          <label
+                            key={perm.key}
+                            className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all text-right ${
+                              hasPerm 
+                                ? 'bg-zinc-800 border-zinc-700 text-[var(--color-asura-accent-light)]' 
+                                : 'bg-black/10 border-white/5 text-zinc-400 hover:border-white/10'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={hasPerm}
+                              onChange={() => {
+                                let updatedPerms = [...currentRolePerms];
+                                if (hasPerm) {
+                                  updatedPerms = updatedPerms.filter(p => p !== perm.key);
+                                } else {
+                                  updatedPerms.push(perm.key);
+                                }
+                                setGlobalRolePermissions({
+                                  ...globalRolePermissions,
+                                  [editingRoleDefault]: updatedPerms
+                                });
+                              }}
+                              className="accent-[var(--color-asura-accent)]"
+                            />
+                            <span className="text-xs font-bold">{perm.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1688,11 +2185,8 @@ export default function Admin() {
                         onClick={() => {
                           const newG = siteGenres.filter((g) => g !== genre);
                           setSiteGenres(newG);
-                          setDoc(
-                            doc(db, "settings", "taxonomy"),
-                            { genres: newG },
-                            { merge: true },
-                          );
+                          apiClient.saveSettings("taxonomy", { genres: newG })
+                            .catch(err => alert("Failed to save genres: " + err.message));
                         }}
                         className="text-red-400 hover:text-red-300"
                       >
@@ -1707,12 +2201,9 @@ export default function Admin() {
                     if (!newGenreInput.trim()) return;
                     const newG = [...siteGenres, newGenreInput.trim()];
                     setSiteGenres(newG);
-                    setDoc(
-                      doc(db, "settings", "taxonomy"),
-                      { genres: newG },
-                      { merge: true },
-                    );
-                    setNewGenreInput("");
+                    apiClient.saveSettings("taxonomy", { genres: newG })
+                      .then(() => setNewGenreInput(""))
+                      .catch(err => alert("Failed to save genres: " + err.message));
                   }}
                   className="flex gap-2 max-w-sm"
                 >
@@ -1778,18 +2269,28 @@ export default function Admin() {
                         <td className="py-3 px-4">
                           <div className="flex flex-col gap-2">
                              {r.status === 'pending' && (
-                               <button onClick={() => setDoc(doc(db, 'reports', r.id), { status: 'resolved' }, { merge: true })} className="text-xs font-bold text-green-400 hover:text-green-300 uppercase tracking-wider text-left">Mark Resolved</button>
+                               <button 
+                                 onClick={() => apiClient.resolveReport(r.id, 'resolved', user!.uid).then(() => fetchUsersAndComments())} 
+                                 className="text-xs font-bold text-green-400 hover:text-green-300 uppercase tracking-wider text-left"
+                               >
+                                 Mark Resolved
+                               </button>
                              )}
                              {r.type === 'comment' && (
                                <button onClick={async () => {
                                   if (!window.confirm("Delete this reported comment?")) return;
                                   try {
-                                    await import('firebase/firestore').then(({ deleteDoc }) => deleteDoc(doc(db, 'comments', r.commentId)));
-                                    await setDoc(doc(db, 'reports', r.id), { status: 'resolved' }, { merge: true });
+                                    await apiClient.deleteComment(r.commentId);
+                                    await apiClient.resolveReport(r.id, 'resolved', user!.uid);
+                                    fetchUsersAndComments();
                                     alert('Comment deleted & Report resolved.');
                                   } catch (e: any) { alert("Error: " + e.message); }
                                }} className="text-xs font-bold text-red-500 hover:text-red-400 uppercase tracking-wider text-left">Delete Comment</button>
                              )}
+                             <button onClick={() => {
+                               if (!window.confirm("Delete this report?")) return;
+                               apiClient.deleteReportAdmin(r.id, user!.uid).then(() => fetchUsersAndComments());
+                             }} className="text-[10px] text-zinc-500 hover:text-red-400 text-left">Delete Report</button>
                           </div>
                         </td>
                       </tr>
@@ -1813,11 +2314,9 @@ export default function Admin() {
               <form 
                 onSubmit={(e) => {
                   e.preventDefault();
-                  import('firebase/firestore').then(({ doc, setDoc }) => {
-                    setDoc(doc(db, "settings", "global"), siteSettings, { merge: true })
-                      .then(() => alert("Settings saved successfully!"))
-                      .catch((err: any) => alert("Failed to save settings: " + err.message));
-                  });
+                  apiClient.saveSettings("global", siteSettings)
+                    .then(() => alert("Settings saved successfully!"))
+                    .catch((err: any) => alert("Failed to save settings: " + err.message));
                 }}
                 className="space-y-6"
               >
@@ -1905,6 +2404,275 @@ export default function Admin() {
                   Save All Settings
                 </button>
               </form>
+            </div>
+          )}
+
+          {activeTab === "wallet" && (
+            <div className="space-y-8" dir="rtl">
+              <div className="border-b border-white/10 pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-black text-white">مدیریت کیف پول‌ها و امور مالی</h2>
+                  <p className="text-xs text-zinc-500 mt-1">شارژ، برداشت و بررسی زنده تراکنش‌های مالی کاربران سایت</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Right/Main Area: Users list */}
+                <div className="lg:col-span-2 space-y-4">
+                  <div className="bg-black/20 p-4 rounded-xl border border-white/5 flex items-center justify-between gap-4">
+                    <h3 className="text-sm font-black text-white">لیست کاربران سیستم</h3>
+                    <input
+                      type="text"
+                      placeholder="جستجوی کاربر با نام یا ایمیل..."
+                      value={walletSearchQuery}
+                      onChange={e => setWalletSearchQuery(e.target.value)}
+                      className="bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-xs text-white w-full max-w-xs focus:outline-none focus:border-[var(--color-asura-accent)]"
+                    />
+                  </div>
+
+                  <div className="overflow-x-auto bg-black/10 border border-white/5 rounded-xl">
+                    <table className="w-full text-right text-xs">
+                      <thead>
+                        <tr className="border-b border-white/5 text-zinc-500">
+                          <th className="p-4 font-black text-right">کاربر</th>
+                          <th className="p-4 font-black text-right">نقش سیستم</th>
+                          <th className="p-4 font-black text-left">موجودی کیف پول</th>
+                          <th className="p-4 font-black text-center">عملیات</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {usersList
+                          .filter(u => {
+                            if (!walletSearchQuery) return true;
+                            const query = walletSearchQuery.toLowerCase();
+                            return (u.displayName || "").toLowerCase().includes(query) ||
+                                   (u.email || "").toLowerCase().includes(query);
+                          })
+                          .map((u: any) => {
+                            const uRoles = u.roles || [u.role || 'user'];
+                            const isSelected = selectedUserForCharge === u.id;
+                            return (
+                              <tr key={u.id} className={`transition-colors hover:bg-white/5 ${isSelected ? 'bg-indigo-500/5 border-r-2 border-[var(--color-asura-accent)]' : ''}`}>
+                                <td className="p-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center text-white font-bold text-xs uppercase overflow-hidden shrink-0">
+                                      {u.avatarUrl ? (
+                                        <img src={u.avatarUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                      ) : (
+                                        (u.displayName || "U").charAt(0)
+                                      )}
+                                    </div>
+                                    <div>
+                                      <p className="font-black text-white text-xs">{u.displayName || "کاربر ناشناس"}</p>
+                                      <p className="text-[10px] text-zinc-500 font-mono mt-0.5">{u.email}</p>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="p-4">
+                                  <div className="flex flex-wrap gap-1">
+                                    {uRoles.map((r: string) => (
+                                      <span key={r} className="bg-white/5 border border-white/10 text-[9px] px-1.5 py-0.5 rounded text-zinc-400 font-bold">
+                                        {r === 'super_admin' ? 'مدیریت کل' : r === 'admin' ? 'ادمین' : r === 'translator' ? 'مترجم' : r === 'cleaner' ? 'کلینر' : r === 'editor' ? 'ادیتور' : r}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td className="p-4 text-left font-black font-mono text-emerald-400">
+                                  {(u.walletBalance || 0).toLocaleString('fa-IR')} ت
+                                </td>
+                                <td className="p-4 text-center">
+                                  <button
+                                    onClick={() => {
+                                      setSelectedUserForCharge(u.id);
+                                      setChargeAmount(0);
+                                      setChargeDescription("");
+                                      setChargeType("admin_adjustment");
+                                    }}
+                                    className="bg-[var(--color-asura-accent)]/10 hover:bg-[var(--color-asura-accent)] text-[var(--color-asura-accent-light)] hover:text-white border border-[var(--color-asura-accent)]/20 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all"
+                                  >
+                                    تغییر موجودی
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Left Area: Charge form */}
+                <div className="space-y-6">
+                  {selectedUserForCharge ? (
+                    (() => {
+                      const selectedUserObj = usersList.find(u => u.id === selectedUserForCharge);
+                      return (
+                        <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 space-y-6">
+                          <div>
+                            <h3 className="text-sm font-black text-white flex items-center gap-2">
+                              <span className="w-1.5 h-4 bg-emerald-500 rounded-full"></span>
+                              تراکنش برای {selectedUserObj?.displayName || "کاربر"}
+                            </h3>
+                            <p className="text-[10px] text-zinc-500 font-mono mt-1">{selectedUserObj?.email}</p>
+                            <div className="bg-black/30 p-3 rounded-lg border border-white/5 mt-3 flex justify-between items-center text-xs">
+                              <span className="text-zinc-400">موجودی فعلی:</span>
+                              <span className="font-black text-emerald-400 font-mono">{(selectedUserObj?.walletBalance || 0).toLocaleString('fa-IR')} ت</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-2">مبلغ تراکنش (تومان)</label>
+                              <input
+                                type="number"
+                                placeholder="مثال: 50000 برای شارژ، -20000 برای کسر"
+                                value={chargeAmount === 0 ? "" : chargeAmount}
+                                onChange={e => setChargeAmount(Number(e.target.value))}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)] font-mono text-left"
+                              />
+                              <p className="text-[10px] text-zinc-500 mt-1.5">مبالغ مثبت کیف پول را شارژ و مبالغ منفی از موجودی کسر می‌کنند.</p>
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-2">نوع تراکنش</label>
+                              <select
+                                value={chargeType}
+                                onChange={e => setChargeType(e.target.value)}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
+                              >
+                                <option value="admin_adjustment">شارژ دستی / تغییر توسط مدیریت</option>
+                                <option value="purchase">خرید فصل مانهوا / دسترسی</option>
+                                <option value="system_gift">هدیه سیستم</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-wider mb-2">توضیحات تراکنش</label>
+                              <textarea
+                                placeholder="مثال: بابت پاداش ترجمه چپتر ۵"
+                                value={chargeDescription}
+                                onChange={e => setChargeDescription(e.target.value)}
+                                rows={3}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
+                              />
+                            </div>
+
+                            <div className="flex gap-2">
+                              <button
+                                onClick={async () => {
+                                  if (!selectedUserForCharge || chargeAmount === 0) {
+                                    alert("لطفا مبلغ تراکنش معتبری وارد کنید.");
+                                    return;
+                                  }
+                                  setSubmittingCharge(true);
+                                  try {
+                                    const res = await apiClient.chargeWallet(
+                                      selectedUserForCharge,
+                                      chargeAmount,
+                                      chargeType,
+                                      chargeDescription
+                                    );
+                                    if (res.success) {
+                                      alert("تراکنش مالی با موفقیت ثبت شد و حساب کاربر بروزرسانی شد.");
+                                      setSelectedUserForCharge("");
+                                      setChargeAmount(0);
+                                      setChargeDescription("");
+                                      fetchAllTransactions();
+                                      fetchUsersAndComments();
+                                    } else {
+                                      alert("ثبت تراکنش با خطا مواجه شد: " + (res.error || "خطای ناشناخته"));
+                                    }
+                                  } catch (err: any) {
+                                    alert("خطا: " + err.message);
+                                  } finally {
+                                    setSubmittingCharge(false);
+                                  }
+                                }}
+                                disabled={submittingCharge}
+                                className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-black text-xs py-3 rounded-xl shadow-lg shadow-emerald-500/10 transition-all disabled:opacity-50"
+                              >
+                                {submittingCharge ? 'در حال ثبت...' : 'ثبت تراکنش جدید'}
+                              </button>
+                              <button
+                                onClick={() => setSelectedUserForCharge("")}
+                                className="bg-white/5 hover:bg-white/10 border border-white/10 text-white font-black text-xs px-4 py-3 rounded-xl transition-colors"
+                              >
+                                انصراف
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <div className="bg-black/20 border border-dashed border-white/5 rounded-2xl p-8 text-center text-zinc-500">
+                      <Wallet size={36} className="mx-auto mb-3 opacity-40 text-zinc-400" />
+                      <p className="text-xs font-bold">برای ثبت تراکنش یا شارژ حساب، دکمه «تغییر موجودی» کنار یکی از کاربران را فشار دهید.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Transactions History Table */}
+              <div className="bg-black/10 border border-white/5 rounded-2xl p-6">
+                <h3 className="text-sm font-black text-white mb-4 flex items-center gap-2">
+                  <span className="w-1.5 h-4 bg-purple-500 rounded-full"></span>
+                  گزارش تمام تراکنش‌های سایت (دفتر کل معین زنده)
+                </h3>
+
+                {loadingWalletTxs ? (
+                  <div className="flex justify-center items-center h-32">
+                    <div className="w-8 h-8 border-4 border-slate-700 border-t-[var(--color-asura-accent)] rounded-full animate-spin"></div>
+                  </div>
+                ) : walletTxs.length === 0 ? (
+                  <div className="text-center py-8 text-zinc-500 text-xs font-bold">تاکنون تراکنشی در کل سیستم ثبت نشده است.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-right text-xs">
+                      <thead>
+                        <tr className="border-b border-white/5 text-zinc-500">
+                          <th className="pb-3 font-black text-right">مبلغ</th>
+                          <th className="pb-3 font-black text-right">کاربر مقصد</th>
+                          <th className="pb-3 font-black text-right">نوع تراکنش</th>
+                          <th className="pb-3 font-black text-right">توضیحات تراکنش</th>
+                          <th className="pb-3 font-black text-right">ثبت‌کننده</th>
+                          <th className="pb-3 font-black text-right">تاریخ و ساعت</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {walletTxs.map((tx, index) => {
+                          const isPositive = tx.amount >= 0;
+                          return (
+                            <tr key={tx.id || index} className="hover:bg-white/5 transition-colors">
+                              <td className={`py-3.5 font-mono font-black ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {isPositive ? '+' : ''}{tx.amount.toLocaleString('fa-IR')} ت
+                              </td>
+                              <td className="py-3.5 text-white font-bold">
+                                {tx.userName || "کاربر ناشناس"} <span className="text-[10px] font-mono text-zinc-500 font-bold">({tx.userId.substring(0, 8)})</span>
+                              </td>
+                              <td className="py-3.5">
+                                <span className={`px-2 py-1 rounded-lg text-[10px] font-black ${
+                                  tx.type === 'admin_adjustment' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                                  tx.type === 'purchase' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' :
+                                  'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
+                                }`}>
+                                  {tx.type === 'admin_adjustment' ? 'تغییر دستی' :
+                                   tx.type === 'purchase' ? 'خرید فصل' : 'سایر'}
+                                </span>
+                              </td>
+                              <td className="py-3.5 text-zinc-300 font-bold max-w-xs truncate" title={tx.description}>{tx.description || 'بدون توضیحات'}</td>
+                              <td className="py-3.5 text-zinc-400 font-bold">{tx.creatorName || 'سیستم'}</td>
+                              <td className="py-3.5 font-mono text-zinc-500 text-[11px]">
+                                {new Date(tx.createdAt).toLocaleDateString('fa-IR')} {new Date(tx.createdAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

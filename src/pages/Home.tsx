@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { ChevronRight, Clock, Star, Flame } from 'lucide-react';
 import { motion } from 'motion/react';
 import { formatDistanceToNow } from 'date-fns';
-import { SeriesCardSkeleton, SidebarSkeleton } from '../components/Skeletons';
+import { SeriesCardSkeleton, SidebarSkeleton, HeroSkeleton } from '../components/Skeletons';
 
 export default function Home() {
   const { series, loading, error } = useSeriesList();
@@ -31,7 +31,7 @@ export default function Home() {
     <Layout>
       {/* Hero Carousel Area */}
       {loading ? (
-        <div className="relative w-full h-[400px] md:h-[500px] bg-zinc-900 animate-pulse"></div>
+        <HeroSkeleton />
       ) : (
         <div className="relative w-full overflow-hidden bg-[var(--color-asura-dark)]">
           <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-asura-dark)]/80 via-transparent to-[var(--color-asura-dark)] z-10 pointer-events-none"></div>

@@ -14,8 +14,9 @@
 }
 
 @layer base {
-  body {
-    @apply bg-[var(--color-asura-dark)] text-zinc-300 font-sans antialiased;
+  html, body {
+    @apply bg-[var(--color-asura-dark)] text-zinc-300 font-sans antialiased overflow-x-hidden;
+    max-width: 100vw;
   }
   h1, h2, h3, h4, h5, h6 {
     @apply font-display text-white;
