@@ -1,15 +1,19 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User, onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
 import { apiClient } from '../lib/apiClient';
 
 interface AuthContextType {
-  user: User | null;
+  user: any | null;
   profile: any | null;
   loading: boolean;
   isSimulatingUser: boolean;
   setIsSimulatingUser: (val: boolean) => void;
+  showSetupModal: boolean;
+  setShowSetupModal: (val: boolean) => void;
+  refreshProfile: () => Promise<void>;
+  login: (emailOrUsername: string, password?: string) => Promise<any>;
+  register: (email: string, displayName: string, password?: string) => Promise<any>;
+  loginWithGoogle: (googleProfile: any) => Promise<any>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -17,15 +21,23 @@ const AuthContext = createContext<AuthContextType>({
   profile: null,
   loading: true,
   isSimulatingUser: false,
-  setIsSimulatingUser: () => {}
+  setIsSimulatingUser: () => {},
+  showSetupModal: false,
+  setShowSetupModal: () => {},
+  refreshProfile: async () => {},
+  login: async () => {},
+  register: async () => {},
+  loginWithGoogle: async () => {},
+  logout: async () => {}
 });
 
 export const useAuth = () => useContext(AuthContext);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any | null>(null);
   const [profile, setProfile] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showSetupModal, setShowSetupModal] = useState(false);
   const [isSimulatingUser, setIsSimulatingUserInternal] = useState<boolean>(() => {
     return localStorage.getItem('asura_simulate_user') === 'true';
   });
@@ -35,64 +47,127 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsSimulatingUserInternal(val);
   };
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
-      if (user) {
-        localStorage.setItem('asura_user_uid', user.uid);
-        // Try creating/fetching user profile
-        try {
-          const userRef = doc(db, 'users', user.uid);
-          const userSnap = await getDoc(userRef);
-          let profileData: any = null;
-          
-          if (!userSnap.exists()) {
-            profileData = {
-              displayName: user.displayName || user.email?.split('@')[0] || 'Unknown',
-              avatarUrl: user.photoURL || '',
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-              banned: false
-            };
-            await setDoc(userRef, profileData);
-          } else {
-            profileData = userSnap.data();
-          }
-
-          if (profileData.banned) {
-            await auth.signOut();
-            setUser(null);
-            setProfile(null);
-            localStorage.removeItem('asura_user_uid');
-            alert("Your account has been suspended.");
-          } else {
-            setProfile(profileData);
-            
-            // Auto-sync with backend SQL/JSON database
-            const role = (user.email === 'amirrezaveisi45@gmail.com' || user.email === 'Mr.V@admin.com' || profileData.role === 'admin') ? 'admin' : 'user';
-            await apiClient.saveUser({
-              id: user.uid,
-              email: user.email || '',
-              displayName: profileData.displayName || 'Unknown',
-              avatarUrl: profileData.avatarUrl || '',
-              role: role
-            }).catch(e => console.error("Failed to sync profile to backend", e));
-          }
-        } catch (error) {
-          console.error("Error fetching profile", error);
+  const refreshProfile = async () => {
+    const savedUid = localStorage.getItem('asura_user_uid');
+    if (!savedUid) return;
+    try {
+      const userProfile = await apiClient.getUser(savedUid);
+      if (userProfile) {
+        setProfile(userProfile);
+        setUser(userProfile);
+        if (userProfile.hasCompletedSetup) {
+          setShowSetupModal(false);
         }
+      }
+    } catch (e) {
+      console.error("Failed to refresh profile:", e);
+    }
+  };
+
+  const login = async (emailOrUsername: string, password?: string) => {
+    try {
+      const loggedUser = await apiClient.login({ identifier: emailOrUsername, password });
+      localStorage.setItem('asura_user_uid', loggedUser.id);
+      setUser(loggedUser);
+      setProfile(loggedUser);
+      if (loggedUser.hasCompletedSetup === false) {
+        setShowSetupModal(true);
       } else {
-        setProfile(null);
-        localStorage.removeItem('asura_user_uid');
+        setShowSetupModal(false);
+      }
+      return loggedUser;
+    } catch (err) {
+      console.error("Login failed:", err);
+      throw err;
+    }
+  };
+
+  const register = async (email: string, displayName: string, password?: string) => {
+    try {
+      const newUser = await apiClient.register({ email, displayName, password });
+      localStorage.setItem('asura_user_uid', newUser.id);
+      setUser(newUser);
+      setProfile(newUser);
+      setShowSetupModal(true);
+      return newUser;
+    } catch (err) {
+      console.error("Registration failed:", err);
+      throw err;
+    }
+  };
+
+  const loginWithGoogle = async (googleProfile: { email: string; displayName: string; avatarUrl: string; firstName?: string; lastName?: string; phoneNumber?: string }) => {
+    try {
+      const loggedUser = await apiClient.googleLogin(googleProfile);
+      localStorage.setItem('asura_user_uid', loggedUser.id);
+      setUser(loggedUser);
+      setProfile(loggedUser);
+      if (loggedUser.hasCompletedSetup === false) {
+        setShowSetupModal(true);
+      } else {
+        setShowSetupModal(false);
+      }
+      return loggedUser;
+    } catch (err) {
+      console.error("Google login failed:", err);
+      throw err;
+    }
+  };
+
+  const logout = async () => {
+    localStorage.removeItem('asura_user_uid');
+    setUser(null);
+    setProfile(null);
+    setShowSetupModal(false);
+  };
+
+  useEffect(() => {
+    const initAuth = async () => {
+      const savedUid = localStorage.getItem('asura_user_uid');
+      if (savedUid) {
+        try {
+          const userProfile = await apiClient.getUser(savedUid);
+          if (userProfile) {
+            if (userProfile.banned) {
+              localStorage.removeItem('asura_user_uid');
+              setUser(null);
+              setProfile(null);
+              alert("حساب کاربری شما مسدود شده است.");
+            } else {
+              setUser(userProfile);
+              setProfile(userProfile);
+              if (userProfile.hasCompletedSetup === false) {
+                setShowSetupModal(true);
+              }
+            }
+          } else {
+            localStorage.removeItem('asura_user_uid');
+          }
+        } catch (e) {
+          console.error("Failed to restore session:", e);
+        }
       }
       setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
+    initAuth();
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isSimulatingUser, setIsSimulatingUser }}>
+    <AuthContext.Provider value={{
+      user,
+      profile,
+      loading,
+      isSimulatingUser,
+      setIsSimulatingUser,
+      showSetupModal,
+      setShowSetupModal,
+      refreshProfile,
+      login,
+      register,
+      loginWithGoogle,
+      logout
+    }}>
       {children}
     </AuthContext.Provider>
   );

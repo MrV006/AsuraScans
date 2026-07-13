@@ -13,6 +13,7 @@ import Profile from './pages/Profile';
 import Search from './pages/Search';
 import Admin from './pages/Admin';
 import Leaderboard from './pages/Leaderboard';
+import CompleteProfileModal from './components/CompleteProfileModal';
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="/admin" element={<Admin />} />
             <Route path="/leaderboard" element={<Leaderboard />} />
           </Routes>
+          <CompleteProfileModal />
         </BrowserRouter>
       </AuthProvider>
     </SettingsProvider>

@@ -12,7 +12,7 @@ export default function Reader() {
   const { seriesId, chapterId } = useParams();
   const { series, loading: seriesLoading } = useSeriesOverview(seriesId);
   const { updateHistory } = useHistory();
-  const { user, isSimulatingUser } = useAuth();
+  const { user, profile, isSimulatingUser, setShowSetupModal } = useAuth();
   
   const [showNav, setShowNav] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
@@ -255,7 +255,19 @@ export default function Reader() {
               )}
 
               <div className="flex flex-col gap-3">
-                {(dbUser?.walletBalance || 0) >= 400 ? (
+                {!profile?.hasCompletedSetup ? (
+                  <div className="flex flex-col gap-3">
+                    <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold p-4 rounded-xl text-center leading-relaxed">
+                      برای خرید چپتر، ابتدا باید اطلاعات حساب کاربری خود را در پروفایل تکمیل کنید.
+                    </div>
+                    <button
+                      onClick={() => setShowSetupModal(true)}
+                      className="w-full py-3.5 px-4 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-sm rounded-xl transition-all shadow-lg flex items-center justify-center gap-2"
+                    >
+                      تکمیل اطلاعات حساب کاربری
+                    </button>
+                  </div>
+                ) : (dbUser?.walletBalance || 0) >= 400 ? (
                   <button
                     onClick={handlePurchase}
                     disabled={purchasing}

@@ -15,7 +15,7 @@ import { apiClient } from '../lib/apiClient';
 export default function Series() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user, profile } = useAuth();
+  const { user, profile, isSimulatingUser } = useAuth();
   const { series, loading, mutate } = useSeriesOverview(id);
   const { isBookmarked, addBookmark, removeBookmark } = useBookmarks();
   const { getHistoryForSeries } = useHistory();
@@ -105,7 +105,7 @@ export default function Series() {
   const readText = history ? `ادامه مطالعه (فصل ${history.chapterNumber})` : 'شروع به خواندن';
 
   // Admin and Contributor Authorization
-  const isGlobalAdmin = profile?.role === 'admin';
+  const isGlobalAdmin = profile?.role === 'admin' && !isSimulatingUser;
   const isApprovedContributor = series.contributors?.some((c: any) => c.userId === user?.uid && c.status === 'approved');
   const isStaffOrAdmin = isGlobalAdmin || isApprovedContributor;
 

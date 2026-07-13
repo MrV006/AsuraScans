@@ -8,6 +8,7 @@ import multer from "multer";
 import sharp from "sharp";
 import JSZip from "jszip";
 import fs from "fs";
+import crypto from "crypto";
 
 async function startServer() {
   const app = express();
@@ -164,6 +165,148 @@ async function startServer() {
   // -----------------------------------------------------------------
   // 2. USER PROFILE & AUTH API
   // -----------------------------------------------------------------
+  const hashPassword = (password: string) => {
+    return crypto.createHash('sha256').update(password).digest('hex');
+  };
+
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const { email, displayName, password } = req.body;
+      if (!email || !displayName || !password) {
+        return res.status(400).json({ error: "لطفا تمام فیلدها را پر کنید." });
+      }
+
+      // Check existing email
+      const existingByEmail = await dbManager.getUserByEmail(email);
+      if (existingByEmail) {
+        return res.status(400).json({ error: "ایمیلی با این آدرس از قبل وجود دارد." });
+      }
+
+      // Check existing username
+      const existingByUsername = await dbManager.getUserByUsername(displayName);
+      if (existingByUsername) {
+        return res.status(400).json({ error: "نام کاربری تکراری است." });
+      }
+
+      const id = `user-${Date.now()}`;
+      const hashedPassword = hashPassword(password);
+
+      const newUser = await dbManager.createOrUpdateUser({
+        id,
+        email,
+        displayName,
+        password: hashedPassword,
+        avatarUrl: "",
+        hasCompletedSetup: false,
+        role: "user",
+        walletBalance: 0
+      });
+
+      io.emit("users:updated", { userId: newUser.id });
+
+      const { password: _, ...userWithoutPassword } = newUser;
+      res.json(userWithoutPassword);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { identifier, password } = req.body;
+      if (!identifier || !password) {
+        return res.status(400).json({ error: "لطفا تمام فیلدها را پر کنید." });
+      }
+
+      // Try email first, then username
+      let user = await dbManager.getUserByEmail(identifier);
+      if (!user) {
+        user = await dbManager.getUserByUsername(identifier);
+      }
+
+      if (!user) {
+        return res.status(401).json({ error: "کاربری با این مشخصات یافت نشد." });
+      }
+
+      if (user.banned) {
+        return res.status(403).json({ error: "حساب کاربری شما مسدود شده است." });
+      }
+
+      const hashedPassword = hashPassword(password);
+      if (user.password !== hashedPassword) {
+        return res.status(401).json({ error: "رمز عبور اشتباه است." });
+      }
+
+      const { password: _, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/auth/google", async (req, res) => {
+    try {
+      const { email, displayName, avatarUrl, firstName, lastName, phoneNumber } = req.body;
+      if (!email) {
+        return res.status(400).json({ error: "ایمیل از گوگل دریافت نشد." });
+      }
+
+      let user = await dbManager.getUserByEmail(email);
+      if (user) {
+        // User exists, update blank fields if any are present in google payload
+        let updated = false;
+        const updates: any = { ...user };
+
+        if (!user.avatarUrl && avatarUrl) {
+          updates.avatarUrl = avatarUrl;
+          updated = true;
+        }
+        if (!user.firstName && firstName) {
+          updates.firstName = firstName;
+          updated = true;
+        }
+        if (!user.lastName && lastName) {
+          updates.lastName = lastName;
+          updated = true;
+        }
+        if (!user.phoneNumber && phoneNumber) {
+          updates.phoneNumber = phoneNumber;
+          updated = true;
+        }
+
+        if (updated) {
+          user = await dbManager.createOrUpdateUser(updates);
+          io.emit("users:updated", { userId: user.id });
+        }
+
+        const { password: _, ...userWithoutPassword } = user;
+        return res.json(userWithoutPassword);
+      } else {
+        // Create new user
+        const id = `user-google-${Date.now()}`;
+        const newUser = await dbManager.createOrUpdateUser({
+          id,
+          email,
+          displayName: displayName || email.split("@")[0],
+          avatarUrl: avatarUrl || "",
+          firstName: firstName || "",
+          lastName: lastName || "",
+          phoneNumber: phoneNumber || "",
+          hasCompletedSetup: false,
+          role: "user",
+          walletBalance: 0
+        });
+
+        io.emit("users:updated", { userId: newUser.id });
+
+        const { password: _, ...userWithoutPassword } = newUser;
+        return res.json(userWithoutPassword);
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/users", async (req, res) => {
     try {
       const users = await dbManager.getUsers();

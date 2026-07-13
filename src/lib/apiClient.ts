@@ -42,6 +42,45 @@ export const apiClient = {
   },
 
   // USERS / AUTH API
+  async register(data: { email: string; displayName: string; password?: string }) {
+    const res = await fetch(`${API_URL}/api/auth/register`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در ثبت نام.');
+    }
+    return res.json();
+  },
+
+  async login(data: { identifier: string; password?: string }) {
+    const res = await fetch(`${API_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'نام کاربری/ایمیل یا رمز عبور اشتباه است.');
+    }
+    return res.json();
+  },
+
+  async googleLogin(data: { email: string; displayName: string; avatarUrl: string; firstName?: string; lastName?: string; phoneNumber?: string }) {
+    const res = await fetch(`${API_URL}/api/auth/google`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در ورود با گوگل.');
+    }
+    return res.json();
+  },
+
   async getUsers() {
     const res = await fetch(`${API_URL}/api/users`, { headers: this.getHeaders() });
     return res.json();
@@ -53,7 +92,7 @@ export const apiClient = {
     return res.json();
   },
 
-  async saveUser(user: { id: string; email: string; displayName: string; avatarUrl: string; firstName?: string; lastName?: string; phoneNumber?: string; role?: 'admin' | 'staff' | 'user' }) {
+  async saveUser(user: { id: string; email: string; displayName: string; avatarUrl: string; firstName?: string; lastName?: string; phoneNumber?: string; role?: 'admin' | 'staff' | 'user'; hasCompletedSetup?: boolean }) {
     const res = await fetch(`${API_URL}/api/users`, {
       method: 'POST',
       headers: this.getHeaders(),

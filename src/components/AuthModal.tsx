@@ -1,14 +1,7 @@
 import React, { useState } from 'react';
-import { auth, db } from '../lib/firebase';
-import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  GoogleAuthProvider, 
-  signInWithPopup 
-} from 'firebase/auth';
-import { collection, query, where, getDocs, setDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { X, Mail, Lock, User as UserIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -20,78 +13,142 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const { login, register, loginWithGoogle } = useAuth();
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!identifier || !password) {
-      setError('Please fill in all fields');
+      setError('لطفا تمام فیلدها را پر کنید.');
       return;
     }
     setError('');
     setLoading(true);
 
     try {
-      let emailToUse = identifier;
-
-      // Check if identifier is an email
-      if (!identifier.includes('@')) {
-        // It's a username, look up the email
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('displayName', '==', identifier));
-        const querySnapshot = await getDocs(q);
-        
-        if (!querySnapshot.empty) {
-          // Found user with this username
-          emailToUse = querySnapshot.docs[0].data().email;
-        } else {
-          throw new Error('User not found. Try logging in with your email or registering with an email address.');
-        }
-      }
-
-      try {
-        // Try to login first
-        await signInWithEmailAndPassword(auth, emailToUse, password);
-        onClose();
-      } catch (loginError: any) {
-        if (loginError.code === 'auth/user-not-found' || loginError.code === 'auth/invalid-login-credentials' || loginError.code === 'auth/invalid-credential') {
-          // Attempt to register if it's an email format and user not found
-          if (identifier.includes('@')) {
-            try {
-              const userCredential = await createUserWithEmailAndPassword(auth, emailToUse, password);
-              const user = userCredential.user;
-              await setDoc(doc(db, 'users', user.uid), {
-                email: user.email,
-                displayName: user.email?.split('@')[0] || 'Unknown',
-                avatarUrl: user.photoURL || '',
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-                banned: false
-              });
-              onClose();
-            } catch (regError: any) {
-              setError(regError.message);
-            }
-          } else {
-            setError('Invalid credentials');
+      // First, try logging in
+      await login(identifier, password);
+      onClose();
+    } catch (loginError: any) {
+      // If user not found, and it looks like an email, automatically register them!
+      if (loginError.message.includes('یافت نشد') || loginError.message.includes('not found')) {
+        if (identifier.includes('@')) {
+          try {
+            const displayName = identifier.split('@')[0];
+            await register(identifier, displayName, password);
+            onClose();
+          } catch (regError: any) {
+            setError(regError.message || 'خطا در ثبت نام.');
           }
         } else {
-          setError(loginError.message);
+          setError('کاربری با این نام کاربری یافت نشد. لطفا ابتدا با ایمیل ثبت نام کنید.');
         }
+      } else {
+        setError(loginError.message || 'ایمیل/نام کاربری یا رمز عبور اشتباه است.');
       }
-    } catch (err: any) {
-      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
+    const clientId = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID;
+    
+    if (!clientId) {
+      // Fallback: Simulation/Prompt when VITE_GOOGLE_CLIENT_ID is not configured
+      const email = prompt("ایمیل شبیه‌ساز گوگل:");
+      if (!email) return;
+      const displayName = prompt("نام نمایشی شبیه‌ساز:", email.split('@')[0]);
+      if (!displayName) return;
+      const avatarUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80";
+      
+      setLoading(true);
+      try {
+        const parts = displayName.trim().split(/\s+/);
+        const firstName = parts[0] || "";
+        const lastName = parts.slice(1).join(' ') || "";
+        
+        await loginWithGoogle({
+          email,
+          displayName,
+          avatarUrl,
+          firstName,
+          lastName,
+          phoneNumber: ""
+        });
+        onClose();
+      } catch (err: any) {
+        setError(err.message || "خطا در ورود با گوگل شبیه‌سازی شده");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // Real Google Identity Services (GIS) auth
     try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      onClose();
-    } catch (error: any) {
-      setError(error.message);
+      setLoading(true);
+      
+      // Load Google Sign-In SDK if not loaded
+      if (!(window as any).google) {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://accounts.google.com/gsi/client';
+          script.async = true;
+          script.defer = true;
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error("Failed to load Google SDK"));
+          document.head.appendChild(script);
+        });
+      }
+
+      const google = (window as any).google;
+      google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async (response: any) => {
+          try {
+            const token = response.credential;
+            const decoded = decodeJwt(token);
+            if (!decoded) {
+              throw new Error("رمزگشایی توکن گوگل ناموفق بود.");
+            }
+
+            const { email, name, picture, given_name, family_name } = decoded;
+            
+            await loginWithGoogle({
+              email: email,
+              displayName: name || email.split('@')[0],
+              avatarUrl: picture || "",
+              firstName: given_name || "",
+              lastName: family_name || "",
+              phoneNumber: ""
+            });
+            onClose();
+          } catch (err: any) {
+            setError(err.message || "خطا در احراز هویت با گوگل.");
+          } finally {
+            setLoading(false);
+          }
+        }
+      });
+
+      google.accounts.id.prompt();
+    } catch (err: any) {
+      setError("بارگذاری ورود با گوگل با خطا مواجه شد. لطفا اتصال خود را بررسی کنید.");
+      setLoading(false);
+    }
+  };
+
+  const decodeJwt = (token: string) => {
+    try {
+      const base64Url = token.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
+      return JSON.parse(jsonPayload);
+    } catch (e) {
+      console.error("JWT Decode failed", e);
+      return null;
     }
   };
 
@@ -113,9 +170,9 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
             className="relative w-full max-w-md bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl shadow-2xl overflow-hidden"
           >
             <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-black text-white uppercase tracking-tighter">
-                  Welcome to <span className="text-[var(--color-asura-accent)]">Asura</span>
+              <div className="flex items-center justify-between mb-6 text-right" dir="rtl">
+                <h2 className="text-xl font-black text-white">
+                  ورود یا ثبت‌نام در <span className="text-[var(--color-asura-accent)]">آسورا</span>
                 </h2>
                 <button 
                   onClick={onClose}
@@ -126,43 +183,43 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
               </div>
 
               {error && (
-                <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-xl text-red-200 text-sm">
+                <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-xl text-red-200 text-sm text-right" dir="rtl">
                   {error}
                 </div>
               )}
 
-              <form onSubmit={handleAuth} className="space-y-4">
+              <form onSubmit={handleAuth} className="space-y-4 text-right" dir="rtl">
                 <div>
-                  <label className="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">
-                    Email or Username
+                  <label className="block text-xs font-bold text-zinc-400 mb-2">
+                    ایمیل یا نام کاربری
                   </label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-zinc-500">
+                    <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none text-zinc-500">
                       <UserIcon size={18} />
                     </div>
                     <input
                       type="text"
                       value={identifier}
                       onChange={(e) => setIdentifier(e.target.value)}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl pl-11 pr-4 py-3 text-white placeholder-zinc-600 focus:outline-none focus:border-[var(--color-asura-accent)] transition-colors"
-                      placeholder="john@example.com or johndoe"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl pr-11 pl-4 py-3 text-white placeholder-zinc-600 focus:outline-none focus:border-[var(--color-asura-accent)] transition-colors text-right"
+                      placeholder="ایمیل یا نام کاربری"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-zinc-400 uppercase tracking-widest mb-2">
-                    Password
+                  <label className="block text-xs font-bold text-zinc-400 mb-2">
+                    رمز عبور
                   </label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-zinc-500">
+                    <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none text-zinc-500">
                       <Lock size={18} />
                     </div>
                     <input
                       type="password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl pl-11 pr-4 py-3 text-white placeholder-zinc-600 focus:outline-none focus:border-[var(--color-asura-accent)] transition-colors"
+                      className="w-full bg-black/40 border border-white/10 rounded-xl pr-11 pl-4 py-3 text-white placeholder-zinc-600 focus:outline-none focus:border-[var(--color-asura-accent)] transition-colors text-right"
                       placeholder="••••••••"
                     />
                   </div>
@@ -172,12 +229,12 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full py-4 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white rounded-xl font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full py-3 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {loading ? 'Processing...' : 'Login / Register'}
+                    {loading ? 'در حال پردازش...' : 'ورود / ثبت‌نام'}
                   </button>
                   <p className="text-center text-xs text-zinc-500 mt-3">
-                    If an account does not exist with this email, it will be automatically created.
+                    در صورتی که حسابی با این مشخصات نباشد، حساب کاربری به صورت خودکار ساخته می‌شود.
                   </p>
                 </div>
               </form>
@@ -185,7 +242,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
               <div className="mt-6 pt-6 border-t border-white/10">
                 <button
                   onClick={handleGoogleLogin}
-                  className="w-full py-3 bg-white text-black hover:bg-zinc-200 rounded-xl font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-3"
+                  className="w-full py-3 bg-white text-black hover:bg-zinc-200 rounded-xl font-bold transition-colors flex items-center justify-center gap-3"
                 >
                   <svg className="w-5 h-5" viewBox="0 0 24 24">
                     <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -193,7 +250,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                     <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
                   </svg>
-                  Continue with Google
+                  ورود با گوگل
                 </button>
               </div>
             </div>

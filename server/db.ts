@@ -71,6 +71,8 @@ export interface User {
   phoneNumber?: string;
   canCreateSeries?: boolean;
   walletBalance?: number;
+  password?: string;
+  hasCompletedSetup?: boolean;
   createdAt: string;
 }
 
@@ -273,6 +275,8 @@ class DatabaseManager {
           canCreateSeries TINYINT(1) DEFAULT 0,
           rolesText TEXT,
           permissionsText TEXT,
+          password VARCHAR(255),
+          hasCompletedSetup TINYINT(1) DEFAULT 0,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
         )`,
         `CREATE TABLE IF NOT EXISTS series (
@@ -398,6 +402,8 @@ class DatabaseManager {
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS rolesText TEXT`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS permissionsText TEXT`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS walletBalance INT DEFAULT 0`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS password VARCHAR(255)`,
+        `ALTER TABLE users ADD COLUMN IF NOT EXISTS hasCompletedSetup TINYINT(1) DEFAULT 0`,
         `ALTER TABLE series ADD COLUMN IF NOT EXISTS contributors TEXT`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS isPending TINYINT(1) DEFAULT 0`
       ];
@@ -460,7 +466,9 @@ class DatabaseManager {
         walletBalance: res.walletBalance || 0,
         role: roleVal,
         roles,
-        permissions
+        permissions,
+        password: res.password || undefined,
+        hasCompletedSetup: res.hasCompletedSetup !== undefined ? !!res.hasCompletedSetup : false
       };
     }
     const u = this.localData.users.find(u => u.id === id);
@@ -469,11 +477,79 @@ class DatabaseManager {
       ...u,
       walletBalance: u.walletBalance || 0,
       roles: u.roles || [u.role || 'user'],
-      permissions: u.permissions || []
+      permissions: u.permissions || [],
+      password: u.password || undefined,
+      hasCompletedSetup: u.hasCompletedSetup !== undefined ? !!u.hasCompletedSetup : false
     };
   }
 
-  async createOrUpdateUser(user: Omit<User, 'createdAt' | 'banned' | 'role' | 'melliCode'> & { banned?: boolean; role?: 'admin' | 'staff' | 'user'; roles?: string[]; permissions?: string[]; melliCode?: string; firstName?: string; lastName?: string; phoneNumber?: string; canCreateSeries?: boolean }): Promise<User> {
+  async getUserByEmail(email: string): Promise<User | null> {
+    const emailLower = email.toLowerCase();
+    if (this.isUsingMySQL && this.pool) {
+      const [rows] = await this.pool.execute('SELECT * FROM users WHERE LOWER(email) = ?', [emailLower]);
+      const res = (rows as any[])[0];
+      if (!res) return null;
+      const roleVal = res.role || 'user';
+      const roles = res.rolesText ? res.rolesText.split(',').map((x: string) => x.trim()).filter(Boolean) : [roleVal];
+      const permissions = res.permissionsText ? res.permissionsText.split(',').map((x: string) => x.trim()).filter(Boolean) : [];
+      return {
+        ...res,
+        banned: !!res.banned,
+        canCreateSeries: !!res.canCreateSeries,
+        walletBalance: res.walletBalance || 0,
+        role: roleVal,
+        roles,
+        permissions,
+        password: res.password || undefined,
+        hasCompletedSetup: res.hasCompletedSetup !== undefined ? !!res.hasCompletedSetup : false
+      };
+    }
+    const u = this.localData.users.find(u => u.email.toLowerCase() === emailLower);
+    if (!u) return null;
+    return {
+      ...u,
+      walletBalance: u.walletBalance || 0,
+      roles: u.roles || [u.role || 'user'],
+      permissions: u.permissions || [],
+      password: u.password || undefined,
+      hasCompletedSetup: u.hasCompletedSetup !== undefined ? !!u.hasCompletedSetup : false
+    };
+  }
+
+  async getUserByUsername(username: string): Promise<User | null> {
+    const userLower = username.toLowerCase();
+    if (this.isUsingMySQL && this.pool) {
+      const [rows] = await this.pool.execute('SELECT * FROM users WHERE LOWER(displayName) = ?', [userLower]);
+      const res = (rows as any[])[0];
+      if (!res) return null;
+      const roleVal = res.role || 'user';
+      const roles = res.rolesText ? res.rolesText.split(',').map((x: string) => x.trim()).filter(Boolean) : [roleVal];
+      const permissions = res.permissionsText ? res.permissionsText.split(',').map((x: string) => x.trim()).filter(Boolean) : [];
+      return {
+        ...res,
+        banned: !!res.banned,
+        canCreateSeries: !!res.canCreateSeries,
+        walletBalance: res.walletBalance || 0,
+        role: roleVal,
+        roles,
+        permissions,
+        password: res.password || undefined,
+        hasCompletedSetup: res.hasCompletedSetup !== undefined ? !!res.hasCompletedSetup : false
+      };
+    }
+    const u = this.localData.users.find(u => u.displayName.toLowerCase() === userLower);
+    if (!u) return null;
+    return {
+      ...u,
+      walletBalance: u.walletBalance || 0,
+      roles: u.roles || [u.role || 'user'],
+      permissions: u.permissions || [],
+      password: u.password || undefined,
+      hasCompletedSetup: u.hasCompletedSetup !== undefined ? !!u.hasCompletedSetup : false
+    };
+  }
+
+  async createOrUpdateUser(user: Omit<User, 'createdAt' | 'banned' | 'role' | 'melliCode'> & { banned?: boolean; role?: 'admin' | 'staff' | 'user'; roles?: string[]; permissions?: string[]; melliCode?: string; firstName?: string; lastName?: string; phoneNumber?: string; canCreateSeries?: boolean; password?: string; hasCompletedSetup?: boolean }): Promise<User> {
     const now = new Date().toISOString();
     const rolesArr = user.roles || (user.role ? [user.role] : ['user']);
     const permsArr = user.permissions || [];
@@ -484,7 +560,7 @@ class DatabaseManager {
       const existing = await this.getUser(user.id);
       if (existing) {
         await this.pool.execute(
-          'UPDATE users SET displayName = ?, avatarUrl = ?, banned = ?, role = ?, melliCode = ?, firstName = ?, lastName = ?, phoneNumber = ?, canCreateSeries = ?, rolesText = ?, permissionsText = ? WHERE id = ?',
+          'UPDATE users SET displayName = ?, avatarUrl = ?, banned = ?, role = ?, melliCode = ?, firstName = ?, lastName = ?, phoneNumber = ?, canCreateSeries = ?, rolesText = ?, permissionsText = ?, password = ?, hasCompletedSetup = ? WHERE id = ?',
           [
             user.displayName,
             user.avatarUrl,
@@ -497,6 +573,8 @@ class DatabaseManager {
             user.canCreateSeries !== undefined ? (user.canCreateSeries ? 1 : 0) : (existing.canCreateSeries ? 1 : 0),
             rolesText,
             permissionsText,
+            user.password !== undefined ? user.password : (existing.password || null),
+            user.hasCompletedSetup !== undefined ? (user.hasCompletedSetup ? 1 : 0) : (existing.hasCompletedSetup ? 1 : 0),
             user.id
           ]
         );
@@ -512,12 +590,15 @@ class DatabaseManager {
           firstName: user.firstName !== undefined ? user.firstName : existing.firstName,
           lastName: user.lastName !== undefined ? user.lastName : existing.lastName,
           phoneNumber: user.phoneNumber !== undefined ? user.phoneNumber : existing.phoneNumber,
-          canCreateSeries: user.canCreateSeries !== undefined ? !!user.canCreateSeries : existing.canCreateSeries
+          canCreateSeries: user.canCreateSeries !== undefined ? !!user.canCreateSeries : existing.canCreateSeries,
+          password: user.password !== undefined ? user.password : existing.password,
+          hasCompletedSetup: user.hasCompletedSetup !== undefined ? !!user.hasCompletedSetup : existing.hasCompletedSetup
         };
       } else {
         const melliCode = user.melliCode || Math.floor(100000 + Math.random() * 900000).toString();
+        const hasSetup = user.hasCompletedSetup !== undefined ? (user.hasCompletedSetup ? 1 : 0) : 0;
         await this.pool.execute(
-          'INSERT INTO users (id, email, displayName, avatarUrl, banned, role, melliCode, firstName, lastName, phoneNumber, canCreateSeries, rolesText, permissionsText, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO users (id, email, displayName, avatarUrl, banned, role, melliCode, firstName, lastName, phoneNumber, canCreateSeries, rolesText, permissionsText, password, hasCompletedSetup, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             user.id,
             user.email,
@@ -532,6 +613,8 @@ class DatabaseManager {
             user.canCreateSeries ? 1 : 0,
             rolesText,
             permissionsText,
+            user.password || null,
+            hasSetup,
             now
           ]
         );
@@ -549,6 +632,8 @@ class DatabaseManager {
           lastName: user.lastName || '',
           phoneNumber: user.phoneNumber || '',
           canCreateSeries: !!user.canCreateSeries,
+          password: user.password,
+          hasCompletedSetup: !!user.hasCompletedSetup,
           createdAt: now
         };
       }
@@ -569,7 +654,9 @@ class DatabaseManager {
         firstName: user.firstName !== undefined ? user.firstName : existing.firstName,
         lastName: user.lastName !== undefined ? user.lastName : existing.lastName,
         phoneNumber: user.phoneNumber !== undefined ? user.phoneNumber : existing.phoneNumber,
-        canCreateSeries: user.canCreateSeries !== undefined ? !!user.canCreateSeries : existing.canCreateSeries
+        canCreateSeries: user.canCreateSeries !== undefined ? !!user.canCreateSeries : existing.canCreateSeries,
+        password: user.password !== undefined ? user.password : existing.password,
+        hasCompletedSetup: user.hasCompletedSetup !== undefined ? !!user.hasCompletedSetup : existing.hasCompletedSetup
       };
       this.localData.users[idx] = updated;
       this.saveLocalData();
@@ -590,6 +677,8 @@ class DatabaseManager {
         lastName: user.lastName || '',
         phoneNumber: user.phoneNumber || '',
         canCreateSeries: !!user.canCreateSeries,
+        password: user.password,
+        hasCompletedSetup: !!user.hasCompletedSetup,
         createdAt: now
       };
       this.localData.users.push(newUser);

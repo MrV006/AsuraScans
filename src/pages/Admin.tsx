@@ -2,11 +2,6 @@ import React, { useState, useEffect } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Layout } from "../components/Layout";
-import { auth } from "../lib/firebase";
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-} from "firebase/auth";
 import { apiClient, getSocketInstance } from "../lib/apiClient";
 import {
   Settings,
@@ -63,7 +58,7 @@ const ALL_ROLES = [
 ];
 
 export default function Admin() {
-  const { user, loading, isSimulatingUser, setIsSimulatingUser } = useAuth();
+  const { user, loading, isSimulatingUser, setIsSimulatingUser, login, register } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [editingSeries, setEditingSeries] = useState<Series | null>(null);
@@ -363,38 +358,25 @@ export default function Admin() {
     setAuthError("");
     let email = loginUser;
 
-    // Convert username to email format for Firebase
+    // Convert username to email format
     if (loginUser === "Mr.V") email = "Mr.V@admin.com";
     else if (!email.includes("@")) email = `${loginUser}@admin.com`;
 
     try {
-      await signInWithEmailAndPassword(auth, email, loginPass);
+      await login(email, loginPass);
     } catch (error: any) {
       console.error(error);
-      if (
-        error.code === "auth/user-not-found" ||
-        error.code === "auth/invalid-credential"
-      ) {
+      if (error.message.includes("یافت نشد") || error.message.includes("not found")) {
         try {
           if (loginUser === "Mr.V" && loginPass === "Amir138484") {
-            await createUserWithEmailAndPassword(auth, email, loginPass);
+            await register(email, "Mr.V", loginPass);
             return;
           }
         } catch (createErr: any) {
-          if (createErr.code === "auth/operation-not-allowed") {
-            setAuthError(
-              'Authentication Error: Please enable "Email/Password" provider in the Firebase Console to use this login method.',
-            );
-            return;
-          }
           setAuthError(createErr.message);
         }
-      } else if (error.code === "auth/operation-not-allowed") {
-        setAuthError(
-          'Authentication Error: Please enable "Email/Password" provider in the Firebase Console (Authentication > Sign-in method).',
-        );
       } else {
-        setAuthError("Login Failed: " + error.message);
+        setAuthError("ورود ناموفق بود: " + error.message);
       }
     }
   };

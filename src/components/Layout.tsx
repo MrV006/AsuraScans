@@ -38,7 +38,7 @@ export function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="flex flex-col min-h-screen">
       {isSimulatingUser && (
-        <div className="fixed bottom-6 left-4 right-4 md:left-auto md:right-6 md:max-w-md bg-amber-500 text-black text-xs font-black z-[100] rounded-2xl p-4 shadow-2xl border border-amber-600/30 flex flex-col gap-3.5 animate-fade-in" dir="rtl">
+        <div className="fixed bottom-6 left-4 right-4 md:left-auto md:right-6 md:max-w-sm bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 text-black text-xs font-black z-[100] rounded-2xl p-4 md:p-5 shadow-2xl shadow-amber-500/20 border border-amber-400/50 flex flex-col gap-3 md:gap-4 animate-fade-in transition-all" dir="rtl">
           <div className="flex items-start gap-2.5">
             <span className="relative flex h-2.5 w-2.5 mt-1 flex-shrink-0">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-black opacity-75"></span>
@@ -46,7 +46,7 @@ export function Layout({ children }: { children: ReactNode }) {
             </span>
             <div className="flex-1">
               <h4 className="font-black text-sm text-black mb-1 font-sans">حالت شبیه‌ساز فعال است</h4>
-              <p className="text-black/85 leading-relaxed text-xs font-medium">
+              <p className="text-black/90 leading-relaxed text-[11px] font-bold">
                 شما کل سایت (از جمله پرداخت چپترها) را مانند یک کاربر معمولی بدون نقش و دسترسی مشاهده می‌کنید.
               </p>
             </div>
@@ -54,7 +54,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="flex items-center justify-end gap-3 border-t border-black/15 pt-3">
             <button
               onClick={() => setIsSimulatingUser(false)}
-              className="w-full bg-black hover:bg-zinc-900 text-amber-500 transition-colors px-4 py-2.5 rounded-xl font-black text-xs text-center shadow-lg"
+              className="w-full bg-black hover:bg-zinc-900 text-amber-500 transition-colors px-4 py-2.5 rounded-xl font-black text-xs text-center shadow-lg active:scale-95 transition-transform"
             >
               خروج از شبیه‌ساز و بازگشت به مدیریت
             </button>

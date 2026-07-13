@@ -25,7 +25,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
-  const { user, profile } = useAuth();
+  const { user, profile, setShowSetupModal } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
 
   const fetchComments = async () => {
@@ -193,7 +193,19 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
       </h3>
 
       {user ? (
-        !replyingTo && renderCommentForm()
+        profile?.hasCompletedSetup ? (
+          !replyingTo && renderCommentForm()
+        ) : (
+          <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 text-center mb-8 flex flex-col items-center gap-3" dir="rtl">
+            <p className="text-zinc-300 text-sm font-bold">برای ارسال دیدگاه، ابتدا باید اطلاعات حساب کاربری خود را تکمیل کنید.</p>
+            <button
+              onClick={() => setShowSetupModal(true)}
+              className="py-2.5 px-6 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-xs rounded-xl transition-all shadow-lg"
+            >
+              تکمیل اطلاعات حساب کاربری
+            </button>
+          </div>
+        )
       ) : (
         <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-xl p-6 text-center mb-8">
           <p className="text-zinc-400 mb-4">Please log in to join the discussion.</p>
@@ -244,7 +256,16 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
                      <ThumbsDown size={14} /> {comment.dislikes?.length || 0}
                    </button>
                    {user && (
-                     <button onClick={() => setReplyingTo(comment.id)} className="flex items-center gap-1 text-xs font-bold text-zinc-500 hover:text-white transition-colors ml-auto">
+                     <button 
+                       onClick={() => {
+                         if (profile?.hasCompletedSetup) {
+                           setReplyingTo(comment.id);
+                         } else {
+                           setShowSetupModal(true);
+                         }
+                       }} 
+                       className="flex items-center gap-1 text-xs font-bold text-zinc-500 hover:text-white transition-colors ml-auto"
+                     >
                        <MessageSquare size={14} /> Reply
                      </button>
                    )}

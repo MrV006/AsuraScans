@@ -2,14 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Search, User, Menu, X, Library, Bell, ChevronDown, LogOut, Settings, Check, Trophy } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { auth } from '../lib/firebase';
-import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNotifications } from '../hooks/useNotifications';
 import { AuthModal } from './AuthModal';
 
 export function Navbar() {
-  const { user, profile, isSimulatingUser } = useAuth();
+  const { user, profile, isSimulatingUser, logout } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const navigate = useNavigate();
   const location = useLocation();
@@ -18,10 +16,18 @@ export function Navbar() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const notificationsRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    const current = location.pathname;
+    if (current !== '/profile' && current !== '/admin') {
+      sessionStorage.setItem('asura_last_main_path', current + location.search);
+    }
+  }, [location]);
+
   const handleProfileClick = (e: React.MouseEvent) => {
     e.preventDefault();
     if (location.pathname === '/profile') {
-      navigate(-1);
+      const backPath = sessionStorage.getItem('asura_last_main_path') || '/';
+      navigate(backPath);
     } else {
       navigate('/profile');
     }
@@ -30,7 +36,8 @@ export function Navbar() {
   const handleSettingsClick = (e: React.MouseEvent) => {
     e.preventDefault();
     if (location.pathname === '/admin') {
-      navigate(-1);
+      const backPath = sessionStorage.getItem('asura_last_main_path') || '/';
+      navigate(backPath);
     } else {
       navigate('/admin');
     }
@@ -59,8 +66,8 @@ export function Navbar() {
 
   return (
     <>
-      <nav className="fixed top-0 left-0 right-0 h-16 bg-[var(--color-asura-card)]/90 backdrop-blur-md border-b border-[var(--color-asura-border)] z-50 flex items-center px-4 md:px-8 transition-all duration-200">
-      <div className="flex items-center gap-8 w-full max-w-7xl mx-auto">
+      <nav className="fixed top-0 left-0 right-0 h-16 bg-[var(--color-asura-card)]/90 backdrop-blur-md border-b border-[var(--color-asura-border)] z-50 flex items-center px-3 sm:px-6 md:px-8 transition-all duration-200">
+      <div className="flex items-center gap-2 sm:gap-4 md:gap-8 w-full max-w-7xl mx-auto">
         {/* Logo */}
         <Link to="/" className="flex items-center flex-shrink-0">
           <span className="text-2xl font-black tracking-tighter text-[var(--color-asura-accent)]">ASURA<span className="text-white">SCANS</span></span>
@@ -113,7 +120,7 @@ export function Navbar() {
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 12, scale: 0.95 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute right-[-12px] sm:right-0 mt-3 w-[calc(100vw-32px)] sm:w-[380px] md:w-[420px] bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl shadow-2xl overflow-hidden z-50 flex flex-col max-h-[80vh] text-right"
+                  className="absolute right-[-4px] sm:right-0 mt-3 w-[calc(100vw-40px)] sm:w-[380px] md:w-[420px] bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl shadow-2xl overflow-hidden z-50 flex flex-col max-h-[80vh] text-right"
                   dir="rtl"
                 >
                   <div className="flex items-center justify-between px-4 py-3.5 border-b border-white/5 bg-black/20">
@@ -181,7 +188,7 @@ export function Navbar() {
           
           {user ? (
             <div className="flex items-center gap-1.5 md:gap-2">
-              {!isSimulatingUser && (user.email === 'amirrezaveisi45@gmail.com' || user.email === 'Mr.V@admin.com') && (
+              {!isSimulatingUser && (profile?.role === 'admin' || user.email === 'amirrezaveisi45@gmail.com' || user.email === 'Mr.V@admin.com') && (
                 <button 
                   onClick={handleSettingsClick} 
                   className="text-zinc-400 hover:text-[var(--color-asura-accent-light)] transition-colors p-1.5 rounded-full hover:bg-white/5" 
@@ -205,7 +212,7 @@ export function Navbar() {
                   {profile?.displayName || 'User'}
                 </span>
               </button>
-              <button onClick={() => signOut(auth)} className="text-zinc-400 hover:text-red-400 transition-colors p-1.5 rounded-full hover:bg-white/5" title="Sign out">
+              <button onClick={() => logout()} className="text-zinc-400 hover:text-red-400 transition-colors p-1.5 rounded-full hover:bg-white/5" title="Sign out">
                 <LogOut size={16} />
               </button>
             </div>
@@ -258,7 +265,7 @@ export function Navbar() {
                 My Profile
               </button>
             )}
-            {!isSimulatingUser && user && (user.email === 'amirrezaveisi45@gmail.com' || user.email === 'Mr.V@admin.com') && (
+            {!isSimulatingUser && user && (profile?.role === 'admin' || user.email === 'amirrezaveisi45@gmail.com' || user.email === 'Mr.V@admin.com') && (
               <button 
                 onClick={(e) => {
                   setMobileMenuOpen(false);

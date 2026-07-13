@@ -7,11 +7,9 @@ import { seedDatabase } from '../lib/seed';
 import { useBookmarks, useHistory } from '../hooks/useUserActivity';
 import { formatDistanceToNow } from 'date-fns';
 import { apiClient, getSocketInstance } from '../lib/apiClient';
-import { doc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 
 export default function Profile() {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, setShowSetupModal } = useAuth();
   const { bookmarks, loading: bookmarksLoading, removeBookmark } = useBookmarks();
   const { history, loading: historyLoading } = useHistory();
   const [activeTab, setActiveTab] = useState<'bookmarks' | 'history' | 'comments' | 'settings' | 'wallet'>('bookmarks');
@@ -40,7 +38,7 @@ export default function Profile() {
   // Load backend user info on mount to display wallet balance
   useEffect(() => {
     if (user) {
-      apiClient.getUser(user.uid).then(setDbUser).catch(console.error);
+      apiClient.getUser(user.id || user.uid).then(setDbUser).catch(console.error);
     }
   }, [user]);
 
@@ -48,9 +46,10 @@ export default function Profile() {
     if (!user) return;
     setLoadingWallet(true);
     try {
-      const uData = await apiClient.getUser(user.uid);
+      const userId = user.id || user.uid;
+      const uData = await apiClient.getUser(userId);
       setDbUser(uData);
-      const txs = await apiClient.getWalletTransactions(user.uid);
+      const txs = await apiClient.getWalletTransactions(userId);
       setTransactions(txs);
     } catch (err) {
       console.error("Failed to load wallet data:", err);
@@ -67,15 +66,16 @@ export default function Profile() {
 
   useEffect(() => {
     if (!user) return;
+    const userId = user.id || user.uid;
     const socket = getSocketInstance();
     const handleUpdate = (data: any) => {
-      if (data.userId === user.uid) {
+      if (data.userId === userId) {
         setDbUser(prev => prev ? { ...prev, walletBalance: data.balance } : { walletBalance: data.balance });
-        apiClient.getWalletTransactions(user.uid).then(setTransactions).catch(console.error);
+        apiClient.getWalletTransactions(userId).then(setTransactions).catch(console.error);
       }
     };
     
-    const socketEventName = `wallet:updated:${user.uid}`;
+    const socketEventName = `wallet:updated:${userId}`;
     socket.on(socketEventName, handleUpdate);
     return () => {
       socket.off(socketEventName, handleUpdate);
@@ -106,9 +106,10 @@ export default function Profile() {
     if (!user) return;
     setSavingProfile(true);
     try {
-      // 1. Sync to backend SQL/JSON database
+      const userId = user.id || user.uid;
+      // Sync to backend SQL/JSON database
       await apiClient.saveUser({
-        id: user.uid,
+        id: userId,
         email: user.email || '',
         displayName: displayName || 'کاربر مهمان',
         avatarUrl: avatarUrl || '',
@@ -116,17 +117,6 @@ export default function Profile() {
         lastName,
         phoneNumber
       });
-
-      // 2. Sync to Firebase Firestore
-      const userRef = doc(db, 'users', user.uid);
-      await setDoc(userRef, {
-        displayName: displayName || 'کاربر مهمان',
-        avatarUrl: avatarUrl || '',
-        firstName,
-        lastName,
-        phoneNumber,
-        updatedAt: new Date()
-      }, { merge: true });
 
       alert("حساب کاربری با موفقیت بروزرسانی شد!");
     } catch (e: any) {
@@ -578,7 +568,20 @@ export default function Profile() {
               )}
 
               {activeTab === 'wallet' && (
-                loadingWallet ? (
+                !profile?.hasCompletedSetup ? (
+                  <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-8 text-center flex flex-col items-center gap-4 justify-center" dir="rtl">
+                    <div className="w-14 h-14 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl flex items-center justify-center">
+                      <Wallet size={28} />
+                    </div>
+                    <p className="text-zinc-300 text-sm font-bold">برای استفاده از کیف پول و شارژ حساب، ابتدا باید اطلاعات کاربری خود را تکمیل کنید.</p>
+                    <button
+                      onClick={() => setShowSetupModal(true)}
+                      className="py-2.5 px-6 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-xs rounded-xl transition-all shadow-lg"
+                    >
+                      تکمیل اطلاعات حساب کاربری
+                    </button>
+                  </div>
+                ) : loadingWallet ? (
                   <div className="flex justify-center items-center h-64">
                     <div className="w-8 h-8 border-4 border-slate-700 border-t-[var(--color-asura-accent)] rounded-full animate-spin"></div>
                   </div>
