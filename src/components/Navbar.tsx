@@ -5,16 +5,26 @@ import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNotifications } from '../hooks/useNotifications';
 import { AuthModal } from './AuthModal';
+import { useSettings } from '../contexts/SettingsContext';
 
 export function Navbar() {
   const { user, profile, isSimulatingUser, logout } = useAuth();
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
+  const { settings } = useSettings();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const notificationsRef = useRef<HTMLDivElement>(null);
+
+  const isStaffOrAdmin = user && profile && (
+    profile.role === 'admin' ||
+    profile.role === 'staff' ||
+    profile.roles?.some((r: string) => r === 'super_admin' || r === 'admin' || r === 'translator' || r === 'cleaner' || r === 'editor' || r === 'typesetter' || r === 'proofreader') ||
+    user.email === 'amirrezaveisi45@gmail.com' ||
+    user.email === 'Mr.V@admin.com'
+  );
 
   useEffect(() => {
     const current = location.pathname;
@@ -70,7 +80,21 @@ export function Navbar() {
       <div className="flex items-center gap-2 sm:gap-4 md:gap-8 w-full max-w-7xl mx-auto">
         {/* Logo */}
         <Link to="/" className="flex items-center flex-shrink-0">
-          <span className="text-2xl font-black tracking-tighter text-[var(--color-asura-accent)]">ASURA<span className="text-white">SCANS</span></span>
+          {settings?.logoUrl ? (
+            <img 
+              src={settings.logoUrl} 
+              alt={settings.siteName || "AsuraClone"} 
+              className="h-9 w-auto object-contain max-w-[150px] sm:max-w-[180px]" 
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <span className="text-xl sm:text-2xl font-black tracking-tighter text-[var(--color-asura-accent)]">
+              {(settings?.siteName || "ASURA SCANS").split(' ')[0]}
+              <span className="text-white">
+                {(settings?.siteName || "ASURA SCANS").split(' ').slice(1).join(' ') ? ' ' + (settings?.siteName || "ASURA SCANS").split(' ').slice(1).join(' ') : ''}
+              </span>
+            </span>
+          )}
         </Link>
 
         {/* Desktop Nav */}
@@ -120,7 +144,7 @@ export function Navbar() {
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 12, scale: 0.95 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute right-[-4px] sm:right-0 mt-3 w-[calc(100vw-40px)] sm:w-[380px] md:w-[420px] bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl shadow-2xl overflow-hidden z-50 flex flex-col max-h-[80vh] text-right"
+                  className="fixed top-16 left-4 right-4 sm:absolute sm:top-full sm:left-auto sm:right-0 mt-3 w-auto sm:w-[380px] md:w-[420px] bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl shadow-2xl overflow-hidden z-50 flex flex-col max-h-[80vh] text-right"
                   dir="rtl"
                 >
                   <div className="flex items-center justify-between px-4 py-3.5 border-b border-white/5 bg-black/20">
@@ -188,7 +212,7 @@ export function Navbar() {
           
           {user ? (
             <div className="flex items-center gap-1.5 md:gap-2">
-              {!isSimulatingUser && (profile?.role === 'admin' || user.email === 'amirrezaveisi45@gmail.com' || user.email === 'Mr.V@admin.com') && (
+              {!isSimulatingUser && isStaffOrAdmin && (
                 <button 
                   onClick={handleSettingsClick} 
                   className="text-zinc-400 hover:text-[var(--color-asura-accent-light)] transition-colors p-1.5 rounded-full hover:bg-white/5" 
@@ -265,7 +289,7 @@ export function Navbar() {
                 My Profile
               </button>
             )}
-            {!isSimulatingUser && user && (profile?.role === 'admin' || user.email === 'amirrezaveisi45@gmail.com' || user.email === 'Mr.V@admin.com') && (
+            {!isSimulatingUser && user && isStaffOrAdmin && (
               <button 
                 onClick={(e) => {
                   setMobileMenuOpen(false);

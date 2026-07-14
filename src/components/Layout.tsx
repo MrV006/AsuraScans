@@ -1,6 +1,6 @@
 import { ReactNode, useEffect } from 'react';
 import { Navbar } from './Navbar';
-import { Github, Twitter, MessageCircle } from 'lucide-react';
+import { Github, Twitter, MessageCircle, Instagram, Send } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
@@ -12,7 +12,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   useEffect(() => {
-    document.title = 'ASURA SCANS CLONE';
+    document.title = settings.siteName || 'ASURA SCANS';
     if (settings.seoDescription) {
       let meta = document.querySelector('meta[name="description"]');
       if (!meta) {
@@ -22,7 +22,7 @@ export function Layout({ children }: { children: ReactNode }) {
       }
       meta.setAttribute('content', settings.seoDescription);
     }
-  }, [settings.seoDescription]);
+  }, [settings.siteName, settings.seoDescription]);
 
   if (settings.maintenanceMode && window.location.pathname !== '/admin') {
     return (
@@ -79,21 +79,42 @@ export function Layout({ children }: { children: ReactNode }) {
         <div className="max-w-7xl mx-auto px-4 md:px-8 grid grid-cols-1 md:grid-cols-4 gap-8">
           <div className="col-span-1 md:col-span-2">
              <div className="flex items-center flex-shrink-0 mb-4">
-               <span className="text-2xl font-black tracking-tighter text-[var(--color-asura-accent)]">ASURA<span className="text-white">SCANS</span></span>
+               <span className="text-2xl font-black tracking-tighter text-[var(--color-asura-accent)]">
+                 {(settings.siteName || 'ASURA SCANS').split(' ')[0]}
+                 <span className="text-white">
+                   {(settings.siteName || 'ASURA SCANS').split(' ').slice(1).join(' ') ? ' ' + (settings.siteName || 'ASURA SCANS').split(' ').slice(1).join(' ') : ''}
+                 </span>
+               </span>
              </div>
             <p className="text-zinc-500 text-xs leading-relaxed max-w-sm">
               {settings.aboutText}
             </p>
-            <div className="flex space-x-3 mt-6">
-              <a href={settings.twitterUrl} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-full border border-white/10 hover:border-[var(--color-asura-accent)] bg-white/5 flex items-center justify-center text-zinc-400 hover:text-white transition-all">
-                <Twitter size={14} />
-              </a>
-              <a href={settings.discordUrl} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-full border border-white/10 hover:border-[var(--color-asura-accent)] bg-white/5 flex items-center justify-center text-zinc-400 hover:text-white transition-all">
-                <MessageCircle size={14} />
-              </a>
-              <a href={settings.githubUrl} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-full border border-white/10 hover:border-[var(--color-asura-accent)] bg-white/5 flex items-center justify-center text-zinc-400 hover:text-white transition-all">
-                <Github size={14} />
-              </a>
+            <div className="flex flex-wrap gap-3 mt-6">
+              {settings.twitterUrl && settings.twitterUrl !== '#' && settings.twitterUrl !== '' && (
+                <a href={settings.twitterUrl} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-full border border-white/10 hover:border-[var(--color-asura-accent)] bg-white/5 flex items-center justify-center text-zinc-400 hover:text-white transition-all shadow-md hover:scale-105" title="Twitter">
+                  <Twitter size={14} />
+                </a>
+              )}
+              {settings.discordUrl && settings.discordUrl !== '#' && settings.discordUrl !== '' && (
+                <a href={settings.discordUrl} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-full border border-white/10 hover:border-[var(--color-asura-accent)] bg-white/5 flex items-center justify-center text-zinc-400 hover:text-white transition-all shadow-md hover:scale-105" title="Discord">
+                  <MessageCircle size={14} />
+                </a>
+              )}
+              {settings.githubUrl && settings.githubUrl !== '#' && settings.githubUrl !== '' && (
+                <a href={settings.githubUrl} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-full border border-white/10 hover:border-[var(--color-asura-accent)] bg-white/5 flex items-center justify-center text-zinc-400 hover:text-white transition-all shadow-md hover:scale-105" title="GitHub">
+                  <Github size={14} />
+                </a>
+              )}
+              {settings.telegramUrl && settings.telegramUrl !== '#' && settings.telegramUrl !== '' && (
+                <a href={settings.telegramUrl} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-full border border-white/10 hover:border-[var(--color-asura-accent)] bg-white/5 flex items-center justify-center text-zinc-400 hover:text-white transition-all shadow-md hover:scale-105" title="Telegram">
+                  <Send size={14} />
+                </a>
+              )}
+              {settings.instagramUrl && settings.instagramUrl !== '#' && settings.instagramUrl !== '' && (
+                <a href={settings.instagramUrl} target="_blank" rel="noopener noreferrer" className="w-8 h-8 rounded-full border border-white/10 hover:border-[var(--color-asura-accent)] bg-white/5 flex items-center justify-center text-zinc-400 hover:text-white transition-all shadow-md hover:scale-105" title="Instagram">
+                  <Instagram size={14} />
+                </a>
+              )}
             </div>
           </div>
           
@@ -117,8 +138,16 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </div>
         <div className="max-w-7xl mx-auto px-4 md:px-8 mt-12 pt-6 border-t border-white/5 text-center text-[10px] uppercase font-bold tracking-widest text-zinc-600 flex flex-col gap-2">
-          <div>&copy; {new Date().getFullYear()} ASURA SCANS &bull; MADE BY FANS FOR FANS &bull; TERMS OF SERVICE &bull; PRIVACY POLICY</div>
-          <div className="text-[9px] text-zinc-700">{settings.seoKeywords}</div>
+          <div className="flex flex-wrap justify-center items-center gap-2 md:gap-4">
+            <span>&copy; {new Date().getFullYear()} {settings.footerCopyrightText || 'ASURA SCANS'}</span>
+            <span className="text-zinc-800">&bull;</span>
+            <span className="text-zinc-500">{settings.footerSubtext || 'MADE BY FANS FOR FANS'}</span>
+            <span className="text-zinc-800">&bull;</span>
+            <Link to="/terms" className="hover:text-[var(--color-asura-accent)] text-zinc-400 transition-colors">TERMS OF SERVICE</Link>
+            <span className="text-zinc-800">&bull;</span>
+            <Link to="/privacy" className="hover:text-[var(--color-asura-accent)] text-zinc-400 transition-colors">PRIVACY POLICY</Link>
+          </div>
+          <div className="text-[9px] text-zinc-700 mt-2">{settings.seoKeywords}</div>
         </div>
       </footer>
     </div>

@@ -102,7 +102,7 @@ export default function Series() {
   // Find the first chapter to read, or the last read chapter if history exists
   const firstChapter = publishedChapters.length > 0 ? publishedChapters[publishedChapters.length - 1] : null;
   const readLink = history ? `/reader/${id}/${history.chapterId}` : (firstChapter ? `/reader/${id}/${firstChapter.id}` : '#');
-  const readText = history ? `ادامه مطالعه (فصل ${history.chapterNumber})` : 'شروع به خواندن';
+  const readText = history ? `ادامه مطالعه (چپتر ${history.chapterNumber})` : 'شروع به خواندن';
 
   // Admin and Contributor Authorization
   const isGlobalAdmin = profile?.role === 'admin' && !isSimulatingUser;
@@ -539,9 +539,9 @@ export default function Series() {
             <div>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold text-white uppercase tracking-tighter flex items-center gap-2">
-                  <span className="w-1 h-5 bg-[var(--color-asura-accent)] rounded-full"></span>فصول منتشر شده
+                  <span className="w-1 h-5 bg-[var(--color-asura-accent)] rounded-full"></span>چپترهای منتشر شده
                 </h2>
-                <span className="text-xs font-bold text-zinc-500">{chaptersList.length} فصل در کل</span>
+                <span className="text-xs font-bold text-zinc-500">{chaptersList.length} چپتر در کل</span>
               </div>
               
               <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-xl divide-y divide-white/5 overflow-hidden max-h-[600px] overflow-y-auto overflow-x-hidden custom-scrollbar">
@@ -559,7 +559,7 @@ export default function Series() {
                       </div>
                       <div>
                         <h4 className="text-sm font-bold text-zinc-200 group-hover:text-[var(--color-asura-accent)] transition-colors flex items-center">
-                          {ch.title || `فصل ${ch.number}`}
+                          {ch.title || `چپتر ${ch.number}`}
                           {ch.isPending && (
                             <span className="mr-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[9px] font-black px-2 py-0.5 rounded-full">
                               در انتظار تایید

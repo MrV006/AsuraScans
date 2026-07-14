@@ -17,6 +17,7 @@ import {
   EyeOff,
 } from "lucide-react";
 import { Series } from "../lib/types";
+import CooperationTab from "../components/CooperationTab";
 
 import { ImageUploader } from "../components/ImageUploader";
 import { SortableImageList } from "../components/SortableImageList";
@@ -58,7 +59,7 @@ const ALL_ROLES = [
 ];
 
 export default function Admin() {
-  const { user, loading, isSimulatingUser, setIsSimulatingUser, login, register } = useAuth();
+  const { user, profile, loading, isSimulatingUser, setIsSimulatingUser, login, register } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [editingSeries, setEditingSeries] = useState<Series | null>(null);
@@ -101,8 +102,20 @@ export default function Admin() {
     twitterUrl: "",
     discordUrl: "",
     githubUrl: "",
+    telegramUrl: "",
+    instagramUrl: "",
     seoKeywords: "",
-    seoDescription: ""
+    seoDescription: "",
+    siteName: "AsuraClone",
+    footerCopyrightText: "ASURA SCANS",
+    footerSubtext: "MADE BY FANS FOR FANS",
+    logoUrl: "",
+    primaryColor: "#4f46e5",
+    hoverColor: "#4338ca",
+    lightColor: "#818cf8",
+    backgroundColor: "#0a0a0c",
+    cardColor: "#0f0f12",
+    siteFont: "Inter"
   });
 
   // activeTab
@@ -118,6 +131,7 @@ export default function Admin() {
     | "reports"
     | "settings"
     | "wallet"
+    | "cooperation"
   >("dashboard");
 
   // Auth Forms
@@ -807,6 +821,15 @@ export default function Admin() {
               <Settings size={18} /> تنظیمات سایت
             </button>
           )}
+
+          {(isSuperAdmin || (profile && ['admin', 'translator', 'cleaner', 'editor'].includes(profile.role || ''))) && (
+            <button
+              onClick={() => setActiveTab("cooperation")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "cooperation" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <UsersIcon size={18} /> کارهای تیمی و همکاری
+            </button>
+          )}
         </div>
 
         <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 md:p-8 overflow-hidden">
@@ -1231,7 +1254,7 @@ export default function Admin() {
                             <div className="flex items-center gap-3">
                               <img
                                 src={
-                                  u.avatarUrl || "https://via.placeholder.com/40"
+                                  u.avatarUrl || "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'></circle><path d='M18 20a6 6 0 0 0-12 0'></path><circle cx='12' cy='10' r='4'></circle></svg>"
                                 }
                                 alt="avatar"
                                 className="w-8 h-8 object-cover rounded-full bg-zinc-800"
@@ -2318,6 +2341,182 @@ export default function Admin() {
                 </div>
 
                 <div className="bg-black/20 p-6 rounded-xl border border-white/5 space-y-6">
+                  <h3 className="text-sm font-bold text-white uppercase border-b border-white/10 pb-2 flex items-center gap-2">
+                    Branding & Personalization (شخصی‌سازی و برندینگ سایت)
+                  </h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">اسم وبسایت (Website Name)</label>
+                      <input 
+                        value={siteSettings.siteName || ""} 
+                        onChange={e => setSiteSettings({...siteSettings, siteName: e.target.value})} 
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white" 
+                        placeholder="Asura Scans"
+                        required
+                      />
+                      <p className="text-zinc-500 text-[10px] mt-1">این اسم در عنوان صفحات، فوتر و کپی‌رایت نمایش داده خواهد شد.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">فونت وبسایت (Website Font)</label>
+                      <select 
+                        value={siteSettings.siteFont || "Inter"} 
+                        onChange={e => setSiteSettings({...siteSettings, siteFont: e.target.value})} 
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white bg-[#0f0f12]"
+                      >
+                        <option value="Inter">Inter (Sans-serif انگلیسی)</option>
+                        <option value="Outfit">Outfit (Geometric انگلیسی)</option>
+                        <option value="Vazirmatn">Vazirmatn (فونت فارسی مدرن و خوانا)</option>
+                        <option value="Rubik">Rubik (فونت فارسی و انگلیسی فانتزی)</option>
+                        <option value="Lalezar">Lalezar (فونت فارسی ضخیم و جذاب)</option>
+                      </select>
+                      <p className="text-zinc-500 text-[10px] mt-1">تغییر فونت به طور کامل بر روی کلیه متون وبسایت اعمال خواهد شد.</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">لوگو اختصاصی وبسایت (Custom Logo)</label>
+                    <div className="flex flex-col md:flex-row gap-4 items-stretch">
+                      <div className="flex-1 space-y-3">
+                        <input 
+                          value={siteSettings.logoUrl || ""} 
+                          onChange={e => setSiteSettings({...siteSettings, logoUrl: e.target.value})} 
+                          className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white" 
+                          placeholder="https://example.com/logo.png"
+                        />
+                        {siteSettings.logoUrl && (
+                          <div className="p-3 bg-white/5 rounded-lg border border-white/5 inline-flex items-center gap-3">
+                            <span className="text-xs text-zinc-400">پیش‌نمایش لوگو:</span>
+                            <img src={siteSettings.logoUrl} alt="Logo Preview" className="h-8 w-auto object-contain" referrerPolicy="no-referrer" />
+                            <button 
+                              type="button" 
+                              onClick={() => setSiteSettings({...siteSettings, logoUrl: ""})}
+                              className="text-red-500 hover:text-red-400 text-xs font-bold"
+                            >
+                              حذف لوگو
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="w-full md:w-64 bg-black/10 border border-white/10 border-dashed rounded-xl p-3 flex flex-col justify-center items-center">
+                        <span className="text-xs text-zinc-400 mb-2">آپلود مستقیم فایل لوگو:</span>
+                        <ImageUploader 
+                          onUpload={(urls) => {
+                            if (urls && urls.length > 0) {
+                              setSiteSettings(prev => ({ ...prev, logoUrl: urls[0] }));
+                            }
+                          }} 
+                          multiple={false}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-zinc-500 text-[10px] mt-2">اگر لوگویی اضافه کنید، به جای نام متنی وبسایت در هدر (بالا) نمایش داده می‌شود. اگر کادر را خالی بگذارید، نام متنی نوشته شده در بالا نمایش داده خواهد شد.</p>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold text-white border-b border-white/5 pb-1 uppercase">رنگ‌بندی وبسایت (Website Colors)</h4>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                      {/* Primary Accent Color */}
+                      <div className="bg-black/30 p-4 rounded-xl border border-white/5 space-y-2">
+                        <label className="block text-xs font-bold text-zinc-400">رنگ اصلی اکستور (Accent Color)</label>
+                        <div className="flex gap-2">
+                          <input 
+                            type="color" 
+                            value={siteSettings.primaryColor || "#4f46e5"} 
+                            onChange={e => setSiteSettings({...siteSettings, primaryColor: e.target.value})}
+                            className="w-10 h-10 rounded border border-white/10 cursor-pointer bg-transparent"
+                          />
+                          <input 
+                            type="text" 
+                            value={siteSettings.primaryColor || ""} 
+                            onChange={e => setSiteSettings({...siteSettings, primaryColor: e.target.value})}
+                            className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Hover Color */}
+                      <div className="bg-black/30 p-4 rounded-xl border border-white/5 space-y-2">
+                        <label className="block text-xs font-bold text-zinc-400">رنگ هاور اکستور (Hover Color)</label>
+                        <div className="flex gap-2">
+                          <input 
+                            type="color" 
+                            value={siteSettings.hoverColor || "#4338ca"} 
+                            onChange={e => setSiteSettings({...siteSettings, hoverColor: e.target.value})}
+                            className="w-10 h-10 rounded border border-white/10 cursor-pointer bg-transparent"
+                          />
+                          <input 
+                            type="text" 
+                            value={siteSettings.hoverColor || ""} 
+                            onChange={e => setSiteSettings({...siteSettings, hoverColor: e.target.value})}
+                            className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Light Accent Color */}
+                      <div className="bg-black/30 p-4 rounded-xl border border-white/5 space-y-2">
+                        <label className="block text-xs font-bold text-zinc-400">رنگ روشن اکستور (Light Accent Color)</label>
+                        <div className="flex gap-2">
+                          <input 
+                            type="color" 
+                            value={siteSettings.lightColor || "#818cf8"} 
+                            onChange={e => setSiteSettings({...siteSettings, lightColor: e.target.value})}
+                            className="w-10 h-10 rounded border border-white/10 cursor-pointer bg-transparent"
+                          />
+                          <input 
+                            type="text" 
+                            value={siteSettings.lightColor || ""} 
+                            onChange={e => setSiteSettings({...siteSettings, lightColor: e.target.value})}
+                            className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Background Color */}
+                      <div className="bg-black/30 p-4 rounded-xl border border-white/5 space-y-2">
+                        <label className="block text-xs font-bold text-zinc-400">رنگ پس‌زمینه (Background Color)</label>
+                        <div className="flex gap-2">
+                          <input 
+                            type="color" 
+                            value={siteSettings.backgroundColor || "#0a0a0c"} 
+                            onChange={e => setSiteSettings({...siteSettings, backgroundColor: e.target.value})}
+                            className="w-10 h-10 rounded border border-white/10 cursor-pointer bg-transparent"
+                          />
+                          <input 
+                            type="text" 
+                            value={siteSettings.backgroundColor || ""} 
+                            onChange={e => setSiteSettings({...siteSettings, backgroundColor: e.target.value})}
+                            className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Card Background Color */}
+                      <div className="bg-black/30 p-4 rounded-xl border border-white/5 space-y-2">
+                        <label className="block text-xs font-bold text-zinc-400">رنگ پس‌زمینه کارت‌ها (Card Color)</label>
+                        <div className="flex gap-2">
+                          <input 
+                            type="color" 
+                            value={siteSettings.cardColor || "#0f0f12"} 
+                            onChange={e => setSiteSettings({...siteSettings, cardColor: e.target.value})}
+                            className="w-10 h-10 rounded border border-white/10 cursor-pointer bg-transparent"
+                          />
+                          <input 
+                            type="text" 
+                            value={siteSettings.cardColor || ""} 
+                            onChange={e => setSiteSettings({...siteSettings, cardColor: e.target.value})}
+                            className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-black/20 p-6 rounded-xl border border-white/5 space-y-6">
                   <h3 className="text-sm font-bold text-white uppercase border-b border-white/10 pb-2">SEO & Metadata</h3>
                   
                   <div>
@@ -2354,29 +2553,66 @@ export default function Admin() {
                     />
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Copyright Text (متن کپی‌رایت)</label>
+                      <input 
+                        value={siteSettings.footerCopyrightText || ""} 
+                        onChange={e => setSiteSettings({...siteSettings, footerCopyrightText: e.target.value})} 
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white" 
+                        placeholder="ASURA SCANS"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Copyright Subtext (زیرنویس کپی‌رایت)</label>
+                      <input 
+                        value={siteSettings.footerSubtext || ""} 
+                        onChange={e => setSiteSettings({...siteSettings, footerSubtext: e.target.value})} 
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white" 
+                        placeholder="MADE BY FANS FOR FANS"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
                     <div>
                       <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Twitter URL</label>
                       <input 
-                        value={siteSettings.twitterUrl} 
+                        value={siteSettings.twitterUrl || ""} 
                         onChange={e => setSiteSettings({...siteSettings, twitterUrl: e.target.value})} 
-                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white" 
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white text-xs font-mono" 
                       />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Discord URL</label>
                       <input 
-                        value={siteSettings.discordUrl} 
+                        value={siteSettings.discordUrl || ""} 
                         onChange={e => setSiteSettings({...siteSettings, discordUrl: e.target.value})} 
-                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white" 
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white text-xs font-mono" 
                       />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">GitHub URL</label>
                       <input 
-                        value={siteSettings.githubUrl} 
+                        value={siteSettings.githubUrl || ""} 
                         onChange={e => setSiteSettings({...siteSettings, githubUrl: e.target.value})} 
-                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white" 
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white text-xs font-mono" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Telegram URL</label>
+                      <input 
+                        value={siteSettings.telegramUrl || ""} 
+                        onChange={e => setSiteSettings({...siteSettings, telegramUrl: e.target.value})} 
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white text-xs font-mono" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Instagram URL</label>
+                      <input 
+                        value={siteSettings.instagramUrl || ""} 
+                        onChange={e => setSiteSettings({...siteSettings, instagramUrl: e.target.value})} 
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white text-xs font-mono" 
                       />
                     </div>
                   </div>
@@ -2523,7 +2759,7 @@ export default function Admin() {
                                 className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
                               >
                                 <option value="admin_adjustment">شارژ دستی / تغییر توسط مدیریت</option>
-                                <option value="purchase">خرید فصل مانهوا / دسترسی</option>
+                                <option value="purchase">خرید چپتر مانهوا / دسترسی</option>
                                 <option value="system_gift">هدیه سیستم</option>
                               </select>
                             </div>
@@ -2639,7 +2875,7 @@ export default function Admin() {
                                   'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
                                 }`}>
                                   {tx.type === 'admin_adjustment' ? 'تغییر دستی' :
-                                   tx.type === 'purchase' ? 'خرید فصل' : 'سایر'}
+                                   tx.type === 'purchase' ? 'خرید چپتر' : 'سایر'}
                                 </span>
                               </td>
                               <td className="py-3.5 text-zinc-300 font-bold max-w-xs truncate" title={tx.description}>{tx.description || 'بدون توضیحات'}</td>
@@ -2656,6 +2892,18 @@ export default function Admin() {
                 )}
               </div>
             </div>
+          )}
+
+          {activeTab === "cooperation" && (
+            <CooperationTab
+              seriesList={seriesList}
+              user={user}
+              profile={profile}
+              isSuperAdmin={isSuperAdmin}
+              onUpdateSeries={(updatedSeries: any) => {
+                setSeriesList(prev => prev.map(s => s.id === updatedSeries.id ? updatedSeries : s));
+              }}
+            />
           )}
         </div>
       </div>

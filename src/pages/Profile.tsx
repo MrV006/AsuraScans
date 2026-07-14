@@ -386,7 +386,7 @@ export default function Profile() {
                                    <img src={h.seriesData.cover} alt={h.seriesData.title} className="w-12 h-16 object-cover rounded-xl shadow-lg shrink-0" />
                                    <div className="flex-1 min-w-0 text-right">
                                      <h4 className="font-black text-white text-xs line-clamp-1 group-hover:text-[var(--color-asura-accent-light)] transition-colors">{h.seriesData.title}</h4>
-                                     <p className="text-zinc-400 text-[11px] mt-1 font-bold">آخرین مطالعه: فصل {h.chapterNumber}</p>
+                                     <p className="text-zinc-400 text-[11px] mt-1 font-bold">آخرین مطالعه: چپتر {h.chapterNumber}</p>
                                      <p className="text-[9px] text-zinc-600 mt-1 font-mono">
                                        {new Date(h.updatedAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}
                                      </p>
@@ -411,7 +411,7 @@ export default function Profile() {
                                    <img src={h.seriesData.cover} alt={h.seriesData.title} className="w-12 h-16 object-cover rounded-xl shadow-lg shrink-0" />
                                    <div className="flex-1 min-w-0 text-right">
                                      <h4 className="font-black text-white text-xs line-clamp-1 group-hover:text-[var(--color-asura-accent-light)] transition-colors">{h.seriesData.title}</h4>
-                                     <p className="text-zinc-400 text-[11px] mt-1 font-bold">آخرین مطالعه: فصل {h.chapterNumber}</p>
+                                     <p className="text-zinc-400 text-[11px] mt-1 font-bold">آخرین مطالعه: چپتر {h.chapterNumber}</p>
                                      <p className="text-[9px] text-zinc-600 mt-1 font-mono">
                                        {new Date(h.updatedAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}
                                      </p>
@@ -436,7 +436,7 @@ export default function Profile() {
                                    <img src={h.seriesData.cover} alt={h.seriesData.title} className="w-12 h-16 object-cover rounded-xl shadow-lg shrink-0" />
                                    <div className="flex-1 min-w-0 text-right">
                                      <h4 className="font-black text-white text-xs line-clamp-1 group-hover:text-[var(--color-asura-accent-light)] transition-colors">{h.seriesData.title}</h4>
-                                     <p className="text-zinc-400 text-[11px] mt-1 font-bold">آخرین مطالعه: فصل {h.chapterNumber}</p>
+                                     <p className="text-zinc-400 text-[11px] mt-1 font-bold">آخرین مطالعه: چپتر {h.chapterNumber}</p>
                                      <p className="text-[9px] text-zinc-600 mt-1 font-mono">
                                        {new Date(h.updatedAt).toLocaleDateString('fa-IR', { month: 'long', day: 'numeric' })}
                                      </p>
@@ -655,7 +655,7 @@ export default function Profile() {
                                         'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
                                       }`}>
                                         {tx.type === 'admin_adjustment' ? 'تغییر توسط مدیریت' :
-                                         tx.type === 'purchase' ? 'خرید فصل' : 'سایر موارد'}
+                                         tx.type === 'purchase' ? 'خرید چپتر' : 'سایر موارد'}
                                       </span>
                                     </td>
                                     <td className="py-3.5 text-zinc-300 font-bold max-w-xs truncate" title={tx.description}>

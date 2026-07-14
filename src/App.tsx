@@ -13,6 +13,8 @@ import Profile from './pages/Profile';
 import Search from './pages/Search';
 import Admin from './pages/Admin';
 import Leaderboard from './pages/Leaderboard';
+import Terms from './pages/Terms';
+import Privacy from './pages/Privacy';
 import CompleteProfileModal from './components/CompleteProfileModal';
 
 export default function App() {
@@ -28,6 +30,8 @@ export default function App() {
             <Route path="/search" element={<Search />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="/leaderboard" element={<Leaderboard />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/privacy" element={<Privacy />} />
           </Routes>
           <CompleteProfileModal />
         </BrowserRouter>

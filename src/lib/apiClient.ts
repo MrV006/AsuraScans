@@ -17,6 +17,38 @@ export function getSocketInstance(): Socket {
 
 // Complete set of wrapper functions around the Express server endpoints
 export const apiClient = {
+  // Generic HTTP requests for dynamic routes
+  async get(url: string) {
+    const res = await fetch(`${API_URL}${url}`, { headers: this.getHeaders() });
+    return res.json();
+  },
+
+  async post(url: string, data?: any, options?: any) {
+    const res = await fetch(`${API_URL}${url}`, {
+      method: 'POST',
+      headers: {
+        ...this.getHeaders(),
+        ...(options?.headers || {})
+      },
+      body: data ? JSON.stringify(data) : undefined,
+      ...options
+    });
+    return res.json();
+  },
+
+  async put(url: string, data?: any, options?: any) {
+    const res = await fetch(`${API_URL}${url}`, {
+      method: 'PUT',
+      headers: {
+        ...this.getHeaders(),
+        ...(options?.headers || {})
+      },
+      body: data ? JSON.stringify(data) : undefined,
+      ...options
+    });
+    return res.json();
+  },
+
   // Utility header builder for admin requests
   getHeaders(userId?: string) {
     const headers: Record<string, string> = {

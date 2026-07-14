@@ -5,6 +5,8 @@ export interface Chapter {
   title?: string;
   images: string[];
   publishAt?: any;
+  isPending?: boolean;
+  submissions?: any[];
   createdAt: any;
   updatedAt: any;
 }
@@ -27,6 +29,7 @@ export interface Series {
   views?: number;
   type: string;
   chapters?: Chapter[];
+  contributors?: any[];
   createdAt: any;
   updatedAt: any;
 }

@@ -504,7 +504,7 @@ export default function Reader() {
                     />
                   ) : (
                     <div className="max-h-[85vh] aspect-[2/3] w-full flex flex-col items-center justify-center bg-zinc-950 rounded-xl border border-white/5 text-zinc-600 text-xs font-black p-4 text-center">
-                      پایان فصل
+                      پایان چپتر
                     </div>
                   )}
 
@@ -542,7 +542,7 @@ export default function Reader() {
           /* Placeholder for missing images */
           <div className="flex-1 flex flex-col items-center justify-center p-10 mt-20 min-h-[60vh]">
             <div className="w-16 h-16 border-4 border-slate-800 border-t-[var(--color-asura-accent)] rounded-full animate-spin mb-6"></div>
-            <p className="text-slate-500 font-medium">در حال بارگذاری تصاویر فصل...</p>
+            <p className="text-slate-500 font-medium">در حال بارگذاری تصاویر چپتر...</p>
             <p className="text-slate-600 text-xs mt-2 text-center max-w-md">
               تصاویر مانهوا از سرور اختصاصی لود خواهند شد. لطفا شکیبا باشید.
             </p>
@@ -552,7 +552,7 @@ export default function Reader() {
 
         {/* Read Next Navigation Area */}
         <div className="p-6 md:p-10 flex flex-col items-center border-t border-white/5 mt-10 bg-[#0f0f12]" dir="rtl">
-          <h3 className="font-black text-sm text-zinc-400 mb-6 text-center uppercase tracking-wider">مطالعه فصل {chapter.number} به پایان رسید</h3>
+          <h3 className="font-black text-sm text-zinc-400 mb-6 text-center uppercase tracking-wider">مطالعه چپتر {chapter.number} به پایان رسید</h3>
           
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full">
             {prevChapter ? (

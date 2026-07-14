@@ -649,6 +649,38 @@ async function startServer() {
     }
   });
 
+  app.post("/api/series/:seriesId/chapters/:id/submit", async (req, res) => {
+    try {
+      const { userId, userName, role, fileUrl, note, images } = req.body;
+      const ch = await dbManager.getChapterById(req.params.seriesId, req.params.id);
+      if (!ch) return res.status(404).json({ error: "Chapter not found" });
+
+      const submissions = ch.submissions || [];
+      const newSubmission = {
+        id: `sub-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+        userId,
+        userName,
+        role,
+        fileUrl: fileUrl || "",
+        note: note || "",
+        createdAt: new Date().toISOString()
+      };
+      submissions.push(newSubmission);
+      ch.submissions = submissions;
+
+      // If the editor is submitting final images, update chapter images as well
+      if (role === "editor" && Array.isArray(images) && images.length > 0) {
+        ch.images = images;
+      }
+
+      const saved = await dbManager.saveChapter(ch);
+      io.emit("chapters:updated", { chapterId: saved.id, seriesId: saved.seriesId });
+      res.json(saved);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // -----------------------------------------------------------------
   // 5. COMMENTS API
   // -----------------------------------------------------------------

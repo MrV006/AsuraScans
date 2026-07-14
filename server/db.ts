@@ -40,6 +40,7 @@ export interface Chapter {
   images: string[];
   views: number;
   isPending?: boolean;
+  submissions?: any[];
   createdAt: string;
   updatedAt: string;
 }
@@ -306,6 +307,7 @@ class DatabaseManager {
           images TEXT, -- Rich comma/newline list
           views INT DEFAULT 0,
           isPending TINYINT(1) DEFAULT 0,
+          submissions TEXT,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           FOREIGN KEY (seriesId) REFERENCES series(id) ON DELETE CASCADE
@@ -405,7 +407,8 @@ class DatabaseManager {
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS password VARCHAR(255)`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS hasCompletedSetup TINYINT(1) DEFAULT 0`,
         `ALTER TABLE series ADD COLUMN IF NOT EXISTS contributors TEXT`,
-        `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS isPending TINYINT(1) DEFAULT 0`
+        `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS isPending TINYINT(1) DEFAULT 0`,
+        `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS submissions TEXT`
       ];
 
       for (const aq of alterQueries) {
@@ -945,13 +948,28 @@ class DatabaseManager {
   async getChapters(seriesId: string): Promise<Chapter[]> {
     if (this.isUsingMySQL && this.pool) {
       const [rows] = await this.pool.execute('SELECT * FROM chapters WHERE seriesId = ? ORDER BY number DESC', [seriesId]);
-      return (rows as any[]).map(r => ({
-        ...r,
-        images: r.images ? r.images.split(',') : []
-      }));
+      return (rows as any[]).map(r => {
+        let parsedSubmissions: any[] = [];
+        if (r.submissions) {
+          try {
+            parsedSubmissions = typeof r.submissions === 'string' ? JSON.parse(r.submissions) : r.submissions;
+          } catch (e) {}
+        }
+        return {
+          ...r,
+          images: r.images ? r.images.split(',') : [],
+          isPending: r.isPending === 1 || r.isPending === true,
+          submissions: parsedSubmissions
+        };
+      });
     }
     return this.localData.chapters
       .filter(c => c.seriesId === seriesId)
+      .map(c => ({
+        ...c,
+        isPending: !!c.isPending,
+        submissions: c.submissions || []
+      }))
       .sort((a, b) => b.number - a.number);
   }
 
@@ -960,12 +978,26 @@ class DatabaseManager {
       const [rows] = await this.pool.execute('SELECT * FROM chapters WHERE seriesId = ? AND id = ?', [seriesId, id]);
       const r = (rows as any[])[0];
       if (!r) return null;
+      let parsedSubmissions: any[] = [];
+      if (r.submissions) {
+        try {
+          parsedSubmissions = typeof r.submissions === 'string' ? JSON.parse(r.submissions) : r.submissions;
+        } catch (e) {}
+      }
       return {
         ...r,
-        images: r.images ? r.images.split(',') : []
+        images: r.images ? r.images.split(',') : [],
+        isPending: r.isPending === 1 || r.isPending === true,
+        submissions: parsedSubmissions
       };
     }
-    return this.localData.chapters.find(c => c.seriesId === seriesId && c.id === id) || null;
+    const found = this.localData.chapters.find(c => c.seriesId === seriesId && c.id === id);
+    if (!found) return null;
+    return {
+      ...found,
+      isPending: !!found.isPending,
+      submissions: found.submissions || []
+    };
   }
 
   async saveChapter(ch: any): Promise<Chapter> {
@@ -973,17 +1005,19 @@ class DatabaseManager {
     const now = new Date().toISOString();
     
     const imagesStr = Array.isArray(ch.images) ? ch.images.join(',') : '';
+    const submissionsStr = ch.submissions ? JSON.stringify(ch.submissions) : '[]';
+    const isPendingVal = (ch.isPending === true || ch.isPending === 1) ? 1 : 0;
 
     if (this.isUsingMySQL && this.pool) {
       if (isEdit) {
         await this.pool.execute(
-          `UPDATE chapters SET number = ?, title = ?, images = ?, updatedAt = ? WHERE seriesId = ? AND id = ?`,
-          [ch.number, ch.title || '', imagesStr, now, ch.seriesId, ch.id]
+          `UPDATE chapters SET number = ?, title = ?, images = ?, isPending = ?, submissions = ?, updatedAt = ? WHERE seriesId = ? AND id = ?`,
+          [ch.number, ch.title || '', imagesStr, isPendingVal, submissionsStr, now, ch.seriesId, ch.id]
         );
       } else {
         await this.pool.execute(
-          `INSERT INTO chapters (id, seriesId, number, title, images, views, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [ch.id, ch.seriesId, ch.number, ch.title || '', imagesStr, ch.views || 0, now, now]
+          `INSERT INTO chapters (id, seriesId, number, title, images, views, isPending, submissions, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [ch.id, ch.seriesId, ch.number, ch.title || '', imagesStr, ch.views || 0, isPendingVal, submissionsStr, now, now]
         );
       }
       return (await this.getChapterById(ch.seriesId, ch.id))!;
@@ -996,6 +1030,8 @@ class DatabaseManager {
       title: ch.title || '',
       images: ch.images || [],
       views: ch.views || 0,
+      isPending: ch.isPending === true || ch.isPending === 1,
+      submissions: ch.submissions || [],
       createdAt: ch.createdAt || now,
       updatedAt: now
     };
@@ -1782,6 +1818,52 @@ class DatabaseManager {
     const transId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     const now = new Date().toISOString();
 
+    // Calculate revenue distribution
+    const approvedContributors = series?.contributors || [];
+    const translators = approvedContributors.filter((c: any) => c.status === 'approved' && c.role === 'translator');
+    const editors = approvedContributors.filter((c: any) => c.status === 'approved' && c.role === 'editor');
+    const cleaners = approvedContributors.filter((c: any) => c.status === 'approved' && (c.role === 'cleaner' || c.role === 'typesetter'));
+
+    const distribution: { userId: string; roleLabel: string; amount: number }[] = [];
+
+    if (translators.length > 0) {
+      const share = Math.floor((price * 0.2) / translators.length);
+      translators.forEach((t: any) => {
+        distribution.push({ userId: t.userId, roleLabel: 'مترجم', amount: share });
+      });
+    }
+
+    if (editors.length > 0) {
+      const share = Math.floor((price * 0.3) / editors.length);
+      editors.forEach((e: any) => {
+        distribution.push({ userId: e.userId, roleLabel: 'ادیتور', amount: share });
+      });
+    }
+
+    if (cleaners.length > 0) {
+      const share = Math.floor((price * 0.3) / cleaners.length);
+      cleaners.forEach((c: any) => {
+        distribution.push({ userId: c.userId, roleLabel: 'کلینر', amount: share });
+      });
+    }
+
+    // Group by userId to handle the case where same person is both editor and cleaner (receives 60%)
+    const userDistributionMap: Record<string, { amount: number; roles: string[] }> = {};
+    distribution.forEach(d => {
+      if (!userDistributionMap[d.userId]) {
+        userDistributionMap[d.userId] = { amount: 0, roles: [] };
+      }
+      userDistributionMap[d.userId].amount += d.amount;
+      userDistributionMap[d.userId].roles.push(d.roleLabel);
+    });
+
+    let totalDistributed = 0;
+    Object.values(userDistributionMap).forEach(d => {
+      totalDistributed += d.amount;
+    });
+
+    const adminProfit = price - totalDistributed;
+
     if (this.isUsingMySQL && this.pool) {
       const conn = await this.pool.getConnection();
       try {
@@ -1790,7 +1872,7 @@ class DatabaseManager {
         // Deduct balance from user
         await conn.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newBalance, userId]);
 
-        // Insert transaction log
+        // Insert transaction log for purchaser
         const description = `خرید چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
         await conn.execute(
           'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -1802,6 +1884,39 @@ class DatabaseManager {
           'INSERT INTO purchased_chapters (id, userId, seriesId, chapterId, createdAt) VALUES (?, ?, ?, ?, ?)',
           [purchaseId, userId, seriesId, chapterId, now]
         );
+
+        // Credit contributors
+        for (const [contribUserId, info] of Object.entries(userDistributionMap)) {
+          const [contribRows] = await conn.execute('SELECT * FROM users WHERE id = ?', [contribUserId]);
+          const contribUser = (contribRows as any[])[0];
+          if (contribUser) {
+            const newContribBalance = (contribUser.walletBalance || 0) + info.amount;
+            await conn.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newContribBalance, contribUserId]);
+            
+            const contribTransId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+            const rolesStr = info.roles.join(' و ');
+            const desc = `سهم مشارکت به عنوان ${rolesStr} در فروش چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
+            await conn.execute(
+              'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              [contribTransId, contribUserId, contribUser.displayName, info.amount, 'credit', desc, 'system', 'سیستم', now]
+            );
+          }
+        }
+
+        // Credit site profit to Global Admin
+        const [adminRows] = await conn.execute("SELECT * FROM users WHERE role = 'admin' OR email = 'amirrezaveisi45@gmail.com' LIMIT 1");
+        const adminUser = (adminRows as any[])[0];
+        if (adminUser) {
+          const newAdminBalance = (adminUser.walletBalance || 0) + adminProfit;
+          await conn.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newAdminBalance, adminUser.id]);
+          
+          const adminTransId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+          const desc = `سود سایت از فروش چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
+          await conn.execute(
+            'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [adminTransId, adminUser.id, adminUser.displayName, adminProfit, 'credit', desc, 'system', 'سیستم', now]
+          );
+        }
 
         await conn.commit();
       } catch (err: any) {
@@ -1847,6 +1962,53 @@ class DatabaseManager {
         chapterId,
         createdAt: now
       });
+
+      // Credit contributors
+      for (const [contribUserId, info] of Object.entries(userDistributionMap)) {
+        const contribUserIdx = this.localData.users.findIndex(u => u.id === contribUserId);
+        if (contribUserIdx >= 0) {
+          const contribUser = this.localData.users[contribUserIdx];
+          const newContribBalance = (contribUser.walletBalance || 0) + info.amount;
+          this.localData.users[contribUserIdx].walletBalance = newContribBalance;
+          
+          const contribTransId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+          const rolesStr = info.roles.join(' و ');
+          const desc = `سهم مشارکت به عنوان ${rolesStr} در فروش چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
+          this.localData.wallet_transactions.push({
+            id: contribTransId,
+            userId: contribUserId,
+            userName: contribUser.displayName,
+            amount: info.amount,
+            type: 'credit',
+            description: desc,
+            creatorId: 'system',
+            creatorName: 'سیستم',
+            createdAt: now
+          });
+        }
+      }
+
+      // Credit site profit to Global Admin
+      const adminUserIdx = this.localData.users.findIndex(u => u.role === 'admin' || u.email === 'amirrezaveisi45@gmail.com');
+      if (adminUserIdx >= 0) {
+        const adminUser = this.localData.users[adminUserIdx];
+        const newAdminBalance = (adminUser.walletBalance || 0) + adminProfit;
+        this.localData.users[adminUserIdx].walletBalance = newAdminBalance;
+        
+        const adminTransId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        const desc = `سود سایت از فروش چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
+        this.localData.wallet_transactions.push({
+          id: adminTransId,
+          userId: adminUser.id,
+          userName: adminUser.displayName,
+          amount: adminProfit,
+          type: 'credit',
+          description: desc,
+          creatorId: 'system',
+          creatorName: 'سیستم',
+          createdAt: now
+        });
+      }
 
       this.saveLocalData();
     }
