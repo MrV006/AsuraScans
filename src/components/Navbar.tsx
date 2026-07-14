@@ -67,6 +67,26 @@ export function Navbar() {
     setShowAuthModal(true);
   };
 
+  const handleLogoClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    try {
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(key => caches.delete(key)));
+      }
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const registration of registrations) {
+          await registration.unregister();
+        }
+      }
+      sessionStorage.clear();
+    } catch (err) {
+      console.error("Cache clearing failed:", err);
+    }
+    window.location.href = `/?update=${Date.now()}`;
+  };
+
   const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && e.currentTarget.value.trim()) {
       setMobileMenuOpen(false);
@@ -79,7 +99,7 @@ export function Navbar() {
       <nav className="fixed top-0 left-0 right-0 h-16 bg-[var(--color-asura-card)]/90 backdrop-blur-md border-b border-[var(--color-asura-border)] z-50 flex items-center px-3 sm:px-6 md:px-8 transition-all duration-200">
       <div className="flex items-center gap-2 sm:gap-4 md:gap-8 w-full max-w-7xl mx-auto">
         {/* Logo */}
-        <Link to="/" className="flex items-center flex-shrink-0">
+        <Link to="/" onClick={handleLogoClick} className="flex items-center flex-shrink-0">
           {settings?.logoUrl ? (
             <img 
               src={settings.logoUrl} 

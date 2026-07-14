@@ -16,12 +16,14 @@ import Leaderboard from './pages/Leaderboard';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import CompleteProfileModal from './components/CompleteProfileModal';
+import { AppInterceptors } from './components/AppInterceptors';
 
 export default function App() {
   return (
     <SettingsProvider>
       <AuthProvider>
         <BrowserRouter>
+          <AppInterceptors />
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/series/:id" element={<Series />} />
