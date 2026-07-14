@@ -56,12 +56,35 @@ function sendResponse($data, $status = 200) {
 }
 
 function getUserFromHeaders($pdo) {
-    $headers = apache_request_headers();
-    $uid = isset($headers['x-user-uid']) ? $headers['x-user-uid'] : (isset($headers['x-admin-uid']) ? $headers['x-admin-uid'] : null);
+    $uid = null;
+    
+    // 1. Check $_SERVER for standard HTTP header mapping (extremely robust on shared hosts / FastCGI)
+    if (isset($_SERVER['HTTP_X_USER_UID'])) {
+        $uid = $_SERVER['HTTP_X_USER_UID'];
+    } elseif (isset($_SERVER['HTTP_X_ADMIN_UID'])) {
+        $uid = $_SERVER['HTTP_X_ADMIN_UID'];
+    }
+    
+    // 2. Fallback to apache_request_headers if available
+    if (!$uid && function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+        if ($headers) {
+            $uid = isset($headers['x-user-uid']) ? $headers['x-user-uid'] : (isset($headers['x-admin-uid']) ? $headers['x-admin-uid'] : null);
+            if (!$uid) {
+                foreach ($headers as $key => $val) {
+                    if (strtolower($key) === 'x-user-uid' || strtolower($key) === 'x-admin-uid') {
+                        $uid = $val;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    // 3. Fallback to manually checking all $_SERVER keys
     if (!$uid) {
-        // Try lowercase headers just in case
-        foreach ($headers as $key => $val) {
-            if (strtolower($key) === 'x-user-uid' || strtolower($key) === 'x-admin-uid') {
+        foreach ($_SERVER as $key => $val) {
+            if (strtolower($key) === 'http_x_user_uid' || strtolower($key) === 'http_x_admin_uid') {
                 $uid = $val;
                 break;
             }
@@ -1480,7 +1503,7 @@ if ($method === 'POST' && $sub_path === '/chapters/purchase') {
     $input = getJsonInput();
     $seriesId = isset($input['seriesId']) ? $input['seriesId'] : null;
     $chapterId = isset($input['chapterId']) ? $input['chapterId'] : null;
-    $price = (int)(isset($input['price']) ? $input['price'] : 0);
+    $price = (int)(isset($input['price']) ? $input['price'] : 400);
     
     if (!$seriesId || !$chapterId) {
         sendResponse(["error" => "چپتر نامعتبر است."], 400);

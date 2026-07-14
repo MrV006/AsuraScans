@@ -25,12 +25,12 @@ export default function Search() {
 
   // Dynamic filter lists from all series to populate the Bento UI
   const ALL_GENRES = useMemo(() => {
-    const list = Array.from(new Set(allSeries.flatMap(s => s.genres || []))).sort();
+    const list = Array.from(new Set(allSeries.flatMap(s => (Array.isArray(s.genres) ? s.genres : (typeof s.genres === 'string' ? s.genres.split(',') : [])).map(g => g.trim()).filter(Boolean)))).sort();
     return list.length > 0 ? list : ['Action', 'Fantasy', 'Adventure', 'Comedy', 'Drama', 'Martial Arts', 'Rebirth', 'System', 'Magic', 'School Life'];
   }, [allSeries]);
 
   const ALL_TAGS = useMemo(() => {
-    const list = Array.from(new Set(allSeries.flatMap(s => s.tags || []))).sort();
+    const list = Array.from(new Set(allSeries.flatMap(s => (Array.isArray(s.tags) ? s.tags : (typeof s.tags === 'string' ? s.tags.split(',') : [])).map(t => t.trim()).filter(Boolean)))).sort();
     return list.length > 0 ? list : ['Overpowered', 'Regression', 'Dungeon', 'Monsters', 'Tower', 'Revenge', 'Leveling', 'Guilds'];
   }, [allSeries]);
 
@@ -361,7 +361,7 @@ export default function Search() {
                     </div>
 
                     <div className="absolute bottom-2 right-2 left-2 flex flex-wrap gap-1">
-                      {s.genres.slice(0, 2).map(g => (
+                      {(Array.isArray(s.genres) ? s.genres : (typeof s.genres === 'string' ? s.genres.split(',') : [])).slice(0, 2).map(g => (
                         <span key={g} className="bg-[var(--color-asura-accent)] text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-widest text-white">
                           {g}
                         </span>

@@ -10,17 +10,28 @@ export function useSeriesList() {
   const fetchSeries = async () => {
     try {
       const data = await apiClient.getSeries();
+      if (!data || !Array.isArray(data)) {
+        throw new Error(data?.error || "اطلاعات مانهوا یافت نشد یا ساختار داده نادرست است.");
+      }
       const fullList = await Promise.all(data.map(async (s: any) => {
-        const chapters = await apiClient.getChapters(s.id);
-        return {
-          ...s,
-          chapters: chapters.slice(0, 2)
-        };
+        try {
+          const chapters = await apiClient.getChapters(s.id);
+          return {
+            ...s,
+            chapters: Array.isArray(chapters) ? chapters.slice(0, 2) : []
+          };
+        } catch (chapterErr) {
+          console.error(`Error fetching chapters for series ${s.id}:`, chapterErr);
+          return {
+            ...s,
+            chapters: []
+          };
+        }
       }));
       setSeries(fullList);
       setLoading(false);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || "خطا در دریافت لیست مانهوا");
       setLoading(false);
     }
   };

@@ -93,7 +93,7 @@ export default function Leaderboard() {
           <div className="flex flex-col gap-4">
             {topSeries.map((series, index) => {
               // Real view calculations
-              const readersCount = (series.views || 0) * 10 + Math.floor((series.rating || 5) * 150);
+              const readersCount = series.views || 0;
               const isTop3 = index < 3;
               
               return (

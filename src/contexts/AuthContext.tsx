@@ -47,14 +47,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsSimulatingUserInternal(val);
   };
 
+  const enrichUser = (u: any) => {
+    if (!u) return null;
+    return { ...u, uid: u.id, id: u.id };
+  };
+
   const refreshProfile = async () => {
     const savedUid = localStorage.getItem('asura_user_uid');
     if (!savedUid) return;
     try {
       const userProfile = await apiClient.getUser(savedUid);
       if (userProfile) {
-        setProfile(userProfile);
-        setUser(userProfile);
+        const enriched = enrichUser(userProfile);
+        setProfile(enriched);
+        setUser(enriched);
         if (userProfile.hasCompletedSetup) {
           setShowSetupModal(false);
         }
@@ -68,14 +74,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const loggedUser = await apiClient.login({ identifier: emailOrUsername, password });
       localStorage.setItem('asura_user_uid', loggedUser.id);
-      setUser(loggedUser);
-      setProfile(loggedUser);
+      const enriched = enrichUser(loggedUser);
+      setUser(enriched);
+      setProfile(enriched);
       if (loggedUser.hasCompletedSetup === false) {
         setShowSetupModal(true);
       } else {
         setShowSetupModal(false);
       }
-      return loggedUser;
+      return enriched;
     } catch (err) {
       console.error("Login failed:", err);
       throw err;
@@ -86,10 +93,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const newUser = await apiClient.register({ email, displayName, password });
       localStorage.setItem('asura_user_uid', newUser.id);
-      setUser(newUser);
-      setProfile(newUser);
+      const enriched = enrichUser(newUser);
+      setUser(enriched);
+      setProfile(enriched);
       setShowSetupModal(true);
-      return newUser;
+      return enriched;
     } catch (err) {
       console.error("Registration failed:", err);
       throw err;
@@ -100,14 +108,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const loggedUser = await apiClient.googleLogin(googleProfile);
       localStorage.setItem('asura_user_uid', loggedUser.id);
-      setUser(loggedUser);
-      setProfile(loggedUser);
+      const enriched = enrichUser(loggedUser);
+      setUser(enriched);
+      setProfile(enriched);
       if (loggedUser.hasCompletedSetup === false) {
         setShowSetupModal(true);
       } else {
         setShowSetupModal(false);
       }
-      return loggedUser;
+      return enriched;
     } catch (err) {
       console.error("Google login failed:", err);
       throw err;
@@ -134,8 +143,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setProfile(null);
               alert("حساب کاربری شما مسدود شده است.");
             } else {
-              setUser(userProfile);
-              setProfile(userProfile);
+              const enriched = enrichUser(userProfile);
+              setUser(enriched);
+              setProfile(enriched);
               if (userProfile.hasCompletedSetup === false) {
                 setShowSetupModal(true);
               }

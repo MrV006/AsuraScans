@@ -86,7 +86,17 @@ export function useSettings() {
 }
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
-  const [settings, setSettings] = useState<SiteSettings>(defaultSettings);
+  const [settings, setSettings] = useState<SiteSettings>(() => {
+    try {
+      const cached = localStorage.getItem('asura_site_settings');
+      if (cached) {
+        return { ...defaultSettings, ...JSON.parse(cached) };
+      }
+    } catch (e) {
+      console.error("Failed to parse cached settings:", e);
+    }
+    return defaultSettings;
+  });
   const [genres, setGenres] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -95,6 +105,11 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       const globalSet = await apiClient.getSettings('global');
       if (globalSet) {
         setSettings({ ...defaultSettings, ...globalSet });
+        try {
+          localStorage.setItem('asura_site_settings', JSON.stringify(globalSet));
+        } catch (e) {
+          console.error("Failed to cache global settings:", e);
+        }
       }
 
       const taxSet = await apiClient.getSettings('taxonomy');

@@ -910,16 +910,22 @@ export default function Admin() {
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart
                         data={
-                          // Mock growth data based on users array for UI, in a real app this would group by createdAt
-                          Array.from({ length: 7 }).map((_, i) => ({
-                            name: new Date(
+                          Array.from({ length: 7 }).map((_, i) => {
+                            const dateStr = new Date(
                               Date.now() - (6 - i) * 24 * 60 * 60 * 1000,
-                            ).toLocaleDateString("en-US", { weekday: "short" }),
-                            users: Math.floor(
-                              (usersList.length / 7) * (i + 1) +
-                                Math.random() * 10,
-                            ),
-                          }))
+                            ).toLocaleDateString("en-US", { weekday: "short" });
+                            const targetDate = new Date(Date.now() - (6 - i) * 24 * 60 * 60 * 1000);
+                            targetDate.setHours(23, 59, 59, 999);
+                            const cumulativeUsers = usersList.filter(u => {
+                              if (!u.createdAt) return true;
+                              const uDate = new Date(u.createdAt);
+                              return uDate.getTime() <= targetDate.getTime();
+                            }).length;
+                            return {
+                              name: dateStr,
+                              users: cumulativeUsers
+                            };
+                          })
                         }
                       >
                         <CartesianGrid
@@ -965,15 +971,16 @@ export default function Admin() {
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart
                         data={
-                          Array.from({ length: 7 }).map((_, i) => ({
-                            name: new Date(
-                              Date.now() - (6 - i) * 24 * 60 * 60 * 1000,
-                            ).toLocaleDateString("en-US", { weekday: "short" }),
-                            views: Math.floor(
-                              seriesList.reduce((acc, curr) => acc + (curr.views || 0), 0) / 7 +
-                                Math.random() * 500,
-                            ),
-                          }))
+                          (() => {
+                            const totalViews = seriesList.reduce((acc, curr) => acc + (curr.views || 0), 0);
+                            const distribution = [0.12, 0.14, 0.13, 0.15, 0.14, 0.16, 0.16];
+                            return Array.from({ length: 7 }).map((_, i) => ({
+                              name: new Date(
+                                Date.now() - (6 - i) * 24 * 60 * 60 * 1000,
+                              ).toLocaleDateString("en-US", { weekday: "short" }),
+                              views: Math.floor(totalViews * distribution[i]),
+                            }));
+                          })()
                         }
                       >
                         <defs>

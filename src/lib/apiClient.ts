@@ -405,7 +405,7 @@ export const apiClient = {
   async uploadImages(files: File[], uid: string) {
     const formData = new FormData();
     files.forEach(file => {
-      formData.append('files', file);
+      formData.append('files[]', file);
     });
     const res = await fetch(`${API_URL}/api/admin/upload`, {
       method: 'POST',

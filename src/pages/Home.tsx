@@ -52,8 +52,8 @@ export default function Home() {
                   
                   <div className="flex-1 pb-6 md:pb-12">
                     <div className="flex flex-wrap gap-2 mb-3">
-                      {series.genres.slice(0, 3).map(g => (
-                        <span key={g} className="bg-[var(--color-asura-accent)] text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-widest">{g}</span>
+                      {(Array.isArray(series.genres) ? series.genres : (typeof series.genres === 'string' ? series.genres.split(',') : [])).slice(0, 3).map(g => (
+                        <span key={g} className="bg-[var(--color-asura-accent)] text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-widest">{g.trim()}</span>
                       ))}
                     </div>
                     <h1 className="text-4xl md:text-5xl font-black text-white mb-2 leading-none">
@@ -166,7 +166,7 @@ export default function Home() {
                      <div className="flex-1 min-w-0">
                        <h4 className="text-xs font-bold text-white truncate group-hover:text-[var(--color-asura-accent)] transition-colors">{series.title}</h4>
                        <p className="text-[10px] text-[var(--color-asura-accent-light)] mt-0.5">
-                         {series.genres[0]}
+                         {((Array.isArray(series.genres) ? series.genres[0] : (typeof series.genres === 'string' ? series.genres.split(',')[0] : '')) || '').trim()}
                        </p>
                        <div className="flex items-center gap-1 mt-1">
                          <span className="text-[9px] text-yellow-500 tracking-tighter">★★★★★</span>

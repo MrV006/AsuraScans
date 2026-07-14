@@ -361,14 +361,14 @@ export default function Series() {
             className="flex-1 pt-4 md:pt-16"
           >
             <div className="flex flex-wrap gap-2 mb-4">
-              {series.genres.map(g => (
+              {(Array.isArray(series.genres) ? series.genres : (typeof series.genres === 'string' ? series.genres.split(',') : [])).map(g => (
                 <span key={g} className="text-[10px] font-bold text-zinc-300 bg-white/5 border border-white/5 px-2.5 py-0.5 rounded uppercase tracking-wider">
-                  {g}
+                  {g.trim()}
                 </span>
               ))}
-              {series.tags && series.tags.map(t => (
+              {(Array.isArray(series.tags) ? series.tags : (typeof series.tags === 'string' ? series.tags.split(',') : [])).map(t => (
                 <span key={t} className="text-[10px] font-bold text-[var(--color-asura-accent-light)] bg-[var(--color-asura-accent)]/10 border border-[var(--color-asura-accent)]/20 px-2.5 py-0.5 rounded tracking-wider italic">
-                  #{t}
+                  #{t.trim()}
                 </span>
               ))}
             </div>
