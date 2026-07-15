@@ -22,6 +22,10 @@ export default function Series() {
   const { averageRating, userRating, submitRating, loading: ratingsLoading } = useRatings(id);
 
   const [hoverRating, setHoverRating] = useState(0);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [selectedRatingScore, setSelectedRatingScore] = useState(5);
+  const [ratingReviewText, setRatingReviewText] = useState("");
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [isAdminEditMode, setIsAdminEditMode] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -88,6 +92,33 @@ export default function Series() {
       removeBookmark(id);
     } else {
       addBookmark(id);
+    }
+  };
+
+  const handleSubmitReview = async () => {
+    if (!user) return;
+    setIsSubmittingReview(true);
+    try {
+      await submitRating(selectedRatingScore);
+      if (ratingReviewText.trim()) {
+        const commentScopeId = `series-${series.id}`;
+        const randomId = 'comment_' + Math.random().toString(36).substr(2, 9);
+        await apiClient.addComment(commentScopeId, {
+          id: randomId,
+          userId: user.uid,
+          userName: profile?.displayName || user.displayName || 'کاربر',
+          userAvatar: profile?.avatarUrl || user.photoURL || '',
+          content: ratingReviewText.trim(),
+          parentId: ''
+        });
+        setRatingReviewText("");
+      }
+      alert("امتیاز و نظر شما با موفقیت ثبت شد و میانگین بروزرسانی گردید.");
+      setShowRatingModal(false);
+    } catch (err: any) {
+      alert("خطا در ثبت: " + err.message);
+    } finally {
+      setIsSubmittingReview(false);
     }
   };
 
@@ -393,15 +424,18 @@ export default function Series() {
                       {[1, 2, 3, 4, 5].map((star) => (
                         <button
                           key={star}
-                          onClick={() => submitRating(star)}
+                          onClick={() => {
+                            setSelectedRatingScore(star);
+                            setShowRatingModal(true);
+                          }}
                           onMouseEnter={() => setHoverRating(star)}
                           onMouseLeave={() => setHoverRating(0)}
                           className="transition-transform hover:scale-110 focus:outline-none"
                         >
                           <Star 
                             size={18} 
-                            fill={star <= (hoverRating || userRating || 0) ? "currentColor" : "none"} 
-                            className={star <= (hoverRating || userRating || 0) ? "text-[var(--color-asura-accent-light)]" : "text-zinc-600"} 
+                            fill={star <= (hoverRating || userRating || Math.round(averageRating || series.rating || 0)) ? "currentColor" : "none"} 
+                            className={star <= (hoverRating || userRating || Math.round(averageRating || series.rating || 0)) ? "text-[var(--color-asura-accent-light)]" : "text-zinc-600"} 
                           />
                         </button>
                       ))}
@@ -797,6 +831,82 @@ export default function Series() {
                 className="px-6 py-2.5 bg-white/5 hover:bg-white/10 text-zinc-400 rounded-xl font-black text-xs transition-colors"
               >
                 لغو
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RATING & REVIEW MODAL */}
+      {showRatingModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 text-right" dir="rtl">
+          <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] w-full max-w-md rounded-2xl p-6">
+            <h3 className="text-lg font-black text-white mb-4 flex items-center gap-2">
+              <Star className="text-yellow-500" fill="currentColor" size={20} />
+              ثبت امتیاز و دیدگاه برای مانهوا
+            </h3>
+            
+            <p className="text-xs text-zinc-400 mb-6 leading-relaxed">
+              لطفا تعداد ستاره‌های امتیاز خود را مشخص کرده و در صورت تمایل نقد یا دیدگاه کوتاه خود را بنویسید. نظر شما بلافاصله در میانگین واقعی کل امتیازات اثر تاثیر خواهد گذاشت.
+            </p>
+
+            <div className="space-y-6">
+              {/* Star selector */}
+              <div className="flex flex-col items-center justify-center bg-black/20 p-4 rounded-xl border border-white/5 gap-2">
+                <span className="text-xs font-bold text-zinc-400">امتیاز شما: {selectedRatingScore} از ۵</span>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setSelectedRatingScore(star)}
+                      className="transition-transform hover:scale-110 focus:outline-none"
+                    >
+                      <Star 
+                        size={32} 
+                        fill={star <= selectedRatingScore ? "currentColor" : "none"} 
+                        className={star <= selectedRatingScore ? "text-yellow-500" : "text-zinc-600"} 
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Textarea */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-zinc-300">دیدگاه یا نقد شما درباره این اثر (اختیاری)</label>
+                <textarea
+                  value={ratingReviewText}
+                  onChange={(e) => setRatingReviewText(e.target.value)}
+                  placeholder="نظرتان را درباره گرافیک، داستان یا ترجمه این مانهوا بنویسید..."
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50 transition-colors resize-none h-28"
+                />
+                <div className="flex justify-between items-center mt-1">
+                  <button 
+                    type="button" 
+                    onClick={() => setRatingReviewText(prev => prev + " [spoiler]متن مخفی[/spoiler] ")}
+                    className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-zinc-400 text-[10px] font-bold uppercase rounded-lg border border-white/10 transition-colors"
+                  >
+                    + Spoiler Tag
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-white/5 pt-4 mt-6">
+              <button 
+                onClick={handleSubmitReview}
+                disabled={isSubmittingReview}
+                className="px-6 py-2.5 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white rounded-xl font-black text-xs transition-colors disabled:opacity-50"
+              >
+                {isSubmittingReview ? "در حال ثبت..." : "ثبت دیدگاه و امتیاز"}
+              </button>
+              <button 
+                onClick={() => setShowRatingModal(false)}
+                disabled={isSubmittingReview}
+                className="px-6 py-2.5 bg-white/5 hover:bg-white/10 text-zinc-400 rounded-xl font-black text-xs transition-colors"
+              >
+                انصراف
               </button>
             </div>
           </div>

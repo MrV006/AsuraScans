@@ -69,6 +69,7 @@ export function useBookmarks() {
     if (!user) return false;
     try {
       await apiClient.toggleBookmark(user.uid, seriesId);
+      await fetchBookmarks();
       return true;
     } catch (e) {
       console.error(e);
@@ -80,6 +81,7 @@ export function useBookmarks() {
     if (!user) return false;
     try {
       await apiClient.toggleBookmark(user.uid, seriesId);
+      await fetchBookmarks();
       return true;
     } catch (e) {
       console.error(e);

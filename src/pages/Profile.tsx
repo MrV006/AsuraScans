@@ -3,7 +3,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { Layout } from '../components/Layout';
 import { Navigate, Link } from 'react-router-dom';
 import { Settings, Bookmark, MessageSquare, Heart, Clock, Wallet } from 'lucide-react';
-import { seedDatabase } from '../lib/seed';
 import { useBookmarks, useHistory } from '../hooks/useUserActivity';
 import { formatDistanceToNow } from 'date-fns';
 import { apiClient, getSocketInstance } from '../lib/apiClient';
@@ -577,16 +576,6 @@ export default function Profile() {
                   >
                     {savingProfile ? 'در حال ذخیره‌سازی...' : 'ذخیره تغییرات'}
                   </button>
-                  
-                  <div className="mt-12 pt-8 border-t border-[var(--color-asura-border)]">
-                    <h3 className="text-xs font-black text-red-500 uppercase tracking-widest mb-4">ابزارهای مدیریت محتوای آزمایشی</h3>
-                    <button 
-                      onClick={() => seedDatabase()}
-                      className="px-6 py-2 bg-red-900/20 hover:bg-red-900/50 text-red-400 border border-red-900/50 rounded-xl font-black text-xs transition-colors"
-                    >
-                      تولید محتوای اولیه دمو (Seed Data)
-                    </button>
-                  </div>
                 </div>
               )}
 

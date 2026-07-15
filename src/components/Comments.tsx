@@ -29,14 +29,14 @@ function SpoilerText({ text }: { text: string; key?: React.Key }) {
         e.stopPropagation();
         setRevealed(!revealed);
       }}
-      className={`relative inline-block cursor-pointer px-1.5 py-0.5 rounded transition-all duration-300 ${
+      className={`relative inline-block cursor-pointer px-2 py-0.5 rounded-lg transition-all duration-300 font-bold text-xs ${
         revealed 
-          ? 'bg-zinc-800 text-zinc-100 blur-none' 
-          : 'bg-zinc-700/50 text-zinc-400 blur-[5px] select-none hover:bg-zinc-600/50'
+          ? 'bg-zinc-800 text-zinc-200 border border-zinc-700' 
+          : 'bg-red-500/15 hover:bg-red-500/20 text-red-400 border border-red-500/30'
       }`}
       title={revealed ? "برای مخفی کردن کلیک کنید" : "برای مشاهده اسپویلر کلیک کنید"}
     >
-      {text}
+      {revealed ? text : "⚠️ اسپویلر (برای مشاهده کلیک کنید)"}
     </span>
   );
 }
@@ -49,9 +49,11 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
   const { user, profile, setShowSetupModal } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
 
+  const commentScopeId = chapterId || `series-${seriesId}`;
+
   const fetchComments = async () => {
     try {
-      const data = await apiClient.getComments(chapterId || 'general');
+      const data = await apiClient.getComments(commentScopeId);
       // Adapt comments data
       const mappedComments: Comment[] = data.map((c: any) => ({
         id: c.id,
@@ -83,7 +85,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
 
     const socket = getSocketInstance();
     const handleUpdate = (data: any) => {
-      if (data.chapterId === (chapterId || 'general')) {
+      if (data.chapterId === commentScopeId) {
         fetchComments();
       }
     };
@@ -93,7 +95,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
     return () => {
       socket.off("comments:updated", handleUpdate);
     };
-  }, [seriesId, chapterId, user]);
+  }, [seriesId, chapterId, user, commentScopeId]);
 
   const handleSubmit = async (e: React.FormEvent, parentId?: string) => {
     e.preventDefault();
@@ -104,7 +106,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
 
     try {
       const randomId = 'comment_' + Math.random().toString(36).substr(2, 9);
-      await apiClient.addComment(chapterId || 'general', {
+      await apiClient.addComment(commentScopeId, {
         id: randomId,
         userId: user.uid,
         userName: profile?.displayName || 'User',

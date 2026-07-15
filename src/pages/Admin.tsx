@@ -3,6 +3,7 @@ import { Navigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Layout } from "../components/Layout";
 import { apiClient, getSocketInstance } from "../lib/apiClient";
+import { seedDatabase } from "../lib/seed";
 import {
   Settings,
   Plus,
@@ -2658,6 +2659,29 @@ export default function Admin() {
                   Save All Settings
                 </button>
               </form>
+
+              {(currentUserData?.roles?.includes('super_admin') || user?.email === "amirrezaveisi45@gmail.com" || user?.email === "Mr.V@admin.com") && (
+                <div className="bg-red-950/20 p-6 rounded-xl border border-red-500/20 space-y-4 mt-8" dir="rtl">
+                  <h3 className="text-sm font-black text-red-400 border-b border-red-500/10 pb-2 flex items-center gap-2">
+                    ابزارهای مدیریت محتوای آزمایشی (Super Admin Only)
+                  </h3>
+                  <p className="text-zinc-400 text-xs font-bold">
+                    با استفاده از این دکمه می‌توانید دیتابیس را با اطلاعات اولیه آزمایشی (مانهواها، دسته‌بندی‌ها و...) پر کنید.
+                  </p>
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm("آیا مطمئن هستید که می‌خواهید دیتابیس دمو را ایجاد کنید؟")) {
+                        seedDatabase();
+                        alert("درخواست تولید محتوای اولیه ارسال شد.");
+                      }
+                    }}
+                    className="px-6 py-2 bg-red-900/20 hover:bg-red-900/50 text-red-400 border border-red-900/50 rounded-xl font-black text-xs transition-colors"
+                  >
+                    تولید محتوای اولیه دمو (Seed Data)
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
