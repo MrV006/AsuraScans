@@ -224,7 +224,7 @@ export default function Profile() {
               <p className="text-[11px] font-mono text-zinc-500 mb-2 truncate w-full text-center">{user.email}</p>
               {profile?.melliCode && (
                 <div className="bg-[var(--color-asura-accent)]/10 border border-[var(--color-asura-accent)]/20 px-3 py-1.5 rounded-full text-center mb-6">
-                  <span className="text-[10px] font-black text-[var(--color-asura-accent-light)]">شناسه ملی سایت: </span>
+                  <span className="text-[10px] font-black text-[var(--color-asura-accent-light)]">کد اختصاصی کاربری: </span>
                   <span className="text-xs font-mono font-black text-white">{profile.melliCode}</span>
                 </div>
               )}
@@ -475,6 +475,29 @@ export default function Profile() {
                       onChange={(e) => setDisplayName(e.target.value)}
                       className="w-full bg-black/40 border border-[var(--color-asura-border)] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50"
                     />
+                  </div>
+
+                  <div className="mb-6">
+                    <label className="block text-xs font-black text-zinc-400 uppercase tracking-widest mb-2">کد اختصاصی کاربری (غیرقابل تغییر)</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        value={profile?.melliCode || ''}
+                        readOnly
+                        disabled
+                        className="w-full bg-black/20 border border-[var(--color-asura-border)]/50 rounded-xl px-4 py-2.5 text-xs text-zinc-500 font-mono focus:outline-none cursor-not-allowed text-left"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(profile?.melliCode || '');
+                          alert("کد اختصاصی با موفقیت کپی شد!");
+                        }}
+                        className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs rounded-xl transition-colors shrink-0 font-sans"
+                      >
+                        کپی کد
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">

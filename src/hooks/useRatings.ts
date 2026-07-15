@@ -67,11 +67,32 @@ export function useRatings(seriesId?: string) {
 
   const submitRating = async (ratingValue: number) => {
     if (!user || !seriesId) return false;
+    
+    const oldUserRating = userRating;
+    const oldRatings = [...ratings];
+    
+    setUserRating(ratingValue);
+    setRatings(prev => {
+      const filtered = prev.filter(r => r.userId !== user.uid);
+      if (ratingValue > 0) {
+        return [...filtered, {
+          seriesId,
+          userId: user.uid,
+          rating: ratingValue,
+          updatedAt: new Date().toISOString()
+        }];
+      }
+      return filtered;
+    });
+
     try {
       await apiClient.rateSeries(seriesId, user.uid, ratingValue);
+      fetchRatings();
       return true;
     } catch (e) {
       console.error("Error submitting rating:", e);
+      setUserRating(oldUserRating);
+      setRatings(oldRatings);
       return false;
     }
   };

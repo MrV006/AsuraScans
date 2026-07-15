@@ -8,6 +8,62 @@ import { apiClient, getSocketInstance } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 import { ReaderSkeleton } from '../components/Skeletons';
 
+
+// Helper for converting Persian digits to English digits
+const convertPersianToEnglishDigits = (str: string): string => {
+  const persianDigits = [/۰/g, /۱/g, /۲/g, /۳/g, /۴/g, /۵/g, /۶/g, /۷/g, /۸/g, /۹/g];
+  let res = str;
+  for (let i = 0; i < 10; i++) {
+    res = res.replace(persianDigits[i], i.toString());
+  }
+  return res;
+};
+
+// Extract filename part of URL to prevent path numbers from interfering with sorting
+const getCleanFilename = (url: string): string => {
+  const withoutQuery = url.split('?')[0];
+  return withoutQuery.split('/').pop() || withoutQuery;
+};
+
+// Natural sorting algorithm supporting both English and Persian digits
+const naturalCompare = (a: string, b: string): number => {
+  const cleanA = convertPersianToEnglishDigits(getCleanFilename(a));
+  const cleanB = convertPersianToEnglishDigits(getCleanFilename(b));
+
+  const regex = /(\d+)/g;
+  const chunksA = cleanA.split(regex);
+  const chunksB = cleanB.split(regex);
+
+  const len = Math.max(chunksA.length, chunksB.length);
+  for (let i = 0; i < len; i++) {
+    const chunkA = chunksA[i] || "";
+    const chunkB = chunksB[i] || "";
+
+    const isDigitA = /^\d+$/.test(chunkA);
+    const isDigitB = /^\d+$/.test(chunkB);
+
+    if (isDigitA && isDigitB) {
+      const numA = parseInt(chunkA, 10);
+      const numB = parseInt(chunkB, 10);
+      if (numA !== numB) {
+        return numA - numB;
+      }
+      if (chunkA.length !== chunkB.length) {
+        return chunkA.length - chunkB.length;
+      }
+    } else {
+      const comp = chunkA.localeCompare(chunkB, undefined, { numeric: true, sensitivity: 'base' });
+      if (comp !== 0) return comp;
+    }
+  }
+  return 0;
+};
+
+export const sortMangaImages = (images: string[]): string[] => {
+  if (!images) return [];
+  return [...images].sort(naturalCompare);
+};
+
 export default function Reader() {
   const { seriesId, chapterId } = useParams();
   const { series, loading: seriesLoading } = useSeriesOverview(seriesId);
@@ -28,21 +84,29 @@ export default function Reader() {
   const [purchasing, setPurchasing] = useState<boolean>(false);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
 
+  // States for prioritized progressive image loading
+  const [loadedIndices, setLoadedIndices] = useState<Set<number>>(new Set());
+  const [visibleIndices, setVisibleIndices] = useState<Set<number>>(new Set());
+  const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
+
   const chapterIdx = series?.chapters ? series.chapters.findIndex(c => c.id === chapterId) : -1;
   const chapter = chapterIdx >= 0 && series?.chapters ? series.chapters[chapterIdx] : (series?.chapters ? series.chapters[0] : null);
   
+  // Apply our custom natural sorting algorithm to the chapter images
+  const sortedImages = chapter?.images ? sortMangaImages(chapter.images) : [];
+
   const nextChapter = series?.chapters && chapterIdx >= 0 ? series.chapters[chapterIdx - 1] : null; 
   const prevChapter = series?.chapters && chapterIdx >= 0 ? series.chapters[chapterIdx + 1] : null; 
 
   const nextPage = () => {
-    if (!chapter?.images) return;
+    if (sortedImages.length === 0) return;
     if (readingMode === 'single') {
-      if (activePageIndex < chapter.images.length - 1) {
+      if (activePageIndex < sortedImages.length - 1) {
         setActivePageIndex(prev => prev + 1);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } else if (readingMode === 'double') {
-      if (activePageIndex < chapter.images.length - 2) {
+      if (activePageIndex < sortedImages.length - 2) {
         setActivePageIndex(prev => prev + 2);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
@@ -63,6 +127,149 @@ export default function Reader() {
     }
   };
 
+  // Reset scroll and loading queues on chapter/series change
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' });
+    setLoadedIndices(new Set());
+    setVisibleIndices(new Set());
+    setLoadingIndex(null);
+    setActivePageIndex(0);
+  }, [chapterId, seriesId]);
+
+  // Anti-Copy copyright protection shortcuts
+  useEffect(() => {
+    const preventActions = (e: KeyboardEvent) => {
+      if (
+        e.key === 'F12' ||
+        ((e.ctrlKey || e.metaKey) && (
+          e.key === 's' || e.key === 'S' || 
+          e.key === 'p' || e.key === 'P' || 
+          e.key === 'u' || e.key === 'U' || 
+          e.key === 'i' || e.key === 'I' || 
+          e.key === 'c' || e.key === 'C'
+        ))
+      ) {
+        e.preventDefault();
+        alert("حق کپی‌رایت ترجمه و ادیت این اثر محفوظ است. امکان ذخیره‌سازی، چاپ یا کپی کردن تصاویر مجاز نمی‌باشد.");
+      }
+    };
+    window.addEventListener('keydown', preventActions);
+    return () => window.removeEventListener('keydown', preventActions);
+  }, []);
+
+  // Intersection observer to track visible images in vertical mode
+  useEffect(() => {
+    if (readingMode !== 'vertical' || sortedImages.length === 0) return;
+    
+    const observerOptions = {
+      root: null,
+      rootMargin: '120px 0px 120px 0px', // detects slightly before entering the screen
+      threshold: 0.05
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      setVisibleIndices(prev => {
+        const next = new Set<number>(prev);
+        entries.forEach(entry => {
+          const indexAttr = entry.target.getAttribute('data-index');
+          if (indexAttr !== null) {
+            const idx = parseInt(indexAttr, 10);
+            if (entry.isIntersecting) {
+              next.add(idx);
+            } else {
+              next.delete(idx);
+            }
+          }
+        });
+        return next;
+      });
+    }, observerOptions);
+
+    const timeout = setTimeout(() => {
+      const elements = document.querySelectorAll('.reader-image-wrapper');
+      elements.forEach(el => observer.observe(el));
+    }, 100);
+
+    return () => {
+      clearTimeout(timeout);
+      const elements = document.querySelectorAll('.reader-image-wrapper');
+      elements.forEach(el => observer.unobserve(el));
+      observer.disconnect();
+    };
+  }, [sortedImages, readingMode, chapterId]);
+
+  // Progressive prioritized loading scheduler
+  useEffect(() => {
+    if (sortedImages.length === 0) return;
+
+    // Determine currently visible pages/viewport indices
+    let effectiveVisible = visibleIndices;
+    if (readingMode !== 'vertical') {
+      const currentPages = [activePageIndex];
+      if (readingMode === 'double' && activePageIndex + 1 < sortedImages.length) {
+        currentPages.push(activePageIndex + 1);
+      }
+      effectiveVisible = new Set(currentPages);
+    }
+
+    // Identify unloaded pages
+    const unloaded: number[] = [];
+    for (let i = 0; i < sortedImages.length; i++) {
+      if (!loadedIndices.has(i)) {
+        unloaded.push(i);
+      }
+    }
+
+    if (unloaded.length === 0) {
+      setLoadingIndex(null);
+      return;
+    }
+
+    // Reference reference point 'v' (visible)
+    let v = 0;
+    if (readingMode !== 'vertical') {
+      v = activePageIndex;
+    } else if (effectiveVisible.size > 0) {
+      // Prioritize the top-most visible unloaded element
+      v = Math.min(...Array.from(effectiveVisible) as number[]);
+    }
+
+    // Dynamic prioritization score
+    const getScore = (idx: number, refVal: number): number => {
+      if (idx === refVal) return 0;
+      const diff = idx - refVal;
+      let score = Math.abs(diff) * 2;
+      if (diff < 0) {
+        score += 1; // Prioritize next pages (diff > 0) slightly over previous pages (diff < 0)
+      }
+      return score;
+    };
+
+    // Sort unloaded indices by score (lower score = higher priority)
+    unloaded.sort((a, b) => getScore(a, v) - getScore(b, v));
+
+    const targetIndex = unloaded[0];
+    setLoadingIndex(targetIndex);
+
+  }, [sortedImages, loadedIndices, visibleIndices, readingMode, activePageIndex]);
+
+  const handleImageLoad = (idx: number) => {
+    setLoadedIndices(prev => {
+      const next = new Set(prev);
+      next.add(idx);
+      return next;
+    });
+  };
+
+  const handleImageError = (idx: number) => {
+    // Prevent stuck queue in case of transient error
+    setLoadedIndices(prev => {
+      const next = new Set(prev);
+      next.add(idx);
+      return next;
+    });
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (readingMode === 'vertical') return;
@@ -74,13 +281,14 @@ export default function Reader() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [readingMode, activePageIndex, chapter?.images?.length]);
+  }, [readingMode, activePageIndex, sortedImages.length]);
 
   useEffect(() => {
     if (series?.title && chapter?.number) {
       document.title = `Chapter ${chapter.number} - ${series.title} - ASURA SCANS CLONE`;
     }
   }, [series?.title, chapter?.number]);
+
 
   useEffect(() => {
     const handleScroll = () => {
@@ -412,7 +620,7 @@ export default function Reader() {
           </div>
         </div>
 
-        {readingMode !== 'vertical' && chapter.images && chapter.images.length > 0 && (
+        {readingMode !== 'vertical' && sortedImages && sortedImages.length > 0 && (
           <div className="flex items-center gap-3">
             <button
               onClick={prevPage}
@@ -424,12 +632,12 @@ export default function Reader() {
             </button>
             
             <span className="text-xs font-black text-zinc-400 min-w-[80px] text-center select-none">
-              صفحه {readingMode === 'double' ? `${activePageIndex + 1}-${Math.min(activePageIndex + 2, chapter.images.length)}` : activePageIndex + 1} از {chapter.images.length}
+              صفحه {readingMode === 'double' ? `${(activePageIndex + 1).toLocaleString('fa-IR')}-${Math.min(activePageIndex + 2, sortedImages.length).toLocaleString('fa-IR')}` : (activePageIndex + 1).toLocaleString('fa-IR')} از {sortedImages.length.toLocaleString('fa-IR')}
             </span>
 
             <button
               onClick={nextPage}
-              disabled={readingMode === 'double' ? activePageIndex >= chapter.images.length - 2 : activePageIndex >= chapter.images.length - 1}
+              disabled={readingMode === 'double' ? activePageIndex >= sortedImages.length - 2 : activePageIndex >= sortedImages.length - 1}
               className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-white border border-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               title="صفحه بعدی"
             >
@@ -441,38 +649,106 @@ export default function Reader() {
 
       {/* Reader Content */}
       <div className="pt-4 pb-16 max-w-[800px] mx-auto flex flex-col relative w-full bg-black/20">
-        {chapter.images && chapter.images.length > 0 ? (
+        {/* Anti-Print and Image protection Style Override */}
+        <style>{`
+          @media print {
+            body { display: none !important; }
+          }
+          img {
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -khtml-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-user-drag: none;
+          }
+        `}</style>
+
+        {sortedImages && sortedImages.length > 0 ? (
           <div className="w-full flex flex-col items-center">
             {readingMode === 'vertical' && (
               <div 
                  className="flex flex-col justify-center items-center w-full"
                  style={{ gap: `${imageGap}px` }}
               >
-                {chapter.images.map((img, i) => (
-                  <img 
+                {sortedImages.map((img, i) => (
+                  <div 
                     key={i} 
-                    src={img} 
-                    alt={`Page ${i + 1}`} 
-                    className="object-contain block w-full mx-auto"
-                    loading="lazy"
-                  />
+                    data-index={i} 
+                    className="reader-image-wrapper w-full relative flex justify-center items-center"
+                    style={{ minHeight: loadedIndices.has(i) ? 'auto' : '450px' }}
+                  >
+                    {/* Beautiful Loader Component */}
+                    {!loadedIndices.has(i) && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#111217]/65 backdrop-blur-sm z-10 py-16 min-h-[450px] border border-white/5 rounded-2xl animate-fade-in w-full">
+                        <div className="w-12 h-12 border-4 border-zinc-800 border-t-[var(--color-asura-accent)] rounded-full animate-spin mb-4"></div>
+                        <p className="text-zinc-400 text-xs font-black font-sans">در حال بارگذاری صفحه {(i + 1).toLocaleString('fa-IR')}...</p>
+                      </div>
+                    )}
+
+                    {/* Image rendering */}
+                    {(loadedIndices.has(i) || loadingIndex === i) && (
+                      <div className="relative w-full overflow-hidden select-none">
+                        <img 
+                          src={img} 
+                          alt={`Page ${i + 1}`} 
+                          onLoad={() => handleImageLoad(i)}
+                          onError={() => handleImageError(i)}
+                          className={`object-contain block w-full mx-auto transition-opacity duration-500 select-none pointer-events-none ${loadedIndices.has(i) ? 'opacity-100' : 'opacity-0 h-0 w-0'}`}
+                          referrerPolicy="no-referrer"
+                        />
+                        {/* Perfect transparent protector layer cover */}
+                        <div 
+                          className="absolute inset-0 z-20 cursor-default select-none bg-transparent"
+                          onContextMenu={(e) => e.preventDefault()}
+                          onDragStart={(e) => e.preventDefault()}
+                          style={{ userSelect: 'none', WebkitUserSelect: 'none', pointerEvents: 'auto' }}
+                        />
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
 
             {readingMode === 'single' && (
-              <div className="w-full flex flex-col items-center relative group">
-                <div className="relative max-w-full flex justify-center items-center select-none">
-                  <img 
-                    src={chapter.images[activePageIndex]} 
-                    alt={`Page ${activePageIndex + 1}`} 
-                    className="max-h-[90vh] object-contain block w-auto mx-auto rounded-xl shadow-2xl border border-white/5"
-                  />
+              <div className="w-full flex flex-col items-center relative group min-h-[500px] justify-center">
+                <div className="relative max-w-full flex justify-center items-center select-none w-full" style={{ minHeight: '500px' }}>
+                  
+                  {/* Loader for single mode */}
+                  {!loadedIndices.has(activePageIndex) && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#111217]/65 backdrop-blur-sm z-10 py-16 border border-white/5 rounded-2xl animate-fade-in w-full">
+                      <div className="w-12 h-12 border-4 border-zinc-800 border-t-[var(--color-asura-accent)] rounded-full animate-spin mb-4"></div>
+                      <p className="text-zinc-400 text-xs font-black font-sans">در حال بارگذاری صفحه {(activePageIndex + 1).toLocaleString('fa-IR')}...</p>
+                    </div>
+                  )}
+
+                  {/* Image itself with dynamic loading index visibility */}
+                  {(loadedIndices.has(activePageIndex) || loadingIndex === activePageIndex) && (
+                    <div className="relative overflow-hidden select-none">
+                      <img 
+                        src={sortedImages[activePageIndex]} 
+                        alt={`Page ${activePageIndex + 1}`} 
+                        onLoad={() => handleImageLoad(activePageIndex)}
+                        onError={() => handleImageError(activePageIndex)}
+                        className={`max-h-[90vh] object-contain block w-auto mx-auto rounded-xl shadow-2xl border border-white/5 transition-opacity duration-500 select-none pointer-events-none ${loadedIndices.has(activePageIndex) ? 'opacity-100' : 'opacity-0 h-0 w-0'}`}
+                        referrerPolicy="no-referrer"
+                      />
+                      {/* Protection Overlay */}
+                      <div 
+                        className="absolute inset-0 z-20 cursor-default select-none bg-transparent"
+                        onContextMenu={(e) => e.preventDefault()}
+                        onDragStart={(e) => e.preventDefault()}
+                        style={{ userSelect: 'none', WebkitUserSelect: 'none', pointerEvents: 'auto' }}
+                      />
+                    </div>
+                  )}
                   
                   {/* Absolute Nav Click Targets */}
                   <div 
                     onClick={prevPage}
-                    className="absolute right-0 top-0 bottom-0 w-1/4 cursor-pointer flex items-center justify-start p-4 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-r from-black/40 to-transparent"
+                    className="absolute right-0 top-0 bottom-0 w-1/4 cursor-pointer flex items-center justify-start p-4 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-r from-black/40 to-transparent z-30"
                     title="صفحه قبل"
                   >
                     <div className="w-10 h-10 rounded-full bg-black/70 border border-white/10 flex items-center justify-center text-white hover:bg-[var(--color-asura-accent)] transition-colors">
@@ -481,7 +757,7 @@ export default function Reader() {
                   </div>
                   <div 
                     onClick={nextPage}
-                    className="absolute left-0 top-0 bottom-0 w-1/4 cursor-pointer flex items-center justify-end p-4 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-l from-black/40 to-transparent"
+                    className="absolute left-0 top-0 bottom-0 w-1/4 cursor-pointer flex items-center justify-end p-4 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-l from-black/40 to-transparent z-30"
                     title="صفحه بعد"
                   >
                     <div className="w-10 h-10 rounded-full bg-black/70 border border-white/10 flex items-center justify-center text-white hover:bg-[var(--color-asura-accent)] transition-colors">
@@ -493,33 +769,78 @@ export default function Reader() {
             )}
 
             {readingMode === 'double' && (
-              <div className="w-full flex flex-col items-center relative group">
-                <div className="grid grid-cols-2 gap-4 w-full select-none justify-items-center">
+              <div className="w-full flex flex-col items-center relative group min-h-[500px] justify-center">
+                <div className="grid grid-cols-2 gap-4 w-full select-none justify-items-center relative" style={{ minHeight: '500px' }}>
+                  
                   {/* Right hand side: page activePageIndex + 1 (manga RTL) */}
-                  {activePageIndex + 1 < chapter.images.length ? (
-                    <img 
-                      src={chapter.images[activePageIndex + 1]} 
-                      alt={`Page ${activePageIndex + 2}`} 
-                      className="max-h-[85vh] object-contain block w-full rounded-xl shadow-2xl border border-white/5"
-                    />
+                  {activePageIndex + 1 < sortedImages.length ? (
+                    <div className="relative w-full flex justify-center items-center min-h-[500px] overflow-hidden rounded-xl">
+                      {!loadedIndices.has(activePageIndex + 1) && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#111217]/65 backdrop-blur-sm z-10 py-16 border border-white/5 rounded-2xl animate-fade-in w-full">
+                          <div className="w-12 h-12 border-4 border-zinc-800 border-t-[var(--color-asura-accent)] rounded-full animate-spin mb-4"></div>
+                          <p className="text-zinc-400 text-xs font-black font-sans">در حال بارگذاری صفحه {(activePageIndex + 2).toLocaleString('fa-IR')}...</p>
+                        </div>
+                      )}
+                      
+                      {(loadedIndices.has(activePageIndex + 1) || loadingIndex === activePageIndex + 1) && (
+                        <div className="relative overflow-hidden select-none w-full h-full">
+                          <img 
+                            src={sortedImages[activePageIndex + 1]} 
+                            alt={`Page ${activePageIndex + 2}`} 
+                            onLoad={() => handleImageLoad(activePageIndex + 1)}
+                            onError={() => handleImageError(activePageIndex + 1)}
+                            className={`max-h-[85vh] object-contain block w-full rounded-xl shadow-2xl border border-white/5 transition-opacity duration-500 select-none pointer-events-none ${loadedIndices.has(activePageIndex + 1) ? 'opacity-100' : 'opacity-0 h-0 w-0'}`}
+                            referrerPolicy="no-referrer"
+                          />
+                          <div 
+                            className="absolute inset-0 z-20 cursor-default select-none bg-transparent"
+                            onContextMenu={(e) => e.preventDefault()}
+                            onDragStart={(e) => e.preventDefault()}
+                            style={{ userSelect: 'none', WebkitUserSelect: 'none', pointerEvents: 'auto' }}
+                          />
+                        </div>
+                      )}
+                    </div>
                   ) : (
-                    <div className="max-h-[85vh] aspect-[2/3] w-full flex flex-col items-center justify-center bg-zinc-950 rounded-xl border border-white/5 text-zinc-600 text-xs font-black p-4 text-center">
+                    <div className="max-h-[85vh] aspect-[2/3] w-full flex flex-col items-center justify-center bg-[#111217]/30 rounded-xl border border-white/5 text-zinc-600 text-xs font-black p-4 text-center">
                       پایان چپتر
                     </div>
                   )}
 
                   {/* Left hand side: page activePageIndex */}
-                  <img 
-                    src={chapter.images[activePageIndex]} 
-                    alt={`Page ${activePageIndex + 1}`} 
-                    className="max-h-[85vh] object-contain block w-full rounded-xl shadow-2xl border border-white/5"
-                  />
+                  <div className="relative w-full flex justify-center items-center min-h-[500px] overflow-hidden rounded-xl">
+                    {!loadedIndices.has(activePageIndex) && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#111217]/65 backdrop-blur-sm z-10 py-16 border border-white/5 rounded-2xl animate-fade-in w-full">
+                        <div className="w-12 h-12 border-4 border-zinc-800 border-t-[var(--color-asura-accent)] rounded-full animate-spin mb-4"></div>
+                        <p className="text-zinc-400 text-xs font-black font-sans">در حال بارگذاری صفحه {(activePageIndex + 1).toLocaleString('fa-IR')}...</p>
+                      </div>
+                    )}
+                    
+                    {(loadedIndices.has(activePageIndex) || loadingIndex === activePageIndex) && (
+                      <div className="relative overflow-hidden select-none w-full h-full">
+                        <img 
+                          src={sortedImages[activePageIndex]} 
+                          alt={`Page ${activePageIndex + 1}`} 
+                          onLoad={() => handleImageLoad(activePageIndex)}
+                          onError={() => handleImageError(activePageIndex)}
+                          className={`max-h-[85vh] object-contain block w-full rounded-xl shadow-2xl border border-white/5 transition-opacity duration-500 select-none pointer-events-none ${loadedIndices.has(activePageIndex) ? 'opacity-100' : 'opacity-0 h-0 w-0'}`}
+                          referrerPolicy="no-referrer"
+                        />
+                        <div 
+                          className="absolute inset-0 z-20 cursor-default select-none bg-transparent"
+                          onContextMenu={(e) => e.preventDefault()}
+                          onDragStart={(e) => e.preventDefault()}
+                          style={{ userSelect: 'none', WebkitUserSelect: 'none', pointerEvents: 'auto' }}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Left/Right Overlays */}
                 <div 
                   onClick={prevPage}
-                  className="absolute right-0 top-0 bottom-0 w-1/6 cursor-pointer flex items-center justify-start p-4 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-r from-black/40 to-transparent"
+                  className="absolute right-0 top-0 bottom-0 w-1/6 cursor-pointer flex items-center justify-start p-4 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-r from-black/40 to-transparent z-30"
                   title="صفحه قبل"
                 >
                   <div className="w-10 h-10 rounded-full bg-black/70 border border-white/10 flex items-center justify-center text-white hover:bg-[var(--color-asura-accent)] transition-colors">
@@ -528,7 +849,7 @@ export default function Reader() {
                 </div>
                 <div 
                   onClick={nextPage}
-                  className="absolute left-0 top-0 bottom-0 w-1/6 cursor-pointer flex items-center justify-end p-4 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-l from-black/40 to-transparent"
+                  className="absolute left-0 top-0 bottom-0 w-1/6 cursor-pointer flex items-center justify-end p-4 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-l from-black/40 to-transparent z-30"
                   title="صفحه بعد"
                 >
                   <div className="w-10 h-10 rounded-full bg-black/70 border border-white/10 flex items-center justify-center text-white hover:bg-[var(--color-asura-accent)] transition-colors">
@@ -552,7 +873,7 @@ export default function Reader() {
 
         {/* Read Next Navigation Area */}
         <div className="p-6 md:p-10 flex flex-col items-center border-t border-white/5 mt-10 bg-[#0f0f12]" dir="rtl">
-          <h3 className="font-black text-sm text-zinc-400 mb-6 text-center uppercase tracking-wider">مطالعه چپتر {chapter.number} به پایان رسید</h3>
+          <h3 className="font-black text-sm text-zinc-400 mb-6 text-center uppercase tracking-wider">چپتر {chapter.number} تموم شد</h3>
           
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full">
             {prevChapter ? (
@@ -584,10 +905,6 @@ export default function Reader() {
               </button>
             )}
           </div>
-        </div>
-
-        <div className="p-6 md:p-10">
-          <Comments seriesId={series.id} chapterId={chapter.id} />
         </div>
       </div>
 

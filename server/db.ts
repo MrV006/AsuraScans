@@ -233,10 +233,26 @@ class DatabaseManager {
           this.localData.purchased_chapters = [];
         }
         if (this.localData.users) {
-          this.localData.users = this.localData.users.map(u => ({
-            ...u,
-            walletBalance: u.walletBalance !== undefined ? u.walletBalance : 0
-          }));
+          let migrated = false;
+          this.localData.users = this.localData.users.map(u => {
+            const has8DigitCode = u.melliCode && /^\d{8}$/.test(u.melliCode);
+            if (!has8DigitCode) {
+              const newCode = Math.floor(10000000 + Math.random() * 90000000).toString();
+              migrated = true;
+              return {
+                ...u,
+                melliCode: newCode,
+                walletBalance: u.walletBalance !== undefined ? u.walletBalance : 0
+              };
+            }
+            return {
+              ...u,
+              walletBalance: u.walletBalance !== undefined ? u.walletBalance : 0
+            };
+          });
+          if (migrated) {
+            this.saveLocalData();
+          }
         }
         console.log('Loaded data from local-db.json');
       } else {
@@ -420,6 +436,18 @@ class DatabaseManager {
       }
 
       console.log('Verified MySQL schema tables exist.');
+
+      // Migrate existing MySQL users to have 8-digit unique codes if they are empty or not 8 digits
+      const [users] = await this.pool.execute('SELECT id, melliCode FROM users');
+      if (Array.isArray(users)) {
+        for (const u of users as any[]) {
+          const has8DigitCode = u.melliCode && /^\d{8}$/.test(u.melliCode);
+          if (!has8DigitCode) {
+            const newCode = Math.floor(10000000 + Math.random() * 90000000).toString();
+            await this.pool.execute('UPDATE users SET melliCode = ? WHERE id = ?', [newCode, u.id]);
+          }
+        }
+      }
     } catch (e) {
       console.error('Failed to auto-create MySQL tables:', e);
     }
@@ -598,7 +626,7 @@ class DatabaseManager {
           hasCompletedSetup: user.hasCompletedSetup !== undefined ? !!user.hasCompletedSetup : existing.hasCompletedSetup
         };
       } else {
-        const melliCode = user.melliCode || Math.floor(100000 + Math.random() * 900000).toString();
+        const melliCode = user.melliCode || Math.floor(10000000 + Math.random() * 90000000).toString();
         const hasSetup = user.hasCompletedSetup !== undefined ? (user.hasCompletedSetup ? 1 : 0) : 0;
         await this.pool.execute(
           'INSERT INTO users (id, email, displayName, avatarUrl, banned, role, melliCode, firstName, lastName, phoneNumber, canCreateSeries, rolesText, permissionsText, password, hasCompletedSetup, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -665,7 +693,7 @@ class DatabaseManager {
       this.saveLocalData();
       return updated;
     } else {
-      const melliCode = user.melliCode || Math.floor(100000 + Math.random() * 900000).toString();
+      const melliCode = user.melliCode || Math.floor(10000000 + Math.random() * 90000000).toString();
       const newUser: User = {
         id: user.id,
         email: user.email,
@@ -1508,7 +1536,7 @@ class DatabaseManager {
     return await this.createOrUpdateUser({ ...user, role });
   }
 
-  async updateUserRolesAndPermissions(id: string, roles: string[], permissions: string[]): Promise<User | null> {
+  async updateUserRolesAndPermissions(id: string, roles: string[], permissions: string[], melliCode?: string): Promise<User | null> {
     const user = await this.getUser(id);
     if (!user) return null;
     
@@ -1522,6 +1550,9 @@ class DatabaseManager {
     user.role = standardRole;
     user.roles = roles;
     user.permissions = permissions;
+    if (melliCode !== undefined) {
+      user.melliCode = melliCode;
+    }
     
     return await this.createOrUpdateUser(user);
   }

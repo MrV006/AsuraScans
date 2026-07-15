@@ -109,6 +109,14 @@ function getUserFromHeaders($pdo) {
     return $user;
 }
 
+function isSuperAdminUser($user) {
+    if (!$user) return false;
+    $roles = isset($user['roles']) ? $user['roles'] : (isset($user['rolesText']) && $user['rolesText'] ? array_filter(array_map('trim', explode(',', $user['rolesText']))) : [$user['role']]);
+    if (in_array('super_admin', $roles)) return true;
+    if (isset($user['email']) && ($user['email'] === 'amirrezaveisi45@gmail.com' || $user['email'] === 'Mr.V@admin.com')) return true;
+    return false;
+}
+
 function requireAdmin($pdo) {
     $user = getUserFromHeaders($pdo);
     if (!$user || $user['banned'] || $user['role'] !== 'admin') {
@@ -256,6 +264,18 @@ function ensureSchema($pdo) {
 
     foreach ($queries as $q) {
         $pdo->exec($q);
+    }
+
+    // Migrate existing users' melliCode to 8-digit random unique codes if empty or not 8 digits
+    $stmt = $pdo->query("SELECT id, melliCode FROM users");
+    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($users as $u) {
+        $code = $u['melliCode'] ?? '';
+        if (strlen($code) !== 8 || !preg_match('/^\d{8}$/', $code)) {
+            $newCode = (string)rand(10000000, 99999999);
+            $stmtUpdate = $pdo->prepare("UPDATE users SET melliCode = ? WHERE id = ?");
+            $stmtUpdate->execute([$newCode, $u['id']]);
+        }
     }
 }
 
@@ -585,7 +605,19 @@ if ($method === 'POST' && $sub_path === '/users') {
 
 // 9. BAN USER (ADMIN)
 if ($method === 'PUT' && matchRoute('/users/:id/ban', $sub_path, $params)) {
-    requireAdmin($pdo);
+    $caller = requireAdmin($pdo);
+    if ($caller['id'] === $params['id']) {
+        sendResponse(["error" => "شما نمی‌توانید حساب کاربری خودتان را مسدود کنید."], 400);
+    }
+    
+    // Fetch target user to check if they are super admin
+    $stmtT = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+    $stmtT->execute([$params['id']]);
+    $targetUser = $stmtT->fetch();
+    if ($targetUser && isSuperAdminUser($targetUser)) {
+        sendResponse(["error" => "مسدود کردن مدیریت کل امکان‌پذیر نیست."], 400);
+    }
+
     $input = getJsonInput();
     $banned = isset($input['banned']) ? ($input['banned'] ? 1 : 0) : 0;
     
@@ -597,7 +629,14 @@ if ($method === 'PUT' && matchRoute('/users/:id/ban', $sub_path, $params)) {
 
 // 10. UPDATE USER ROLE & PERMISSIONS (ADMIN)
 if ($method === 'PUT' && matchRoute('/users/:id/roles-permissions', $sub_path, $params)) {
-    requireAdmin($pdo);
+    $caller = getUserFromHeaders($pdo);
+    if (!$caller || !isSuperAdminUser($caller)) {
+        sendResponse(["error" => "تنها مدیریت کل مجاز به ویرایش نقش‌ها و دسترسی‌ها می‌باشد."], 403);
+    }
+    if ($caller['id'] === $params['id']) {
+        sendResponse(["error" => "مدیریت کل امکان تغییر یا تنزل نقش خود را ندارد."], 400);
+    }
+
     $input = getJsonInput();
     $roles = isset($input['roles']) ? $input['roles'] : [];
     $permissions = isset($input['permissions']) ? $input['permissions'] : [];
@@ -616,7 +655,14 @@ if ($method === 'PUT' && matchRoute('/users/:id/roles-permissions', $sub_path, $
 
 // 11. UPDATE ROLE (ADMIN)
 if ($method === 'PUT' && matchRoute('/users/:id/role', $sub_path, $params)) {
-    requireAdmin($pdo);
+    $caller = getUserFromHeaders($pdo);
+    if (!$caller || !isSuperAdminUser($caller)) {
+        sendResponse(["error" => "تنها مدیریت کل مجاز به ویرایش نقش کاربر می‌باشد."], 403);
+    }
+    if ($caller['id'] === $params['id']) {
+        sendResponse(["error" => "مدیریت کل امکان تغییر یا تنزل نقش خود را ندارد."], 400);
+    }
+
     $input = getJsonInput();
     $role = isset($input['role']) ? $input['role'] : 'user';
     
@@ -628,7 +674,11 @@ if ($method === 'PUT' && matchRoute('/users/:id/role', $sub_path, $params)) {
 
 // 12. UPDATE CAN CREATE SERIES (ADMIN)
 if ($method === 'PUT' && matchRoute('/users/:id/can-create-series', $sub_path, $params)) {
-    requireAdmin($pdo);
+    $caller = getUserFromHeaders($pdo);
+    if (!$caller || !isSuperAdminUser($caller)) {
+        sendResponse(["error" => "تنها مدیریت کل مجاز به تغییر این دسترسی می‌باشد."], 403);
+    }
+    
     $input = getJsonInput();
     $canCreateSeries = isset($input['canCreateSeries']) ? ($input['canCreateSeries'] ? 1 : 0) : 0;
     
@@ -1449,31 +1499,45 @@ if ($method === 'POST' && $sub_path === '/wallet/charge') {
     if (!$user) sendResponse(["error" => "کاربر یافت نشد."], 401);
     
     $input = getJsonInput();
+    $targetUserId = isset($input['userId']) ? $input['userId'] : $user['id'];
     $amount = (int)(isset($input['amount']) ? $input['amount'] : 0);
+    $type = isset($input['type']) ? $input['type'] : 'admin_adjustment';
     $description = isset($input['description']) ? $input['description'] : 'شارژ حساب کاربری';
     
-    if ($amount <= 0) {
-        sendResponse(["error" => "مبلغ شارژ باید بیشتر از صفر باشد."], 400);
+    if ($targetUserId !== $user['id']) {
+        if ($user['role'] !== 'admin' && !isSuperAdminUser($user)) {
+            sendResponse(["error" => "شما مجاز به تغییر موجودی دیگران نیستید."], 403);
+        }
+    }
+    
+    if ($amount === 0) {
+        sendResponse(["error" => "مبلغ تراکنش نمی‌تواند صفر باشد."], 400);
     }
     
     // Begin Transaction
     $pdo->beginTransaction();
     try {
-        $stmtUser = $pdo->prepare("SELECT walletBalance FROM users WHERE id = ? FOR UPDATE");
-        $stmtUser->execute([$user['id']]);
-        $uData = $stmtUser->fetch();
-        $newBalance = ($uData['walletBalance'] ?: 0) + $amount;
+        $stmtTarget = $pdo->prepare("SELECT displayName, walletBalance FROM users WHERE id = ? FOR UPDATE");
+        $stmtTarget->execute([$targetUserId]);
+        $targetData = $stmtTarget->fetch();
+        if (!$targetData) {
+            $pdo->rollBack();
+            sendResponse(["error" => "کاربر مقصد یافت نشد."], 404);
+        }
+        
+        $newBalance = ($targetData['walletBalance'] ?: 0) + $amount;
         
         $stmtUpdate = $pdo->prepare("UPDATE users SET walletBalance = ? WHERE id = ?");
-        $stmtUpdate->execute([$newBalance, $user['id']]);
+        $stmtUpdate->execute([$newBalance, $targetUserId]);
         
         $tid = 'tx-' . round(microtime(true) * 1000);
-        $stmtTx = $pdo->prepare("INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName) VALUES (?, ?, ?, ?, 'charge', ?, ?, ?)");
+        $stmtTx = $pdo->prepare("INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
         $stmtTx->execute([
             $tid,
-            $user['id'],
-            $user['displayName'],
+            $targetUserId,
+            $targetData['displayName'],
             $amount,
+            $type,
             $description,
             $user['id'],
             $user['displayName']

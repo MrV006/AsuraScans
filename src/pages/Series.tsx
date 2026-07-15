@@ -212,8 +212,9 @@ export default function Series() {
       alert("برای ثبت درخواست ابتدا وارد شوید.");
       return;
     }
-    if (!joinMelliCode || joinMelliCode.length !== 6) {
-      alert("لطفا ابتدا یک کد کاربری (کد ملی سایت) معتبر ۶ رقمی در پروفایل خود ثبت کنید.");
+    const code = profile?.melliCode || '';
+    if (!code) {
+      alert("شناسه اختصاصی کاربری شما یافت نشد. لطفا ابتدا آن را در پروفایل خود دریافت کنید.");
       return;
     }
     try {
@@ -222,7 +223,7 @@ export default function Series() {
         email: user.email || '',
         displayName: profile?.displayName || user.email?.split('@')[0] || 'Unknown User',
         role: joinRole,
-        melliCode: joinMelliCode
+        melliCode: code
       });
       alert("درخواست همکاری شما ثبت شد و پس از بررسی مدیر تایید خواهد شد.");
       setShowJoinModal(false);
@@ -778,16 +779,9 @@ export default function Series() {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-zinc-300 mb-2">شناسه ۶ رقمی (کد ملی سایت)</label>
-                <input 
-                  type="text" 
-                  maxLength={6}
-                  value={joinMelliCode}
-                  onChange={(e) => setJoinMelliCode(e.target.value)}
-                  placeholder="مثال: 123456"
-                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50 text-right font-mono"
-                />
+              <div className="bg-white/5 border border-white/10 rounded-xl p-3.5">
+                <span className="text-[10px] text-zinc-400 block mb-1">کد اختصاصی کاربری شما (به‌صورت خودکار ضمیمه می‌شود)</span>
+                <strong className="text-xs font-mono text-white tracking-widest">{profile?.melliCode || 'ثبت نشده (ابتدا از پروفایل دریافت کنید)'}</strong>
               </div>
             </div>
 

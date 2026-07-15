@@ -244,7 +244,7 @@ export const apiClient = {
     return res.json();
   },
 
-  async addComment(chapterId: string, comment: { id: string; userId: string; userName: string; userAvatar: string; content: string }) {
+  async addComment(chapterId: string, comment: { id: string; userId: string; userName: string; userAvatar: string; content: string; parentId?: string }) {
     const res = await fetch(`${API_URL}/api/chapters/${chapterId}/comments`, {
       method: 'POST',
       headers: this.getHeaders(),
@@ -360,11 +360,11 @@ export const apiClient = {
     return res.json();
   },
 
-  async updateUserRolesAndPermissions(userId: string, roles: string[], permissions: string[], adminUid: string) {
+  async updateUserRolesAndPermissions(userId: string, roles: string[], permissions: string[], adminUid: string, melliCode?: string) {
     const res = await fetch(`${API_URL}/api/users/${userId}/roles-permissions`, {
       method: 'PUT',
       headers: this.getHeaders(adminUid),
-      body: JSON.stringify({ roles, permissions })
+      body: JSON.stringify({ roles, permissions, melliCode })
     });
     return res.json();
   },

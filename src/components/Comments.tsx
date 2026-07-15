@@ -21,9 +21,30 @@ interface Comment {
   };
 }
 
+function SpoilerText({ text }: { text: string; key?: React.Key }) {
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <span 
+      onClick={(e) => {
+        e.stopPropagation();
+        setRevealed(!revealed);
+      }}
+      className={`relative inline-block cursor-pointer px-1.5 py-0.5 rounded transition-all duration-300 ${
+        revealed 
+          ? 'bg-zinc-800 text-zinc-100 blur-none' 
+          : 'bg-zinc-700/50 text-zinc-400 blur-[5px] select-none hover:bg-zinc-600/50'
+      }`}
+      title={revealed ? "برای مخفی کردن کلیک کنید" : "برای مشاهده اسپویلر کلیک کنید"}
+    >
+      {text}
+    </span>
+  );
+}
+
 export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?: string }) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
+  const [replyText, setReplyText] = useState('');
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const { user, profile, setShowSetupModal } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
@@ -77,7 +98,8 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
   const handleSubmit = async (e: React.FormEvent, parentId?: string) => {
     e.preventDefault();
     if (!user) return;
-    const content = newComment.trim();
+    const isReply = !!parentId;
+    const content = isReply ? replyText.trim() : newComment.trim();
     if (!content) return;
 
     try {
@@ -87,10 +109,15 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
         userId: user.uid,
         userName: profile?.displayName || 'User',
         userAvatar: profile?.avatarUrl || '',
-        content: content
+        content: content,
+        parentId: parentId
       });
-      setNewComment('');
-      setReplyingTo(null);
+      if (isReply) {
+        setReplyText('');
+        setReplyingTo(null);
+      } else {
+        setNewComment('');
+      }
     } catch (error) {
       console.error("Error adding comment:", error);
     }
@@ -107,81 +134,119 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
 
   const handleVote = async (comment: Comment, type: 'up' | 'down') => {
     if (!user) return alert("Log in to vote!");
+    
+    // Optimistic Update
+    setComments(prevComments => {
+      return prevComments.map(c => {
+        if (c.id === comment.id) {
+          let likes = [...(c.likes || [])];
+          let dislikes = [...(c.dislikes || [])];
+          
+          if (type === 'up') {
+            if (likes.includes(user.uid)) {
+              likes = likes.filter(id => id !== user.uid);
+            } else {
+              likes.push(user.uid);
+              dislikes = dislikes.filter(id => id !== user.uid);
+            }
+          } else {
+            if (dislikes.includes(user.uid)) {
+              dislikes = dislikes.filter(id => id !== user.uid);
+            } else {
+              dislikes.push(user.uid);
+              likes = likes.filter(id => id !== user.uid);
+            }
+          }
+          return { ...c, likes, dislikes };
+        }
+        return c;
+      });
+    });
+
     try {
       await apiClient.reactToComment(comment.id, user.uid, type === 'up' ? 'like' : 'dislike');
     } catch (e) {
       console.error("Error voting:", e);
+      fetchComments();
     }
   };
 
-  const insertSpoiler = () => {
-    setNewComment(prev => prev + "[spoiler]Hidden text[/spoiler]");
-  };
-
   const renderContentWithSpoiler = (text: string) => {
-    const parts = text.split(/(\[spoiler\].*?\[\/spoiler\])/gs);
+    if (!text) return null;
+    const parts = text.split(/(\[spoiler\].*?\[\/spoiler\])/gsi);
     return parts.map((part, i) => {
-      if (part.startsWith('[spoiler]') && part.endsWith('[/spoiler]')) {
-        const innerText = part.slice(9, -10);
-        return (
-           <span key={i} className="group/spoiler relative inline-block cursor-pointer">
-             <span className="blur-sm bg-white/10 rounded px-1 transition-all group-hover/spoiler:blur-none">{innerText}</span>
-           </span>
-        );
+      if (/^\[spoiler\]([\s\S]*?)\[\/spoiler\]$/i.test(part)) {
+        const match = part.match(/^\[spoiler\]([\s\S]*?)\[\/spoiler\]$/i);
+        const innerText = match ? match[1] : '';
+        return <SpoilerText key={i} text={innerText} />;
       }
       return <span key={i}>{part}</span>;
     });
   };
 
-  const renderCommentForm = (parentId?: string, autoFocus: boolean = false) => (
-    <form onSubmit={(e) => handleSubmit(e, parentId)} className="mb-8 mt-2">
-      <div className="flex gap-4">
-        <div className="w-10 h-10 rounded-full bg-[var(--color-asura-accent)] flex items-center justify-center shrink-0 overflow-hidden border border-[var(--color-asura-border)]">
-          {profile?.avatarUrl ? (
-             <img src={profile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-          ) : (
-            <UserIcon size={20} className="text-white" />
-          )}
-        </div>
-        <div className="flex-1">
-          <textarea
-            value={newComment}
-            onChange={(e) => setNewComment(e.target.value)}
-            autoFocus={autoFocus}
-            placeholder={parentId ? "Write a reply..." : "What are your thoughts?"}
-            className="w-full bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-xl p-4 text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50 transition-colors resize-none h-24"
-          />
-          <div className="flex flex-wrap justify-between mt-2 gap-2">
-            <button 
-              type="button" 
-              onClick={insertSpoiler}
-              className="px-3 py-1 bg-white/5 hover:bg-white/10 text-zinc-400 text-xs font-bold uppercase rounded-lg border border-white/10 transition-colors"
-            >
-              + Spoiler Tag
-            </button>
-            <div className="flex gap-2">
-              {parentId && (
-                <button
-                  type="button"
-                  onClick={() => { setReplyingTo(null); setNewComment(''); }}
-                  className="px-6 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg font-bold text-sm uppercase transition-colors"
-                >
-                  Cancel
-                </button>
-              )}
-              <button
-                type="submit"
-                disabled={!newComment.trim()}
-                className="px-6 py-2 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-sm uppercase transition-colors shadow-lg"
+  const renderCommentForm = (parentId?: string, autoFocus: boolean = false) => {
+    const isReply = !!parentId;
+    const value = isReply ? replyText : newComment;
+    const onChange = (val: string) => isReply ? setReplyText(val) : setNewComment(val);
+    const insertSpoilerForForm = () => {
+      if (isReply) {
+        setReplyText(prev => prev + "[spoiler]متن مخفی[/spoiler]");
+      } else {
+        setNewComment(prev => prev + "[spoiler]متن مخفی[/spoiler]");
+      }
+    };
+
+    return (
+      <form onSubmit={(e) => handleSubmit(e, parentId)} className="mb-8 mt-2">
+        <div className="flex gap-4">
+          <div className="w-10 h-10 rounded-full bg-[var(--color-asura-accent)] flex items-center justify-center shrink-0 overflow-hidden border border-[var(--color-asura-border)]">
+            {profile?.avatarUrl ? (
+               <img src={profile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+            ) : (
+              <UserIcon size={20} className="text-white" />
+            )}
+          </div>
+          <div className="flex-1">
+            <textarea
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              autoFocus={autoFocus}
+              placeholder={isReply ? "پاسخ خود را بنویسید..." : "دیدگاه خود را بنویسید..."}
+              className="w-full bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-xl p-4 text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50 transition-colors resize-none h-24 text-right"
+              dir="rtl"
+            />
+            <div className="flex flex-wrap justify-between mt-2 gap-2">
+              <button 
+                type="button" 
+                onClick={insertSpoilerForForm}
+                className="px-3 py-1 bg-white/5 hover:bg-white/10 text-zinc-400 text-xs font-bold uppercase rounded-lg border border-white/10 transition-colors text-right"
               >
-                {parentId ? 'Reply' : 'Post Comment'}
+                + Spoiler Tag
               </button>
+              <div className="flex gap-2">
+                {isReply && (
+                  <button
+                    type="button"
+                    onClick={() => { setReplyingTo(null); setReplyText(''); }}
+                    className="px-6 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg font-bold text-sm uppercase transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={!value.trim()}
+                  className="px-6 py-2 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-sm uppercase transition-colors shadow-lg"
+                >
+                  {isReply ? 'Reply' : 'Post Comment'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </form>
-  );
+      </form>
+    );
+  };
 
   const topLevelComments = comments.filter(c => !c.parentId).sort((a, b) => b.createdAt?.toDate?.()?.getTime() - a.createdAt?.toDate?.()?.getTime());
 

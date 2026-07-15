@@ -69,6 +69,7 @@ export default function Admin() {
   const [selectedUserForRoles, setSelectedUserForRoles] = useState<any | null>(null);
   const [selectedUserRoles, setSelectedUserRoles] = useState<string[]>([]);
   const [selectedUserPermissions, setSelectedUserPermissions] = useState<string[]>([]);
+  const [selectedUserMelliCode, setSelectedUserMelliCode] = useState<string>("");
   const [editingRoleDefault, setEditingRoleDefault] = useState<string>("admin");
   const [globalRolePermissions, setGlobalRolePermissions] = useState<Record<string, string[]>>({
     admin: ['create_series', 'edit_series', 'add_chapter', 'edit_chapter', 'delete_chapter', 'delete_comment', 'manage_reports'],
@@ -1334,18 +1335,31 @@ export default function Admin() {
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-3">
+                              {isSuperAdmin && u.id !== currentUserData?.id && (
+                                <button
+                                  onClick={() => {
+                                    setSelectedUserForRoles(u);
+                                    setSelectedUserRoles(u.roles || (u.role === 'admin' ? ['admin'] : ['user']));
+                                    setSelectedUserPermissions(u.permissions || []);
+                                    setSelectedUserMelliCode(u.melliCode || "");
+                                  }}
+                                  className="font-black text-[10px] text-[var(--color-asura-accent-light)] hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-2.5 py-1.5 rounded-lg border border-white/10"
+                                >
+                                  مدیریت نقش و دسترسی
+                                </button>
+                              )}
                               <button
                                 onClick={() => {
-                                  setSelectedUserForRoles(u);
-                                  setSelectedUserRoles(u.roles || (u.role === 'admin' ? ['admin'] : ['user']));
-                                  setSelectedUserPermissions(u.permissions || []);
-                                }}
-                                className="font-black text-[10px] text-[var(--color-asura-accent-light)] hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-2.5 py-1.5 rounded-lg border border-white/10"
-                              >
-                                مدیریت نقش و دسترسی
-                              </button>
-                              <button
-                                onClick={() => {
+                                  if (u.id === (currentUserData?.id || user?.uid)) {
+                                    alert("شما نمی‌توانید حساب کاربری خودتان را مسدود کنید.");
+                                    return;
+                                  }
+                                  const targetRoles = u.roles || [u.role || 'user'];
+                                  const isTargetSuperAdmin = targetRoles.includes('super_admin') || u.email === "amirrezaveisi45@gmail.com" || u.email === "Mr.V@admin.com";
+                                  if (isTargetSuperAdmin) {
+                                    alert("مسدود کردن مدیریت کل امکان‌پذیر نیست.");
+                                    return;
+                                  }
                                   const newBannedStatus = !u.banned;
                                   if (
                                     !window.confirm(
@@ -1393,6 +1407,20 @@ export default function Admin() {
                     <p className="text-zinc-500 text-xs mb-6 font-semibold font-sans">
                       {selectedUserForRoles.email || selectedUserForRoles.id}
                     </p>
+
+                    {/* Unique 8-Digit User Code (Editable by Super Admin) */}
+                    <div className="mb-6 bg-black/20 p-4 rounded-xl border border-white/5">
+                      <label className="block text-xs font-black text-zinc-300 mb-2">کد اختصاصی ۸ رقمی کاربری</label>
+                      <input 
+                        type="text" 
+                        maxLength={8}
+                        value={selectedUserMelliCode}
+                        onChange={(e) => setSelectedUserMelliCode(e.target.value.replace(/\D/g, ""))}
+                        placeholder="مثال: 12345678"
+                        className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)] text-left font-mono"
+                      />
+                      <p className="text-[10px] text-zinc-500 mt-1">ویرایش این کد اختصاصی تنها توسط مدیریت کل سیستم امکان‌پذیر است.</p>
+                    </div>
 
                     {/* Roles section */}
                     <div className="mb-6">
@@ -1489,7 +1517,8 @@ export default function Admin() {
                               selectedUserForRoles.id, 
                               selectedUserRoles, 
                               selectedUserPermissions, 
-                              user!.uid
+                              user!.uid,
+                              selectedUserMelliCode
                             );
                             alert("نقش‌ها و دسترسی‌های کاربر با موفقیت بروزرسانی شد.");
                             setSelectedUserForRoles(null);

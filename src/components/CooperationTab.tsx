@@ -94,8 +94,9 @@ export default function CooperationTab({
   };
 
   const handleRequestCollaboration = async (seriesId: string) => {
-    if (!reqMelliCode.trim() || reqMelliCode.length < 10) {
-      setReqError("لطفا کد ملی معتبر ۱۰ رقمی خود را وارد کنید.");
+    const code = profile?.melliCode || '';
+    if (!code) {
+      setReqError("شناسه اختصاصی کاربری شما یافت نشد. لطفا ابتدا آن را در پروفایل دریافت کنید.");
       return;
     }
 
@@ -109,7 +110,7 @@ export default function CooperationTab({
         email: user?.email,
         displayName: profile?.displayName || user?.email,
         role: reqRole,
-        melliCode: reqMelliCode
+        melliCode: code
       });
       onUpdateSeries(res.data);
       setReqSuccess("درخواست همکاری شما با موفقیت ثبت شد و در انتظار تایید مدیریت است.");
@@ -423,16 +424,9 @@ export default function CooperationTab({
                                 <option value="editor">ادیتور (Editor) - ۳۰٪</option>
                               </select>
                             </div>
-                            <div>
-                              <label className="block text-[10px] text-zinc-400 font-bold mb-1">کد ملی شما (جهت تسویه‌حساب):</label>
-                              <input
-                                type="text"
-                                maxLength={10}
-                                placeholder="کد ملی ده رقمی"
-                                value={reqMelliCode}
-                                onChange={(e) => setReqMelliCode(e.target.value.replace(/\D/g, ""))}
-                                className="w-full bg-zinc-950 border border-white/5 text-white rounded-lg p-1.5 text-xs font-bold text-center focus:outline-none focus:border-[var(--color-asura-accent)]"
-                              />
+                            <div className="bg-zinc-950 border border-white/5 rounded-lg p-2 text-center">
+                              <span className="block text-[10px] text-zinc-400 font-bold mb-1">کد اختصاصی کاربری شما:</span>
+                              <strong className="text-xs text-white font-mono tracking-wider">{profile?.melliCode || "ثبت نشده (ابتدا از پروفایل دریافت کنید)"}</strong>
                             </div>
 
                             {reqError && <p className="text-red-400 text-[10px] font-bold">{reqError}</p>}

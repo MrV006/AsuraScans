@@ -48,6 +48,12 @@ async function startServer() {
   app.use(express.json());
   app.use("/uploads", express.static(uploadsDir));
 
+  const isSuperAdminUser = (user: any): boolean => {
+    if (!user) return false;
+    const userRoles = user.roles || [user.role || 'user'];
+    return userRoles.includes('super_admin') || user.email === 'amirrezaveisi45@gmail.com' || user.email === 'Mr.V@admin.com';
+  };
+
   // Helper middleware for auth checks if needed (Admin verification simulated)
   const hasPermission = async (userId: string, permission: string): Promise<boolean> => {
     const user = await dbManager.getUser(userId);
@@ -339,9 +345,17 @@ async function startServer() {
 
   app.put("/api/users/:id/ban", requireAdmin, async (req, res) => {
     try {
-      const { banned } = req.body;
+      const callerUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
+      if (callerUid === req.params.id) {
+        return res.status(400).json({ error: "شما نمی‌توانید حساب کاربری خودتان را مسدود کنید." });
+      }
+
       const user = await dbManager.getUser(req.params.id);
       if (!user) return res.status(404).json({ error: "User not found" });
+
+      if (isSuperAdminUser(user)) {
+        return res.status(400).json({ error: "مسدود کردن مدیریت کل امکان‌پذیر نیست." });
+      }
       
       const updated = await dbManager.createOrUpdateUser({
         ...user,
@@ -356,11 +370,20 @@ async function startServer() {
 
   app.put("/api/users/:id/roles-permissions", requireAdmin, async (req, res) => {
     try {
-      const { roles, permissions } = req.body;
+      const callerUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
+      const caller = await dbManager.getUser(callerUid);
+      if (!caller || !isSuperAdminUser(caller)) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به ویرایش نقش‌ها و دسترسی‌ها می‌باشد." });
+      }
+      if (callerUid === req.params.id) {
+        return res.status(400).json({ error: "مدیریت کل امکان تغییر یا تنزل نقش خود را ندارد." });
+      }
+
+      const { roles, permissions, melliCode } = req.body;
       if (!Array.isArray(roles) || !Array.isArray(permissions)) {
         return res.status(400).json({ error: "Roles and permissions must be arrays." });
       }
-      const updated = await dbManager.updateUserRolesAndPermissions(req.params.id, roles, permissions);
+      const updated = await dbManager.updateUserRolesAndPermissions(req.params.id, roles, permissions, melliCode);
       if (!updated) return res.status(404).json({ error: "User not found" });
       io.emit("users:updated", { userId: updated.id });
       res.json(updated);
@@ -892,6 +915,15 @@ async function startServer() {
 
   app.put("/api/users/:id/role", requireAdmin, async (req, res) => {
     try {
+      const callerUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
+      const caller = await dbManager.getUser(callerUid);
+      if (!caller || !isSuperAdminUser(caller)) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به ویرایش نقش کاربر می‌باشد." });
+      }
+      if (callerUid === req.params.id) {
+        return res.status(400).json({ error: "مدیریت کل امکان تغییر یا تنزل نقش خود را ندارد." });
+      }
+
       const { role } = req.body;
       if (role !== 'admin' && role !== 'staff' && role !== 'user') {
         return res.status(400).json({ error: "Invalid role specified." });
@@ -907,6 +939,12 @@ async function startServer() {
 
   app.put("/api/users/:id/can-create-series", requireAdmin, async (req, res) => {
     try {
+      const callerUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
+      const caller = await dbManager.getUser(callerUid);
+      if (!caller || !isSuperAdminUser(caller)) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به تغییر این دسترسی می‌باشد." });
+      }
+
       const { canCreateSeries } = req.body;
       const updated = await dbManager.setUserCanCreateSeries(req.params.id, !!canCreateSeries);
       if (!updated) return res.status(404).json({ error: "User not found" });
