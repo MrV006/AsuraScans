@@ -768,6 +768,8 @@ class DatabaseManager {
     status?: string;
     type?: string;
     sortBy?: string;
+    limit?: number;
+    offset?: number;
   }): Promise<Series[]> {
     if (this.isUsingMySQL && this.pool) {
       let queryStr = 'SELECT * FROM series WHERE 1=1';
@@ -823,6 +825,21 @@ class DatabaseManager {
         list.sort((a, b) => (b.views || 0) - (a.views || 0));
       } else if (sortBy === 'rating') {
         list.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      } else if (sortBy === 'popular') {
+        try {
+          const [purchaseRows] = await this.pool.execute('SELECT seriesId, COUNT(*) as count FROM purchased_chapters GROUP BY seriesId');
+          const counts = new Map<string, number>();
+          (purchaseRows as any[]).forEach(r => counts.set(r.seriesId, parseInt(r.count || 0)));
+          list.sort((a, b) => (counts.get(b.id) || 0) - (counts.get(a.id) || 0));
+        } catch (e) {
+          console.error("Error sorting by popular", e);
+        }
+      }
+
+      if (filters.offset !== undefined || filters.limit !== undefined) {
+        const start = filters.offset || 0;
+        const end = filters.limit !== undefined ? start + filters.limit : list.length;
+        list = list.slice(start, end);
       }
 
       return list;
@@ -865,6 +882,18 @@ class DatabaseManager {
       list.sort((a, b) => (b.views || 0) - (a.views || 0));
     } else if (sortBy === 'rating') {
       list.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    } else if (sortBy === 'popular') {
+      const counts = new Map<string, number>();
+      (this.localData.purchased_chapters || []).forEach(pc => {
+        counts.set(pc.seriesId, (counts.get(pc.seriesId) || 0) + 1);
+      });
+      list.sort((a, b) => (counts.get(b.id) || 0) - (counts.get(a.id) || 0));
+    }
+
+    if (filters.offset !== undefined || filters.limit !== undefined) {
+      const start = filters.offset || 0;
+      const end = filters.limit !== undefined ? start + filters.limit : list.length;
+      list = list.slice(start, end);
     }
 
     return list.map(s => ({

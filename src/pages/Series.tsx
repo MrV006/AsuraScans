@@ -51,7 +51,7 @@ export default function Series() {
 
   useEffect(() => {
     if (series?.title) {
-      document.title = `${series.title} - ASURA SCANS CLONE`;
+      document.title = `${series.title} - Mangata`;
     }
   }, [series?.title]);
 

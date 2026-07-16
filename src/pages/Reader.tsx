@@ -285,7 +285,7 @@ export default function Reader() {
 
   useEffect(() => {
     if (series?.title && chapter?.number) {
-      document.title = `Chapter ${chapter.number} - ${series.title} - ASURA SCANS CLONE`;
+      document.title = `Chapter ${chapter.number} - ${series.title} - Mangata`;
     }
   }, [series?.title, chapter?.number]);
 

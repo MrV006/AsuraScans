@@ -109,9 +109,9 @@ export function Navbar() {
             />
           ) : (
             <span className="text-xl sm:text-2xl font-black tracking-tighter text-[var(--color-asura-accent)]">
-              {(settings?.siteName || "ASURA SCANS").split(' ')[0]}
+              {(settings?.siteName || "Mangata").split(' ')[0]}
               <span className="text-white">
-                {(settings?.siteName || "ASURA SCANS").split(' ').slice(1).join(' ') ? ' ' + (settings?.siteName || "ASURA SCANS").split(' ').slice(1).join(' ') : ''}
+                {(settings?.siteName || "Mangata").split(' ').slice(1).join(' ') ? ' ' + (settings?.siteName || "Mangata").split(' ').slice(1).join(' ') : ''}
               </span>
             </span>
           )}

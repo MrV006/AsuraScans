@@ -16,6 +16,7 @@ import {
   BookOpen,
   Wallet,
   EyeOff,
+  Sliders,
 } from "lucide-react";
 import { Series } from "../lib/types";
 import CooperationTab from "../components/CooperationTab";
@@ -122,8 +123,8 @@ export default function Admin() {
     instagramUrl: "",
     seoKeywords: "",
     seoDescription: "",
-    siteName: "AsuraClone",
-    footerCopyrightText: "ASURA SCANS",
+    siteName: "Mangata",
+    footerCopyrightText: "Mangata",
     footerSubtext: "MADE BY FANS FOR FANS",
     logoUrl: "",
     primaryColor: "#4f46e5",
@@ -148,6 +149,7 @@ export default function Admin() {
     | "settings"
     | "wallet"
     | "cooperation"
+    | "slider"
   >("dashboard");
 
   // Auth Forms
@@ -889,6 +891,15 @@ export default function Admin() {
               className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "cooperation" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
             >
               <UsersIcon size={18} /> کارهای تیمی و همکاری
+            </button>
+          )}
+
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab("slider")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "slider" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <Sliders size={18} /> مدیریت اسلایدر صفحه اصلی
             </button>
           )}
         </div>
@@ -2711,7 +2722,7 @@ export default function Admin() {
                         value={siteSettings.footerCopyrightText || ""} 
                         onChange={e => setSiteSettings({...siteSettings, footerCopyrightText: e.target.value})} 
                         className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white" 
-                        placeholder="ASURA SCANS"
+                        placeholder="Mangata"
                       />
                     </div>
                     <div>
@@ -3082,6 +3093,53 @@ export default function Admin() {
                 setSeriesList(prev => prev.map(s => s.id === updatedSeries.id ? updatedSeries : s));
               }}
             />
+          )}
+
+          {activeTab === "slider" && (
+            <div dir="rtl" className="text-right">
+              <h2 className="text-lg font-black text-white mb-2">مدیریت اسلایدر صفحه اصلی</h2>
+              <p className="text-zinc-400 text-xs mb-6">در این بخش می‌توانید مانهواهایی که قرار است در اسلایدر بزرگ و چرخشی صفحه اصلی قرار بگیرند را مدیریت کنید. محدودیتی در تعداد وجود ندارد، ولی پیشنهاد می‌شود بین ۳ تا ۷ اثر جذاب را انتخاب کنید.</p>
+              
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                {seriesList.map(s => {
+                  const isInSlider = !!s.isHero;
+                  return (
+                    <div key={s.id} className="bg-black/30 border border-white/5 rounded-2xl p-3 flex flex-col items-center group relative hover:border-[var(--color-asura-accent)]/30 transition-all duration-300">
+                      <div className="aspect-[3/4] w-full rounded-xl overflow-hidden relative mb-3 bg-zinc-800">
+                        <img src={s.cover} alt={s.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                        {isInSlider && (
+                          <div className="absolute top-2 right-2 bg-gradient-to-r from-amber-500 to-yellow-500 text-black text-[9px] font-black px-2 py-0.5 rounded-full shadow-lg">
+                            فعال در اسلایدر
+                          </div>
+                        )}
+                      </div>
+                      <h3 className="font-black text-white text-xs line-clamp-1 mb-3 text-center w-full">{s.title}</h3>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const payload = {
+                              ...s,
+                              isHero: !isInSlider
+                            };
+                            await apiClient.saveSeries(payload);
+                            fetchSeries();
+                          } catch (err: any) {
+                            alert("خطا در بروزرسانی اسلایدر: " + err.message);
+                          }
+                        }}
+                        className={`w-full py-2 px-3 rounded-xl font-bold text-[11px] text-center transition-all ${
+                          isInSlider 
+                            ? 'bg-amber-500 hover:bg-amber-600 text-black shadow-lg shadow-amber-500/15 animate-pulse' 
+                            : 'bg-white/5 hover:bg-white/10 text-zinc-300 border border-white/5'
+                        }`}
+                      >
+                        {isInSlider ? '✓ فعال در اسلایدر' : '+ افزودن به اسلایدر'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
       </div>

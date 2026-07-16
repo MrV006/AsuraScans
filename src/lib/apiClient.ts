@@ -150,6 +150,8 @@ export const apiClient = {
     status?: string;
     type?: string;
     sortBy?: string;
+    limit?: number;
+    offset?: number;
   }) {
     let url = `${API_URL}/api/series`;
     if (filters) {
@@ -160,6 +162,8 @@ export const apiClient = {
       if (filters.status) params.append('status', filters.status);
       if (filters.type) params.append('type', filters.type);
       if (filters.sortBy) params.append('sortBy', filters.sortBy);
+      if (filters.limit !== undefined) params.append('limit', String(filters.limit));
+      if (filters.offset !== undefined) params.append('offset', String(filters.offset));
       
       const queryStr = params.toString();
       if (queryStr) {

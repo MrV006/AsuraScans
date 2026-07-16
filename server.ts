@@ -416,7 +416,7 @@ async function startServer() {
   // -----------------------------------------------------------------
   app.get("/api/series", async (req, res) => {
     try {
-      const { q, genres, tags, status, type, sortBy } = req.query;
+      const { q, genres, tags, status, type, sortBy, limit, offset } = req.query;
       const parsedGenres = typeof genres === "string" && genres ? genres.split(",") : undefined;
       const parsedTags = typeof tags === "string" && tags ? tags.split(",") : undefined;
 
@@ -427,6 +427,8 @@ async function startServer() {
         status: typeof status === "string" ? status : undefined,
         type: typeof type === "string" ? type : undefined,
         sortBy: typeof sortBy === "string" ? sortBy : undefined,
+        limit: typeof limit === "string" ? parseInt(limit) : undefined,
+        offset: typeof offset === "string" ? parseInt(offset) : undefined,
       });
       res.json(list);
     } catch (err: any) {

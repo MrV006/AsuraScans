@@ -12,7 +12,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   useEffect(() => {
-    document.title = settings.siteName || 'ASURA SCANS';
+    document.title = settings.siteName || 'Mangata';
     if (settings.seoDescription) {
       let meta = document.querySelector('meta[name="description"]');
       if (!meta) {
@@ -80,9 +80,9 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="col-span-1 md:col-span-2">
              <div className="flex items-center flex-shrink-0 mb-4">
                <span className="text-2xl font-black tracking-tighter text-[var(--color-asura-accent)]">
-                 {(settings.siteName || 'ASURA SCANS').split(' ')[0]}
+                 {(settings.siteName || 'Mangata').split(' ')[0]}
                  <span className="text-white">
-                   {(settings.siteName || 'ASURA SCANS').split(' ').slice(1).join(' ') ? ' ' + (settings.siteName || 'ASURA SCANS').split(' ').slice(1).join(' ') : ''}
+                   {(settings.siteName || 'Mangata').split(' ').slice(1).join(' ') ? ' ' + (settings.siteName || 'Mangata').split(' ').slice(1).join(' ') : ''}
                  </span>
                </span>
              </div>
@@ -139,7 +139,7 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
         <div className="max-w-7xl mx-auto px-4 md:px-8 mt-12 pt-6 border-t border-white/5 text-center text-[10px] uppercase font-bold tracking-widest text-zinc-600 flex flex-col gap-2">
           <div className="flex flex-wrap justify-center items-center gap-2 md:gap-4">
-            <span>&copy; {new Date().getFullYear()} {settings.footerCopyrightText || 'ASURA SCANS'}</span>
+            <span>&copy; {new Date().getFullYear()} {settings.footerCopyrightText || 'Mangata'}</span>
             <span className="text-zinc-800">&bull;</span>
             <span className="text-zinc-500">{settings.footerSubtext || 'MADE BY FANS FOR FANS'}</span>
             <span className="text-zinc-800">&bull;</span>
