@@ -2,6 +2,29 @@ import fs from 'fs';
 import path from 'path';
 import mysql from 'mysql2/promise';
 
+function deleteUploadedFile(urlOrPath: string) {
+  if (!urlOrPath) return;
+  try {
+    let filename = "";
+    if (urlOrPath.includes('/uploads/')) {
+      filename = urlOrPath.split('/uploads/').pop() || "";
+    } else {
+      filename = path.basename(urlOrPath);
+    }
+    filename = filename.split('?')[0];
+
+    if (filename) {
+      const filePath = path.join(process.cwd(), 'uploads', filename);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`Deleted file: ${filePath}`);
+      }
+    }
+  } catch (err) {
+    console.error(`Failed to delete file ${urlOrPath}:`, err);
+  }
+}
+
 // Define structures
 export interface Contributor {
   userId: string;
@@ -727,6 +750,18 @@ class DatabaseManager {
     this.localData.bookmarks = this.localData.bookmarks.filter(b => b.userId !== id);
     this.localData.history = this.localData.history.filter(h => h.userId !== id);
     this.localData.ratings = this.localData.ratings.filter(r => r.userId !== id);
+    if (this.localData.comments) {
+      this.localData.comments = this.localData.comments.filter(c => c.userId !== id);
+    }
+    if (this.localData.notifications) {
+      this.localData.notifications = this.localData.notifications.filter(n => n.userId !== id);
+    }
+    if (this.localData.purchased_chapters) {
+      this.localData.purchased_chapters = this.localData.purchased_chapters.filter(pc => pc.userId !== id);
+    }
+    if (this.localData.wallet_transactions) {
+      this.localData.wallet_transactions = this.localData.wallet_transactions.filter(wt => wt.userId !== id);
+    }
     this.saveLocalData();
     return true;
   }
@@ -984,6 +1019,24 @@ class DatabaseManager {
   }
 
   async deleteSeries(id: string): Promise<boolean> {
+    try {
+      const s = await this.getSeriesById(id);
+      if (s) {
+        deleteUploadedFile(s.cover);
+        deleteUploadedFile(s.banner);
+      }
+      const chapters = await this.getChapters(id);
+      for (const ch of chapters) {
+        if (ch.images) {
+          for (const img of ch.images) {
+            deleteUploadedFile(img);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error cleaning up series files:", e);
+    }
+
     if (this.isUsingMySQL && this.pool) {
       await this.pool.execute('DELETE FROM series WHERE id = ?', [id]);
       return true;
@@ -1117,6 +1170,17 @@ class DatabaseManager {
   }
 
   async deleteChapter(seriesId: string, id: string): Promise<boolean> {
+    try {
+      const ch = await this.getChapterById(seriesId, id);
+      if (ch && ch.images) {
+        for (const img of ch.images) {
+          deleteUploadedFile(img);
+        }
+      }
+    } catch (e) {
+      console.error("Error cleaning up chapter files:", e);
+    }
+
     if (this.isUsingMySQL && this.pool) {
       await this.pool.execute('DELETE FROM chapters WHERE seriesId = ? AND id = ?', [seriesId, id]);
       return true;

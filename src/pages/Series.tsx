@@ -136,7 +136,11 @@ export default function Series() {
   const readText = history ? `ادامه مطالعه (چپتر ${history.chapterNumber})` : 'شروع به خواندن';
 
   // Admin and Contributor Authorization
-  const isGlobalAdmin = profile?.role === 'admin' && !isSimulatingUser;
+  const userRoles = profile?.roles || [profile?.role || 'user'];
+  const isSuperAdmin = userRoles.includes('super_admin') || 
+                       profile?.email === "amirrezaveisi45@gmail.com" || 
+                       profile?.email === "Mr.V@admin.com";
+  const isGlobalAdmin = (userRoles.includes('super_admin') || userRoles.includes('admin') || isSuperAdmin) && !isSimulatingUser;
   const isApprovedContributor = series.contributors?.some((c: any) => c.userId === user?.uid && c.status === 'approved');
   const isStaffOrAdmin = isGlobalAdmin || isApprovedContributor;
 

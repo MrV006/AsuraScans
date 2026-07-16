@@ -186,6 +186,10 @@ export const apiClient = {
       headers: this.getHeaders(),
       body: JSON.stringify(series)
     });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در ثبت اطلاعات مانهوا.');
+    }
     return res.json();
   },
 
@@ -194,6 +198,10 @@ export const apiClient = {
       method: 'DELETE',
       headers: this.getHeaders(adminUid)
     });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در حذف مانهوا.');
+    }
     return res.json();
   },
 
@@ -223,6 +231,10 @@ export const apiClient = {
       headers: this.getHeaders(),
       body: JSON.stringify({ seriesId, ...chapter })
     });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در ثبت چپتر.');
+    }
     return res.json();
   },
 
@@ -231,6 +243,10 @@ export const apiClient = {
       method: 'DELETE',
       headers: this.getHeaders(adminUid)
     });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در حذف چپتر.');
+    }
     return res.json();
   },
 
@@ -361,6 +377,10 @@ export const apiClient = {
       headers: this.getHeaders(adminUid),
       body: JSON.stringify({ role })
     });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در تغییر نقش کاربر.');
+    }
     return res.json();
   },
 
@@ -370,6 +390,10 @@ export const apiClient = {
       headers: this.getHeaders(adminUid),
       body: JSON.stringify({ roles, permissions, melliCode })
     });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در بروزرسانی دسترسی‌های کاربر.');
+    }
     return res.json();
   },
 
@@ -378,6 +402,10 @@ export const apiClient = {
       method: 'DELETE',
       headers: this.getHeaders(adminUid)
     });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در حذف دائم حساب کاربری.');
+    }
     return res.json();
   },
 
@@ -502,6 +530,10 @@ export const apiClient = {
       method: 'PUT',
       headers: this.getHeaders(adminUid)
     });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در تایید چپتر.');
+    }
     return res.json();
   },
 
