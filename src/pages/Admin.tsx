@@ -79,6 +79,20 @@ export default function Admin() {
     editor: ['add_chapter', 'edit_chapter']
   });
 
+  const userRoles = currentUserData?.roles || [currentUserData?.role || 'user'];
+  const isSuperAdmin = userRoles.includes('super_admin') || 
+                       currentUserData?.email === "amirrezaveisi45@gmail.com" || 
+                       currentUserData?.email === "Mr.V@admin.com";
+
+  const hasFrontendPermission = (permission: string) => {
+    if (isSuperAdmin) return true;
+    if (currentUserData?.permissions?.includes(permission)) return true;
+    for (const r of userRoles) {
+      if (globalRolePermissions[r]?.includes(permission)) return true;
+    }
+    return false;
+  };
+
   const [seriesList, setSeriesList] = useState<Series[]>([]);
 
   // Dashboard state
@@ -178,7 +192,13 @@ export default function Admin() {
   });
 
   const fetchSeries = () => {
-    apiClient.getSeries().then(setSeriesList).catch(console.error);
+    apiClient.getSeries().then(data => {
+      if (Array.isArray(data)) {
+        setSeriesList(data);
+      } else {
+        setSeriesList([]);
+      }
+    }).catch(console.error);
   };
 
   const fetchStats = () => {
@@ -217,23 +237,41 @@ export default function Admin() {
   const fetchUsersAndComments = () => {
     if (!user) return;
     apiClient.getUsers().then(users => {
-      if (users) {
+      if (Array.isArray(users)) {
         setUsersList(users);
         const adminMap: Record<string, boolean> = {};
         users.forEach((u: any) => {
           if (u.role === 'admin') adminMap[u.id] = true;
         });
         setAdminsMap(adminMap);
+      } else {
+        setUsersList([]);
       }
     }).catch(console.error);
     
-    apiClient.getAllCommentsAdmin(user.uid).then(comments => {
-      if (comments) setCommentsList(comments);
-    }).catch(console.error);
+    if (isSuperAdmin || hasFrontendPermission('delete_comment')) {
+      apiClient.getAllCommentsAdmin(user.uid).then(comments => {
+        if (Array.isArray(comments)) {
+          setCommentsList(comments);
+        } else {
+          setCommentsList([]);
+        }
+      }).catch(console.error);
+    } else {
+      setCommentsList([]);
+    }
 
-    apiClient.getReportsAdmin(user.uid).then(reports => {
-      if (reports) setReportsList(reports);
-    }).catch(console.error);
+    if (isSuperAdmin || hasFrontendPermission('manage_reports')) {
+      apiClient.getReportsAdmin(user.uid).then(reports => {
+        if (Array.isArray(reports)) {
+          setReportsList(reports);
+        } else {
+          setReportsList([]);
+        }
+      }).catch(console.error);
+    } else {
+      setReportsList([]);
+    }
   };
 
   useEffect(() => {
@@ -322,10 +360,19 @@ export default function Admin() {
   const fetchAllTransactions = async () => {
     setLoadingWalletTxs(true);
     try {
-      const txs = await apiClient.getWalletTransactions("all");
-      setWalletTxs(txs || []);
+      if (isSuperAdmin || hasFrontendPermission('manage_wallets')) {
+        const txs = await apiClient.getWalletTransactions("all");
+        if (Array.isArray(txs)) {
+          setWalletTxs(txs);
+        } else {
+          setWalletTxs([]);
+        }
+      } else {
+        setWalletTxs([]);
+      }
     } catch (err) {
       console.error("Failed to fetch wallet transactions:", err);
+      setWalletTxs([]);
     } finally {
       setLoadingWalletTxs(false);
     }
@@ -399,6 +446,11 @@ export default function Admin() {
 
   const handleAddSeries = async (e: React.FormEvent) => {
     e.preventDefault();
+    const hasPerm = editingSeries ? (isSuperAdmin || hasFrontendPermission('edit_series')) : (isSuperAdmin || hasFrontendPermission('create_series'));
+    if (!hasPerm) {
+      alert("خطای عدم دسترسی: شما دسترسی لازم برای افزودن یا ویرایش اثر را ندارید.");
+      return;
+    }
     try {
       const genresArray = seriesForm.genres
         .split(",")
@@ -450,6 +502,10 @@ export default function Admin() {
   };
 
   const handleDeleteSeries = async (id: string, title: string) => {
+    if (!isSuperAdmin && !hasFrontendPermission('delete_series')) {
+      alert("خطای عدم دسترسی: شما دسترسی لازم برای حذف اثر را ندارید.");
+      return;
+    }
     if (
       !window.confirm(
         `Are you sure you want to delete "${title}"? This will delete the series and all its chapters.`,
@@ -486,6 +542,11 @@ export default function Admin() {
   const handleAddChapter = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chapterForm.seriesId) return alert("Select a series first");
+    const hasPerm = editingChapterId ? (isSuperAdmin || hasFrontendPermission('edit_chapter')) : (isSuperAdmin || hasFrontendPermission('add_chapter'));
+    if (!hasPerm) {
+      alert("خطای عدم دسترسی: شما دسترسی لازم برای افزودن یا ویرایش چپتر را ندارید.");
+      return;
+    }
     try {
       const imagesArray = chapterForm.images
         .split("\n")
@@ -535,6 +596,10 @@ export default function Admin() {
     chapterId: string,
     number: number,
   ) => {
+    if (!isSuperAdmin && !hasFrontendPermission('delete_chapter')) {
+      alert("خطای عدم دسترسی: شما دسترسی لازم برای حذف چپتر را ندارید.");
+      return;
+    }
     if (!window.confirm(`Are you sure you want to delete Chapter ${number}?`))
       return;
     try {
@@ -551,6 +616,10 @@ export default function Admin() {
     currentStatus: boolean,
     email?: string,
   ) => {
+    if (!isSuperAdmin && !hasFrontendPermission('manage_users')) {
+      alert("خطای عدم دسترسی: شما دسترسی لازم برای تغییر نقش کاربران را ندارید.");
+      return;
+    }
     if (email === "amirrezaveisi45@gmail.com" || email === "Mr.V@admin.com") {
       alert("Cannot remove primary head admins.");
       return;
@@ -566,6 +635,10 @@ export default function Admin() {
   };
 
   const handleDeleteComment = async (commentId: string) => {
+    if (!isSuperAdmin && !hasFrontendPermission('delete_comment')) {
+      alert("خطای عدم دسترسی: شما دسترسی لازم برای حذف نظرات را ندارید.");
+      return;
+    }
     if (!window.confirm("Are you sure you want to delete this comment?"))
       return;
     try {
@@ -661,20 +734,6 @@ export default function Admin() {
       </Layout>
     );
   }
-
-  const userRoles = currentUserData?.roles || [currentUserData?.role || 'user'];
-  const isSuperAdmin = userRoles.includes('super_admin') || 
-                       currentUserData?.email === "amirrezaveisi45@gmail.com" || 
-                       currentUserData?.email === "Mr.V@admin.com";
-
-  const hasFrontendPermission = (permission: string) => {
-    if (isSuperAdmin) return true;
-    if (currentUserData?.permissions?.includes(permission)) return true;
-    for (const r of userRoles) {
-      if (globalRolePermissions[r]?.includes(permission)) return true;
-    }
-    return false;
-  };
 
   const showSeriesTabs = isSuperAdmin || hasFrontendPermission('create_series') || hasFrontendPermission('edit_series');
   const showChapterTabs = isSuperAdmin || hasFrontendPermission('add_chapter') || hasFrontendPermission('edit_chapter');
@@ -1119,7 +1178,7 @@ export default function Admin() {
             </div>
           )}
 
-          {activeTab === "manage" && (
+          {activeTab === "manage" && showSeriesTabs && (
             <div className="overflow-x-auto">
               <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4 mb-4">
                 Manage Series
@@ -1188,7 +1247,7 @@ export default function Admin() {
             </div>
           )}
 
-          {activeTab === "users" && (
+          {activeTab === "users" && showUsersTab && (
             <div className="overflow-x-auto text-right" dir="rtl">
               <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4 mb-4">
                 مدیریت و رهگیری کاربران وبسایت
@@ -1509,10 +1568,14 @@ export default function Admin() {
                     </div>
 
                     {/* Action buttons */}
-                    <div className="flex gap-4">
+                    <div className="flex flex-wrap gap-4">
                       <button
                         type="button"
                         onClick={async () => {
+                          if (!isSuperAdmin && !hasFrontendPermission('manage_users')) {
+                            alert("خطای عدم دسترسی: شما دسترسی لازم برای تغییر نقش‌ها و دسترسی‌های کاربران را ندارید.");
+                            return;
+                          }
                           try {
                             await apiClient.updateUserRolesAndPermissions(
                               selectedUserForRoles.id, 
@@ -1528,10 +1591,45 @@ export default function Admin() {
                             alert("خطا در ذخیره‌سازی دسترسی‌ها: " + err.message);
                           }
                         }}
-                        className="flex-1 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-bold py-3 px-6 rounded-xl text-xs transition-colors"
+                        className="flex-1 min-w-[200px] bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-bold py-3 px-6 rounded-xl text-xs transition-colors"
                       >
                         ذخیره تغییرات و اعمال دسترسی‌ها
                       </button>
+
+                      {isSuperAdmin && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (selectedUserForRoles.id === (currentUserData?.id || user?.uid)) {
+                              alert("شما نمی‌توانید حساب کاربری خودتان را حذف کنید.");
+                              return;
+                            }
+                            const targetRoles = selectedUserForRoles.roles || [];
+                            const isTargetSuperAdmin = targetRoles.includes('super_admin') || 
+                                                       selectedUserForRoles.email === "amirrezaveisi45@gmail.com" || 
+                                                       selectedUserForRoles.email === "Mr.V@admin.com";
+                            if (isTargetSuperAdmin) {
+                              alert("امکان حذف حساب کاربری مدیریت کل وجود ندارد.");
+                              return;
+                            }
+                            if (!window.confirm(`آیا از حذف دائم و غیر قابل بازگشت حساب کاربری "${selectedUserForRoles.displayName}" اطمینان کامل دارید؟`)) {
+                              return;
+                            }
+                            try {
+                              await apiClient.deleteUser(selectedUserForRoles.id, user!.uid);
+                              alert("حساب کاربری با موفقیت حذف گردید.");
+                              setSelectedUserForRoles(null);
+                              fetchUsersAndComments();
+                            } catch (err: any) {
+                              alert("خطا در حذف حساب کاربری: " + err.message);
+                            }
+                          }}
+                          className="bg-red-600/20 hover:bg-red-600 border border-red-500/30 hover:border-red-500 text-red-400 hover:text-white font-black py-3 px-6 rounded-xl text-xs transition-all"
+                        >
+                          حذف دائم حساب کاربری
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={() => setSelectedUserForRoles(null)}
@@ -1581,6 +1679,10 @@ export default function Admin() {
                       <button
                         type="button"
                         onClick={async () => {
+                          if (!isSuperAdmin) {
+                            alert("خطای عدم دسترسی: تنها مدیریت کل مجاز به ویرایش تنظیمات سراسری نقش‌ها می‌باشد.");
+                            return;
+                          }
                           try {
                             await apiClient.saveSettings("role_permissions", globalRolePermissions);
                             alert("تنظیمات سطح دسترسی نقش‌ها با موفقیت ذخیره شد.");
@@ -1635,7 +1737,7 @@ export default function Admin() {
             </div>
           )}
 
-          {activeTab === "comments" && (
+          {activeTab === "comments" && showCommentsTab && (
             <div className="overflow-x-auto">
               <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4 mb-4">
                 Manage Comments
@@ -1704,7 +1806,7 @@ export default function Admin() {
             </div>
           )}
 
-          {activeTab === "manage_chapters" && (
+          {activeTab === "manage_chapters" && showChapterTabs && (
             <div className="space-y-6">
               <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-4">
                 <h2 className="text-xl font-black text-white uppercase flex items-center gap-2">
@@ -1816,7 +1918,7 @@ export default function Admin() {
             </div>
           )}
 
-          {activeTab === "series" && (
+          {activeTab === "series" && showSeriesTabs && (
             <form onSubmit={handleAddSeries} className="space-y-6 max-w-3xl">
               <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-4">
                 <h2 className="text-xl font-black text-white uppercase">
@@ -2058,7 +2160,7 @@ export default function Admin() {
             </form>
           )}
 
-          {activeTab === "chapters" && (
+          {activeTab === "chapters" && showChapterTabs && (
             <form onSubmit={handleAddChapter} className="space-y-6 max-w-3xl">
               <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-4">
                 <h2 className="text-xl font-black text-white uppercase">
@@ -2207,7 +2309,7 @@ export default function Admin() {
             </form>
           )}
 
-          {activeTab === "taxonomy" && (
+          {activeTab === "taxonomy" && showTaxonomyTab && (
             <div>
               <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4 mb-4">
                 Manage Taxonomy
@@ -2225,6 +2327,10 @@ export default function Admin() {
                       {genre}
                       <button
                         onClick={() => {
+                          if (!isSuperAdmin && !hasFrontendPermission('manage_settings')) {
+                            alert("خطای عدم دسترسی: شما دسترسی لازم برای ویرایش دسته‌بندی‌ها را ندارید.");
+                            return;
+                          }
                           const newG = siteGenres.filter((g) => g !== genre);
                           setSiteGenres(newG);
                           apiClient.saveSettings("taxonomy", { genres: newG })
@@ -2240,6 +2346,10 @@ export default function Admin() {
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
+                    if (!isSuperAdmin && !hasFrontendPermission('manage_settings')) {
+                      alert("خطای عدم دسترسی: شما دسترسی لازم برای ویرایش دسته‌بندی‌ها را ندارید.");
+                      return;
+                    }
                     if (!newGenreInput.trim()) return;
                     const newG = [...siteGenres, newGenreInput.trim()];
                     setSiteGenres(newG);
@@ -2267,7 +2377,7 @@ export default function Admin() {
             </div>
           )}
 
-          {activeTab === "reports" && (
+          {activeTab === "reports" && showReportsTab && (
             <div>
               <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4 mb-4">
                 User Reports
@@ -2348,7 +2458,7 @@ export default function Admin() {
             </div>
           )}
 
-          {activeTab === "settings" && (
+          {activeTab === "settings" && showSettingsTab && (
             <div>
               <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4 mb-4">
                 Global Settings
@@ -2356,6 +2466,10 @@ export default function Admin() {
               <form 
                 onSubmit={(e) => {
                   e.preventDefault();
+                  if (!isSuperAdmin && !hasFrontendPermission('manage_settings')) {
+                    alert("خطای عدم دسترسی: شما دسترسی لازم برای تغییر تنظیمات سراسری را ندارید.");
+                    return;
+                  }
                   apiClient.saveSettings("global", siteSettings)
                     .then(() => alert("Settings saved successfully!"))
                     .catch((err: any) => alert("Failed to save settings: " + err.message));
@@ -2685,7 +2799,7 @@ export default function Admin() {
             </div>
           )}
 
-          {activeTab === "wallet" && (
+          {activeTab === "wallet" && showWalletTab && (
             <div className="space-y-8" dir="rtl">
               <div className="border-b border-white/10 pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
@@ -2838,6 +2952,10 @@ export default function Admin() {
                             <div className="flex gap-2">
                               <button
                                 onClick={async () => {
+                                  if (!isSuperAdmin && !hasFrontendPermission('manage_wallets')) {
+                                    alert("خطای عدم دسترسی: شما دسترسی لازم برای تغییر موجودی کیف پول را ندارید.");
+                                    return;
+                                  }
                                   if (!selectedUserForCharge || chargeAmount === 0) {
                                     alert("لطفا مبلغ تراکنش معتبری وارد کنید.");
                                     return;

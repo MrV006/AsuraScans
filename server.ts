@@ -392,6 +392,25 @@ async function startServer() {
     }
   });
 
+  app.delete("/api/users/:id", requireAdmin, async (req, res) => {
+    try {
+      const callerUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
+      const caller = await dbManager.getUser(callerUid);
+      if (!caller || !isSuperAdminUser(caller)) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به حذف حساب کاربری می‌باشد." });
+      }
+      if (callerUid === req.params.id) {
+        return res.status(400).json({ error: "مدیریت کل امکان حذف حساب کاربری خودش را ندارد." });
+      }
+
+      await dbManager.deleteUser(req.params.id);
+      io.emit("users:updated", { userId: req.params.id, deleted: true });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // -----------------------------------------------------------------
   // 3. SERIES (MANGA / MANHWA) API
   // -----------------------------------------------------------------
@@ -1177,17 +1196,13 @@ async function startServer() {
       appType: "spa",
     });
     app.use(vite.middlewares);
-    
-    // Explicit SPA fallback for development mode
     app.get('*', async (req, res, next) => {
-      // Skip API, uploads, and files with extensions
-      if (req.originalUrl.startsWith('/api') || req.originalUrl.startsWith('/uploads') || req.originalUrl.includes('.')) {
+      if (req.originalUrl.startsWith('/api') || req.originalUrl.includes('.')) {
         return next();
       }
       try {
-        const templatePath = path.resolve(process.cwd(), 'index.html');
-        let html = fs.readFileSync(templatePath, 'utf-8');
-        html = await vite.transformIndexHtml(req.originalUrl, html);
+        const template = await fs.promises.readFile(path.join(process.cwd(), 'index.html'), 'utf-8');
+        const html = await vite.transformIndexHtml(req.originalUrl, template);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
       } catch (e) {
         next(e);

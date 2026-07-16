@@ -195,16 +195,12 @@ class DatabaseManager {
           database: process.env.DB_NAME,
           waitForConnections: true,
           connectionLimit: 10,
-          queueLimit: 0,
-          charset: 'utf8mb4'
+          queueLimit: 0
         });
         
-        // Test connection and enforce utf8mb4 connection charset
+        // Test connection
         const conn = await this.pool.getConnection();
-        await conn.query("SET NAMES utf8mb4");
-        await conn.query("SET CHARACTER SET utf8mb4");
-        await conn.query("SET character_set_connection=utf8mb4");
-        console.log('MySQL Database Connected Successfully with UTF-8 character encoding!');
+        console.log('MySQL Database Connected Successfully!');
         conn.release();
         
         this.isUsingMySQL = true;
@@ -440,29 +436,6 @@ class DatabaseManager {
       }
 
       console.log('Verified MySQL schema tables exist.');
-
-      // Force convert tables to utf8mb4 to guarantee Persian/Arabic characters don't turn into ???
-      const convertQueries = [
-        "ALTER TABLE users CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "ALTER TABLE series CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "ALTER TABLE chapters CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "ALTER TABLE comments CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "ALTER TABLE bookmarks CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "ALTER TABLE history CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "ALTER TABLE ratings CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "ALTER TABLE settings CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "ALTER TABLE reports CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "ALTER TABLE notifications CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "ALTER TABLE wallet_transactions CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-        "ALTER TABLE purchased_chapters CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-      ];
-      for (const convertQ of convertQueries) {
-        try {
-          await this.pool.query(convertQ);
-        } catch (e) {
-          console.warn(`Could not convert table: ${convertQ}`, e);
-        }
-      }
 
       // Migrate existing MySQL users to have 8-digit unique codes if they are empty or not 8 digits
       const [users] = await this.pool.execute('SELECT id, melliCode FROM users');
@@ -743,6 +716,19 @@ class DatabaseManager {
       this.saveLocalData();
       return newUser;
     }
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    if (this.isUsingMySQL && this.pool) {
+      await this.pool.execute('DELETE FROM users WHERE id = ?', [id]);
+      return true;
+    }
+    this.localData.users = this.localData.users.filter(u => u.id !== id);
+    this.localData.bookmarks = this.localData.bookmarks.filter(b => b.userId !== id);
+    this.localData.history = this.localData.history.filter(h => h.userId !== id);
+    this.localData.ratings = this.localData.ratings.filter(r => r.userId !== id);
+    this.saveLocalData();
+    return true;
   }
 
   // -----------------------------------------------------------------

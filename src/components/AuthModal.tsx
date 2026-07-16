@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Mail, Lock, User as UserIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../contexts/SettingsContext';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -9,6 +10,7 @@ interface AuthModalProps {
 }
 
 export function AuthModal({ isOpen, onClose }: AuthModalProps) {
+  const { settings } = useSettings();
   const [identifier, setIdentifier] = useState(''); // email or username
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -172,7 +174,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
             <div className="p-6">
               <div className="flex items-center justify-between mb-6 text-right" dir="rtl">
                 <h2 className="text-xl font-black text-white">
-                  ورود یا ثبت‌نام در <span className="text-[var(--color-asura-accent)]">آسورا</span>
+                  ورود یا ثبت‌نام در <span className="text-[var(--color-asura-accent)]">{settings.siteName || "آسورا"}</span>
                 </h2>
                 <button 
                   onClick={onClose}

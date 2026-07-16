@@ -369,6 +369,14 @@ export const apiClient = {
     return res.json();
   },
 
+  async deleteUser(userId: string, adminUid: string) {
+    const res = await fetch(`${API_URL}/api/users/${userId}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(adminUid)
+    });
+    return res.json();
+  },
+
   async getReportsAdmin(adminUid: string) {
     const res = await fetch(`${API_URL}/api/admin/reports`, {
       headers: this.getHeaders(adminUid)

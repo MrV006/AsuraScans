@@ -89,8 +89,9 @@ export function useBookmarks() {
     }
   };
 
-  const isBookmarked = (seriesId: string) => {
-    return bookmarks.some(b => b.seriesId === seriesId);
+  const isBookmarked = (seriesId: string | undefined) => {
+    if (!seriesId) return false;
+    return bookmarks.some(b => String(b.seriesId) === String(seriesId));
   };
 
   return { bookmarks, loading, addBookmark, removeBookmark, isBookmarked };

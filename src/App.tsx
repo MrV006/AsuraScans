@@ -17,12 +17,14 @@ import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
 import CompleteProfileModal from './components/CompleteProfileModal';
 import { AppInterceptors } from './components/AppInterceptors';
+import { ScrollToTop } from './components/ScrollToTop';
 
 export default function App() {
   return (
     <SettingsProvider>
       <AuthProvider>
         <BrowserRouter>
+          <ScrollToTop />
           <AppInterceptors />
           <Routes>
             <Route path="/" element={<Home />} />
