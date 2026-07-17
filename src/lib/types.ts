@@ -7,6 +7,7 @@ export interface Chapter {
   publishAt?: any;
   isPending?: boolean;
   submissions?: any[];
+  sortMode?: 'natural' | 'input';
   createdAt: any;
   updatedAt: any;
 }

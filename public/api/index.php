@@ -170,6 +170,7 @@ function ensureSchema($pdo) {
             rating DOUBLE DEFAULT 0.0,
             type VARCHAR(50) DEFAULT 'Manhwa',
             views INT DEFAULT 0,
+            isHero TINYINT(1) DEFAULT 0,
             contributors TEXT,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -276,6 +277,20 @@ function ensureSchema($pdo) {
             $stmtUpdate = $pdo->prepare("UPDATE users SET melliCode = ? WHERE id = ?");
             $stmtUpdate->execute([$newCode, $u['id']]);
         }
+    }
+
+    // Migrate series table to add isHero column if not exists
+    try {
+        $pdo->exec("ALTER TABLE series ADD COLUMN isHero TINYINT(1) DEFAULT 0");
+    } catch (PDOException $e) {
+        // Ignored if column already exists
+    }
+
+    // Migrate chapters table to add sortMode column if not exists
+    try {
+        $pdo->exec("ALTER TABLE chapters ADD COLUMN sortMode VARCHAR(50) DEFAULT 'natural'");
+    } catch (PDOException $e) {
+        // Ignored if column already exists
     }
 }
 
@@ -800,6 +815,7 @@ if ($method === 'GET' && $sub_path === '/series') {
         $s['genres'] = $genres;
         $s['tags'] = $tags;
         $s['contributors'] = $contributors;
+        $s['isHero'] = isset($s['isHero']) ? (bool)$s['isHero'] : false;
         $s['rating'] = (double)$s['rating'];
         $s['views'] = (int)$s['views'];
         $result[] = $s;
@@ -833,6 +849,7 @@ if ($method === 'GET' && matchRoute('/series/:id', $sub_path, $params)) {
     $s['tags'] = $s['tags'] ? array_filter(explode(',', $s['tags'])) : [];
     $s['contributors'] = $s['contributors'] ? json_decode($s['contributors'], true) : [];
     if (!is_array($s['contributors'])) $s['contributors'] = [];
+    $s['isHero'] = isset($s['isHero']) ? (bool)$s['isHero'] : false;
     $s['rating'] = (double)$s['rating'];
     $s['views'] = (int)$s['views'];
     
@@ -851,18 +868,19 @@ if ($method === 'POST' && $sub_path === '/series') {
     }
     
     $title = isset($input['title']) ? $input['title'] : '';
-    $alternativeTitles = isset($input['alternativeTitles']) ? implode(',', $input['alternativeTitles']) : '';
+    $alternativeTitles = (isset($input['alternativeTitles']) && is_array($input['alternativeTitles'])) ? implode(',', $input['alternativeTitles']) : (isset($input['alternativeTitles']) ? $input['alternativeTitles'] : '');
     $cover = isset($input['cover']) ? $input['cover'] : '';
     $banner = isset($input['banner']) ? $input['banner'] : '';
     $author = isset($input['author']) ? $input['author'] : '';
     $artist = isset($input['artist']) ? $input['artist'] : '';
     $synopsis = isset($input['synopsis']) ? $input['synopsis'] : '';
-    $genres = isset($input['genres']) ? implode(',', $input['genres']) : '';
-    $tags = isset($input['tags']) ? implode(',', $input['tags']) : '';
+    $genres = (isset($input['genres']) && is_array($input['genres'])) ? implode(',', $input['genres']) : (isset($input['genres']) ? $input['genres'] : '');
+    $tags = (isset($input['tags']) && is_array($input['tags'])) ? implode(',', $input['tags']) : (isset($input['tags']) ? $input['tags'] : '');
     $status = isset($input['status']) ? $input['status'] : 'Ongoing';
     $rating = isset($input['rating']) ? (double)$input['rating'] : 0.0;
     $type = isset($input['type']) ? $input['type'] : 'Manhwa';
     $contributors = isset($input['contributors']) ? json_encode($input['contributors']) : '[]';
+    $isHero = isset($input['isHero']) ? ($input['isHero'] ? 1 : 0) : 0;
     
     // Check if exists
     $stmtCheck = $pdo->prepare("SELECT id FROM series WHERE id = ?");
@@ -870,11 +888,11 @@ if ($method === 'POST' && $sub_path === '/series') {
     $exists = $stmtCheck->fetch();
     
     if ($exists) {
-        $stmt = $pdo->prepare("UPDATE series SET title = ?, alternativeTitles = ?, cover = ?, banner = ?, author = ?, artist = ?, synopsis = ?, genres = ?, tags = ?, status = ?, type = ? WHERE id = ?");
-        $stmt->execute([$title, $alternativeTitles, $cover, $banner, $author, $artist, $synopsis, $genres, $tags, $status, $type, $id]);
+        $stmt = $pdo->prepare("UPDATE series SET title = ?, alternativeTitles = ?, cover = ?, banner = ?, author = ?, artist = ?, synopsis = ?, genres = ?, tags = ?, status = ?, type = ?, isHero = ? WHERE id = ?");
+        $stmt->execute([$title, $alternativeTitles, $cover, $banner, $author, $artist, $synopsis, $genres, $tags, $status, $type, $isHero, $id]);
     } else {
-        $stmt = $pdo->prepare("INSERT INTO series (id, title, alternativeTitles, cover, banner, author, artist, synopsis, genres, tags, status, rating, type, views, contributors) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)");
-        $stmt->execute([$id, $title, $alternativeTitles, $cover, $banner, $author, $artist, $synopsis, $genres, $tags, $status, $rating, $type, $contributors]);
+        $stmt = $pdo->prepare("INSERT INTO series (id, title, alternativeTitles, cover, banner, author, artist, synopsis, genres, tags, status, rating, type, views, isHero, contributors) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)");
+        $stmt->execute([$id, $title, $alternativeTitles, $cover, $banner, $author, $artist, $synopsis, $genres, $tags, $status, $rating, $type, $isHero, $contributors]);
     }
     
     // Fetch and return
@@ -887,6 +905,7 @@ if ($method === 'POST' && $sub_path === '/series') {
     $s['tags'] = $s['tags'] ? array_filter(explode(',', $s['tags'])) : [];
     $s['contributors'] = $s['contributors'] ? json_decode($s['contributors'], true) : [];
     if (!is_array($s['contributors'])) $s['contributors'] = [];
+    $s['isHero'] = isset($s['isHero']) ? (bool)$s['isHero'] : false;
     $s['rating'] = (double)$s['rating'];
     $s['views'] = (int)$s['views'];
     
@@ -1024,6 +1043,7 @@ if ($method === 'GET' && matchRoute('/series/:seriesId/chapters', $sub_path, $pa
         $ch['isPending'] = (bool)$ch['isPending'];
         $ch['number'] = (double)$ch['number'];
         $ch['views'] = (int)$ch['views'];
+        $ch['sortMode'] = isset($ch['sortMode']) ? $ch['sortMode'] : 'natural';
     }
     
     sendResponse($chaps);
@@ -1044,6 +1064,7 @@ if ($method === 'GET' && matchRoute('/series/:seriesId/chapters/:id', $sub_path,
     $ch['isPending'] = (bool)$ch['isPending'];
     $ch['number'] = (double)$ch['number'];
     $ch['views'] = (int)$ch['views'];
+    $ch['sortMode'] = isset($ch['sortMode']) ? $ch['sortMode'] : 'natural';
     
     sendResponse($ch);
 }
@@ -1063,17 +1084,18 @@ if ($method === 'POST' && matchRoute('/series/:seriesId/chapters', $sub_path, $p
     $images = isset($input['images']) ? implode(',', $input['images']) : '';
     $isPending = isset($input['isPending']) ? ($input['isPending'] ? 1 : 0) : 0;
     $submissions = isset($input['submissions']) ? json_encode($input['submissions']) : '[]';
+    $sortMode = isset($input['sortMode']) ? $input['sortMode'] : 'natural';
     
     $stmtCheck = $pdo->prepare("SELECT id FROM chapters WHERE id = ?");
     $stmtCheck->execute([$id]);
     $exists = $stmtCheck->fetch();
     
     if ($exists) {
-        $stmt = $pdo->prepare("UPDATE chapters SET number = ?, title = ?, images = ?, isPending = ?, submissions = ? WHERE id = ?");
-        $stmt->execute([$number, $title, $images, $isPending, $submissions, $id]);
+        $stmt = $pdo->prepare("UPDATE chapters SET number = ?, title = ?, images = ?, isPending = ?, submissions = ?, sortMode = ? WHERE id = ?");
+        $stmt->execute([$number, $title, $images, $isPending, $submissions, $sortMode, $id]);
     } else {
-        $stmt = $pdo->prepare("INSERT INTO chapters (id, seriesId, number, title, images, views, isPending, submissions) VALUES (?, ?, ?, ?, ?, 0, ?, ?)");
-        $stmt->execute([$id, $params['seriesId'], $number, $title, $images, $isPending, $submissions]);
+        $stmt = $pdo->prepare("INSERT INTO chapters (id, seriesId, number, title, images, views, isPending, submissions, sortMode) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)");
+        $stmt->execute([$id, $params['seriesId'], $number, $title, $images, $isPending, $submissions, $sortMode]);
     }
     
     // Fetch and return
@@ -1087,6 +1109,7 @@ if ($method === 'POST' && matchRoute('/series/:seriesId/chapters', $sub_path, $p
     $ch['isPending'] = (bool)$ch['isPending'];
     $ch['number'] = (double)$ch['number'];
     $ch['views'] = (int)$ch['views'];
+    $ch['sortMode'] = isset($ch['sortMode']) ? $ch['sortMode'] : 'natural';
     
     sendResponse($ch);
 }

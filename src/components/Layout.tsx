@@ -7,12 +7,16 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
 
 export function Layout({ children }: { children: ReactNode }) {
-  const { settings, genres } = useSettings();
+  const { settings, genres, loading } = useSettings();
   const { isSimulatingUser, setIsSimulatingUser } = useAuth();
   const location = useLocation();
 
   useEffect(() => {
-    document.title = settings.siteName || 'Mangata';
+    if (loading) {
+      document.title = 'loading';
+    } else {
+      document.title = settings.siteName || 'Mangata';
+    }
     if (settings.seoDescription) {
       let meta = document.querySelector('meta[name="description"]');
       if (!meta) {
@@ -22,7 +26,7 @@ export function Layout({ children }: { children: ReactNode }) {
       }
       meta.setAttribute('content', settings.seoDescription);
     }
-  }, [settings.siteName, settings.seoDescription]);
+  }, [settings.siteName, settings.seoDescription, loading]);
 
   if (settings.maintenanceMode && window.location.pathname !== '/admin') {
     return (

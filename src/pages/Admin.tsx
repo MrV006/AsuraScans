@@ -191,6 +191,7 @@ export default function Admin() {
     title: "",
     images: "",
     publishAt: "",
+    sortMode: "natural",
   });
 
   const fetchSeries = () => {
@@ -564,6 +565,7 @@ export default function Admin() {
         title: chapterForm.title,
         images: imagesArray,
         publishAt: chapterForm.publishAt || null,
+        sortMode: chapterForm.sortMode || "natural",
       };
 
       await apiClient.saveChapter(chapterForm.seriesId, payload);
@@ -575,6 +577,7 @@ export default function Admin() {
         title: "",
         images: "",
         publishAt: "",
+        sortMode: "natural",
       });
       fetchChapters();
     } catch (error: any) {
@@ -590,6 +593,7 @@ export default function Admin() {
       title: chapter.title || "",
       images: chapter.images.join("\n"),
       publishAt: chapter.publishAt || "",
+      sortMode: chapter.sortMode || "natural",
     });
   };
 
@@ -814,6 +818,7 @@ export default function Admin() {
                     title: "",
                     images: "",
                     publishAt: "",
+                    sortMode: "natural",
                   });
                 }}
                 className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "chapters" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
@@ -2187,6 +2192,7 @@ export default function Admin() {
                         number: "",
                         title: "",
                         images: "",
+                        sortMode: "natural",
                       });
                       setActiveTab("manage_chapters");
                     }}
@@ -2262,6 +2268,24 @@ export default function Admin() {
                     }
                     className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white"
                   />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">
+                    ترتیب صفحات ریدر (Page Sorting)
+                  </label>
+                  <select
+                    value={chapterForm.sortMode || "natural"}
+                    onChange={(e) =>
+                      setChapterForm({
+                        ...chapterForm,
+                        sortMode: e.target.value,
+                      })
+                    }
+                    className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white"
+                  >
+                    <option value="natural">مرتب‌سازی عددی خودکار (Natural Sort)</option>
+                    <option value="input">ترتیب دستی عینا مطابق ورودی (Input Order)</option>
+                  </select>
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">

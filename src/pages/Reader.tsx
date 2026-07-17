@@ -1,4 +1,4 @@
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSeriesOverview } from '../hooks/useSeries';
 import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../hooks/useUserActivity';
@@ -66,6 +66,7 @@ export const sortMangaImages = (images: string[]): string[] => {
 };
 
 export default function Reader() {
+  const navigate = useNavigate();
   const { seriesId, chapterId } = useParams();
   const { settings } = useSettings();
   const { series, loading: seriesLoading } = useSeriesOverview(seriesId);
@@ -94,8 +95,10 @@ export default function Reader() {
   const chapterIdx = series?.chapters ? series.chapters.findIndex(c => c.id === chapterId) : -1;
   const chapter = chapterIdx >= 0 && series?.chapters ? series.chapters[chapterIdx] : (series?.chapters ? series.chapters[0] : null);
   
-  // Apply our custom natural sorting algorithm to the chapter images
-  const sortedImages = chapter?.images ? sortMangaImages(chapter.images) : [];
+  // Apply our custom natural sorting algorithm to the chapter images unless sortMode is set to 'input'
+  const sortedImages = chapter?.images 
+    ? (chapter.sortMode === 'input' ? chapter.images : sortMangaImages(chapter.images)) 
+    : [];
 
   const nextChapter = series?.chapters && chapterIdx >= 0 ? series.chapters[chapterIdx - 1] : null; 
   const prevChapter = series?.chapters && chapterIdx >= 0 ? series.chapters[chapterIdx + 1] : null; 
@@ -295,9 +298,13 @@ export default function Reader() {
   useEffect(() => {
     const handleScroll = () => {
       const currentScrollY = window.scrollY;
-      if (currentScrollY > lastScrollY && currentScrollY > 100) {
+      const diff = currentScrollY - lastScrollY;
+      
+      if (currentScrollY <= 80) {
+        setShowNav(true);
+      } else if (diff > 15) {
         setShowNav(false);
-      } else {
+      } else if (diff < -15) {
         setShowNav(true);
       }
       setLastScrollY(currentScrollY);
@@ -527,14 +534,17 @@ export default function Reader() {
       {/* Top Navbar */}
       <div className={`fixed top-0 left-0 right-0 bg-[#0f0f12] border-b border-white/5 z-50 transition-transform duration-300 ${showNav ? 'translate-y-0' : '-translate-y-full'}`}>
         <div className="max-w-4xl mx-auto px-4 h-12 flex items-center justify-between">
-          <Link to={`/series/${series.id}`} className="flex items-center gap-2 hover:text-white transition-colors text-sm font-bold truncate shrink-0 max-w-[40%]">
+          <Link 
+            to={`/series/${series?.id}`} 
+            className="flex items-center gap-2 hover:text-white transition-colors text-sm font-bold truncate shrink-0 max-w-[40%]"
+          >
             <ChevronLeft size={16} />
-            <span className="hidden sm:inline truncate">{series.title}</span>
+            <span className="hidden sm:inline truncate">{series?.title}</span>
           </Link>
           
           <div className="flex-1 flex justify-center">
             <div className="font-bold text-white bg-white/10 px-3 py-1 rounded text-xs tracking-widest uppercase">
-              Chapter {chapter.number}
+              Chapter {chapter?.number}
             </div>
           </div>
 
@@ -545,7 +555,10 @@ export default function Reader() {
             >
               <SettingsIcon size={18} />
             </button>
-            <Link to="/" className="hover:text-white transition-colors text-zinc-500">
+            <Link 
+              to="/" 
+              className="hover:text-white transition-colors text-zinc-500"
+            >
               <Home size={18} />
             </Link>
           </div>

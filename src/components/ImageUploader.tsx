@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { UploadCloud, Loader2 } from 'lucide-react';
 import { apiClient } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
+import JSZip from 'jszip';
 
 interface Props {
   onUpload: (urls: string[]) => void;
@@ -32,13 +33,13 @@ export function ImageUploader({ onUpload, multiple = false }: Props) {
   const handleFiles = async (files: File[]) => {
     if (files.length === 0) return;
     if (!user) {
-      setError("You must be logged in as an administrator to upload.");
+      setError("شما باید به عنوان مدیر برای آپلود وارد شده باشید.");
       return;
     }
 
     setUploading(true);
     setError(null);
-    setProgressText("Uploading and optimizing images on the host... (this may take a few moments)");
+    setProgressText("در حال پردازش فایل‌ها...");
 
     try {
       // Check if it's a zip file
@@ -46,11 +47,45 @@ export function ImageUploader({ onUpload, multiple = false }: Props) {
       
       let uploadPayload: File[] = [];
       if (zipFile && multiple) {
-        uploadPayload = [zipFile];
-        setProgressText("Uploading manhwa ZIP archive to host...");
+        setProgressText("در حال باز کردن و استخراج فایل زیپ در مرورگر شما...");
+        const zip = new JSZip();
+        const zipContents = await zip.loadAsync(zipFile);
+        
+        const filenames = Object.keys(zipContents.files).filter(p => {
+          const entry = zipContents.files[p];
+          return !entry.dir && p.match(/\.(jpe?g|png|webp|gif|bmp)$/i) && !p.includes("__MACOSX");
+        });
+
+        if (filenames.length === 0) {
+          throw new Error("هیچ تصویری داخل فایل فشرده یافت نشد.");
+        }
+
+        // Natural sort numerically/alphabetically (e.g. 1, 2, 10 instead of 1, 10, 2)
+        filenames.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+
+        setProgressText(`در حال استخراج ${filenames.length} تصویر...`);
+        
+        // Extract all images from ZIP as Files
+        for (let i = 0; i < filenames.length; i++) {
+          const filename = filenames[i];
+          const entry = zipContents.files[filename];
+          const blob = await entry.async("blob");
+          
+          let mimeType = "image/jpeg";
+          if (filename.toLowerCase().endsWith(".png")) mimeType = "image/png";
+          else if (filename.toLowerCase().endsWith(".webp")) mimeType = "image/webp";
+          else if (filename.toLowerCase().endsWith(".gif")) mimeType = "image/gif";
+          
+          const ext = filename.split('.').pop() || 'jpg';
+          const cleanName = `page-${i + 1}.${ext}`;
+          const fileObj = new File([blob], cleanName, { type: mimeType });
+          uploadPayload.push(fileObj);
+        }
+        
+        setProgressText(`در حال آپلود و بهینه‌سازی ${uploadPayload.length} تصویر روی هاست... (لطفاً شکیبا باشید)`);
       } else {
         uploadPayload = multiple ? files : [files[0]];
-        setProgressText(`Uploading ${uploadPayload.length} image(s) to host...`);
+        setProgressText(`در حال آپلود ${uploadPayload.length} تصویر به هاست...`);
       }
 
       const res = await apiClient.uploadImages(uploadPayload, user.uid);
@@ -63,11 +98,11 @@ export function ImageUploader({ onUpload, multiple = false }: Props) {
         onUpload(res.urls);
         setProgressText(null);
       } else {
-        throw new Error("Invalid response from server.");
+        throw new Error("پاسخ نامعتبر از سرور.");
       }
     } catch (err: any) {
       console.error('Upload failed:', err);
-      setError(err.message || 'Error uploading files');
+      setError(err.message || 'خطا در آپلود فایل‌ها');
     } finally {
       setUploading(false);
     }
@@ -90,10 +125,10 @@ export function ImageUploader({ onUpload, multiple = false }: Props) {
         <div className="flex flex-col items-center justify-center text-zinc-400 group-hover:text-white transition-colors">
           <UploadCloud className="w-8 h-8 mb-2" />
           <p className="text-xs font-bold uppercase tracking-wider text-center px-4">
-            {multiple ? "Drag & Drop ZIP file or multiple images here" : "Drag & Drop image here"}
+            {multiple ? "فایل ZIP چپتر یا تصاویر را به اینجا بکشید یا کلیک کنید" : "تصویر کاور را به اینجا بکشید یا کلیک کنید"}
           </p>
           <p className="text-[10px] text-zinc-500 mt-1 uppercase tracking-wider text-center">
-            {multiple ? "Supports ZIP, WebP, JPEG, PNG - Automatically Compressed to WebP" : "Supports WebP, JPEG, PNG"}
+            {multiple ? "پشتیبانی از ZIP، WebP، JPEG، PNG - تبدیل خودکار به WebP بسیار فشرده" : "پشتیبانی از WebP، JPEG، PNG"}
           </p>
         </div>
       </div>
