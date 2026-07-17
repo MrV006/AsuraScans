@@ -411,6 +411,25 @@ async function startServer() {
     }
   });
 
+  app.post("/api/users/:id/delete", requireAdmin, async (req, res) => {
+    try {
+      const callerUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
+      const caller = await dbManager.getUser(callerUid);
+      if (!caller || !isSuperAdminUser(caller)) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به حذف حساب کاربری می‌باشد." });
+      }
+      if (callerUid === req.params.id) {
+        return res.status(400).json({ error: "مدیریت کل امکان حذف حساب کاربری خودش را ندارد." });
+      }
+
+      await dbManager.deleteUser(req.params.id);
+      io.emit("users:updated", { userId: req.params.id, deleted: true });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // -----------------------------------------------------------------
   // 3. SERIES (MANGA / MANHWA) API
   // -----------------------------------------------------------------

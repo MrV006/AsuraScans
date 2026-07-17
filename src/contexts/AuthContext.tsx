@@ -125,9 +125,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     localStorage.removeItem('asura_user_uid');
+    localStorage.removeItem('asura_simulate_user');
     setUser(null);
     setProfile(null);
     setShowSetupModal(false);
+    window.location.href = '/';
   };
 
   useEffect(() => {

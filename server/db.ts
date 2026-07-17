@@ -51,6 +51,7 @@ export interface Series {
   type: string;
   views: number;
   contributors?: Contributor[];
+  isHero?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -335,6 +336,7 @@ class DatabaseManager {
           type VARCHAR(50) DEFAULT 'Manhwa',
           views INT DEFAULT 0,
           contributors TEXT,
+          isHero TINYINT(1) DEFAULT 0,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )`,
@@ -446,6 +448,7 @@ class DatabaseManager {
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS password VARCHAR(255)`,
         `ALTER TABLE users ADD COLUMN IF NOT EXISTS hasCompletedSetup TINYINT(1) DEFAULT 0`,
         `ALTER TABLE series ADD COLUMN IF NOT EXISTS contributors TEXT`,
+        `ALTER TABLE series ADD COLUMN IF NOT EXISTS isHero TINYINT(1) DEFAULT 0`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS isPending TINYINT(1) DEFAULT 0`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS submissions TEXT`
       ];
@@ -743,7 +746,24 @@ class DatabaseManager {
 
   async deleteUser(id: string): Promise<boolean> {
     if (this.isUsingMySQL && this.pool) {
-      await this.pool.execute('DELETE FROM users WHERE id = ?', [id]);
+      const tablesAndFields = [
+        ["bookmarks", "userId"],
+        ["history", "userId"],
+        ["ratings", "userId"],
+        ["comments", "userId"],
+        ["notifications", "userId"],
+        ["purchased_chapters", "userId"],
+        ["wallet_transactions", "userId"],
+        ["reports", "userId"],
+        ["users", "id"]
+      ];
+      for (const [table, field] of tablesAndFields) {
+        try {
+          await this.pool.execute(`DELETE FROM \`${table}\` WHERE \`${field}\` = ?`, [id]);
+        } catch (e) {
+          console.warn(`Could not delete from ${table}:`, e);
+        }
+      }
       return true;
     }
     this.localData.users = this.localData.users.filter(u => u.id !== id);
@@ -839,7 +859,8 @@ class DatabaseManager {
           alternativeTitles: r.alternativeTitles ? r.alternativeTitles.split(',') : [],
           genres: r.genres ? r.genres.split(',') : [],
           tags: r.tags ? r.tags.split(',') : [],
-          contributors: parsedContributors
+          contributors: parsedContributors,
+          isHero: !!r.isHero
         };
       });
 
@@ -953,7 +974,8 @@ class DatabaseManager {
         alternativeTitles: r.alternativeTitles ? r.alternativeTitles.split(',') : [],
         genres: r.genres ? r.genres.split(',') : [],
         tags: r.tags ? r.tags.split(',') : [],
-        contributors: parsedContributors
+        contributors: parsedContributors,
+        isHero: !!r.isHero
       };
     }
     const found = this.localData.series.find(s => s.id === id);
@@ -976,13 +998,13 @@ class DatabaseManager {
     if (this.isUsingMySQL && this.pool) {
       if (isEdit) {
         await this.pool.execute(
-          `UPDATE series SET title = ?, alternativeTitles = ?, cover = ?, banner = ?, author = ?, artist = ?, synopsis = ?, genres = ?, tags = ?, status = ?, type = ?, contributors = ?, updatedAt = ? WHERE id = ?`,
-          [s.title, altTitlesStr, s.cover, s.banner, s.author, s.artist, s.synopsis, genresStr, tagsStr, s.status, s.type, contributorsStr, now, s.id]
+          `UPDATE series SET title = ?, alternativeTitles = ?, cover = ?, banner = ?, author = ?, artist = ?, synopsis = ?, genres = ?, tags = ?, status = ?, type = ?, contributors = ?, isHero = ?, updatedAt = ? WHERE id = ?`,
+          [s.title, altTitlesStr, s.cover, s.banner, s.author, s.artist, s.synopsis, genresStr, tagsStr, s.status, s.type, contributorsStr, s.isHero ? 1 : 0, now, s.id]
         );
       } else {
         await this.pool.execute(
-          `INSERT INTO series (id, title, alternativeTitles, cover, banner, author, artist, synopsis, genres, tags, status, rating, type, views, contributors, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [s.id, s.title, altTitlesStr, s.cover, s.banner, s.author, s.artist, s.synopsis, genresStr, tagsStr, s.status || 'Ongoing', s.rating || 0, s.type || 'Manhwa', s.views || 0, contributorsStr, now, now]
+          `INSERT INTO series (id, title, alternativeTitles, cover, banner, author, artist, synopsis, genres, tags, status, rating, type, views, contributors, isHero, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [s.id, s.title, altTitlesStr, s.cover, s.banner, s.author, s.artist, s.synopsis, genresStr, tagsStr, s.status || 'Ongoing', s.rating || 0, s.type || 'Manhwa', s.views || 0, contributorsStr, s.isHero ? 1 : 0, now, now]
         );
       }
       return (await this.getSeriesById(s.id))!;
@@ -1004,6 +1026,7 @@ class DatabaseManager {
       type: s.type || 'Manhwa',
       views: s.views || 0,
       contributors: s.contributors || [],
+      isHero: !!s.isHero,
       createdAt: s.createdAt || now,
       updatedAt: now
     };

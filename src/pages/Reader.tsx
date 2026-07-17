@@ -1,5 +1,6 @@
 import { useParams, Link } from 'react-router-dom';
 import { useSeriesOverview } from '../hooks/useSeries';
+import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../hooks/useUserActivity';
 import { ChevronLeft, ChevronRight, Menu, Home, ArrowUp, Settings as SettingsIcon } from 'lucide-react';
 import { useState, useEffect } from 'react';
@@ -66,6 +67,7 @@ export const sortMangaImages = (images: string[]): string[] => {
 
 export default function Reader() {
   const { seriesId, chapterId } = useParams();
+  const { settings } = useSettings();
   const { series, loading: seriesLoading } = useSeriesOverview(seriesId);
   const { updateHistory } = useHistory();
   const { user, profile, isSimulatingUser, setShowSetupModal } = useAuth();
@@ -285,9 +287,9 @@ export default function Reader() {
 
   useEffect(() => {
     if (series?.title && chapter?.number) {
-      document.title = `Chapter ${chapter.number} - ${series.title} - Mangata`;
+      document.title = `Chapter ${chapter.number} - ${series.title} - ${settings?.siteName || 'Mangata'}`;
     }
-  }, [series?.title, chapter?.number]);
+  }, [series?.title, chapter?.number, settings?.siteName]);
 
 
   useEffect(() => {

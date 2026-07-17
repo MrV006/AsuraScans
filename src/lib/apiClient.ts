@@ -398,8 +398,8 @@ export const apiClient = {
   },
 
   async deleteUser(userId: string, adminUid: string) {
-    const res = await fetch(`${API_URL}/api/users/${userId}`, {
-      method: 'DELETE',
+    const res = await fetch(`${API_URL}/api/users/${userId}/delete`, {
+      method: 'POST',
       headers: this.getHeaders(adminUid)
     });
     if (!res.ok) {

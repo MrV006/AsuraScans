@@ -11,6 +11,8 @@ import { Comments } from '../components/Comments';
 import { formatDistanceToNow } from 'date-fns';
 import { SeriesDetailSkeleton } from '../components/Skeletons';
 import { apiClient } from '../lib/apiClient';
+import { ImageUploader } from '../components/ImageUploader';
+import { useSettings } from '../contexts/SettingsContext';
 
 export default function Series() {
   const { id } = useParams();
@@ -35,6 +37,8 @@ export default function Series() {
   const [joinMelliCode, setJoinMelliCode] = useState(profile?.melliCode || '');
 
   // Edit Series Fields
+  const { settings } = useSettings();
+
   const [editForm, setEditForm] = useState({
     title: '',
     alternativeTitles: '',
@@ -51,9 +55,9 @@ export default function Series() {
 
   useEffect(() => {
     if (series?.title) {
-      document.title = `${series.title} - Mangata`;
+      document.title = `${series.title} - ${settings?.siteName || 'Mangata'}`;
     }
-  }, [series?.title]);
+  }, [series?.title, settings?.siteName]);
 
   useEffect(() => {
     if (profile?.melliCode) {
@@ -291,6 +295,9 @@ export default function Series() {
           src={series.banner} 
           alt={series.title} 
           className="absolute inset-0 w-full h-full object-cover opacity-20 blur-sm scale-105"
+          onError={(e) => {
+            e.currentTarget.src = "https://placehold.co/1200x400/18181b/ffffff?text=No+Banner";
+          }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-asura-dark)] via-[var(--color-asura-dark)]/80 to-transparent"></div>
         <div className="absolute inset-0 bg-gradient-to-r from-[var(--color-asura-dark)] via-transparent to-transparent"></div>
@@ -324,7 +331,14 @@ export default function Series() {
               animate={{ y: 0, opacity: 1 }}
               className="relative aspect-[2/3] rounded-xl overflow-hidden shadow-2xl shadow-black border border-white/10"
             >
-              <img src={series.cover} alt={series.title} className="w-full h-full object-cover" />
+              <img 
+                src={series.cover} 
+                alt={series.title} 
+                className="w-full h-full object-cover" 
+                onError={(e) => {
+                  e.currentTarget.src = "https://placehold.co/400x600/18181b/ffffff?text=No+Cover";
+                }}
+              />
               <div className="absolute top-2 right-2 bg-[var(--color-asura-accent)] text-white text-xs font-bold px-2 py-1 rounded shadow">
                 {series.type === 'manhwa' ? 'مانهوا' : series.type === 'manga' ? 'مانگا' : series.type === 'manhua' ? 'مانها' : series.type}
               </div>
@@ -674,7 +688,7 @@ export default function Series() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
+                <div className="space-y-2">
                   <label className="block text-zinc-400 mb-1.5">تصویر کاور (URL)</label>
                   <input 
                     type="text" 
@@ -682,8 +696,19 @@ export default function Series() {
                     onChange={(e) => setEditForm({ ...editForm, cover: e.target.value })}
                     className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50"
                   />
+                  <div className="bg-black/20 p-2 border border-white/5 border-dashed rounded-xl">
+                    <span className="block text-[10px] text-zinc-500 mb-1">آپلود مستقیم کاور:</span>
+                    <ImageUploader 
+                      multiple={false}
+                      onUpload={(urls) => {
+                        if (urls && urls.length > 0) {
+                          setEditForm(prev => ({ ...prev, cover: urls[0] }));
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
-                <div>
+                <div className="space-y-2">
                   <label className="block text-zinc-400 mb-1.5">تصویر بنر پس‌زمینه (URL)</label>
                   <input 
                     type="text" 
@@ -691,6 +716,17 @@ export default function Series() {
                     onChange={(e) => setEditForm({ ...editForm, banner: e.target.value })}
                     className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50"
                   />
+                  <div className="bg-black/20 p-2 border border-white/5 border-dashed rounded-xl">
+                    <span className="block text-[10px] text-zinc-500 mb-1">آپلود مستقیم بنر:</span>
+                    <ImageUploader 
+                      multiple={false}
+                      onUpload={(urls) => {
+                        if (urls && urls.length > 0) {
+                          setEditForm(prev => ({ ...prev, banner: urls[0] }));
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
 

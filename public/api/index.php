@@ -688,6 +688,43 @@ if ($method === 'PUT' && matchRoute('/users/:id/can-create-series', $sub_path, $
     sendResponse(["success" => true]);
 }
 
+// 12-B. DELETE USER (SUPER ADMIN ONLY)
+if (($method === 'DELETE' && matchRoute('/users/:id', $sub_path, $params)) || ($method === 'POST' && matchRoute('/users/:id/delete', $sub_path, $params))) {
+    $caller = getUserFromHeaders($pdo);
+    if (!$caller || !isSuperAdminUser($caller)) {
+        sendResponse(["error" => "تنها مدیریت کل مجاز به حذف حساب کاربری می‌باشد."], 403);
+    }
+    if ($caller['id'] === $params['id']) {
+        sendResponse(["error" => "مدیریت کل امکان حذف حساب کاربری خودش را ندارد."], 400);
+    }
+
+    $targetId = $params['id'];
+
+    // Delete user from all tables to prevent residue database crashes or partial deletion issues
+    $tablesAndFields = [
+        "bookmarks" => "userId",
+        "history" => "userId",
+        "ratings" => "userId",
+        "comments" => "userId",
+        "notifications" => "userId",
+        "wallet_transactions" => "userId",
+        "purchased_chapters" => "userId",
+        "reports" => "userId",
+        "users" => "id"
+    ];
+
+    foreach ($tablesAndFields as $table => $field) {
+        try {
+            $stmt = $pdo->prepare("DELETE FROM `{$table}` WHERE `{$field}` = ?");
+            $stmt->execute([$targetId]);
+        } catch (Exception $e) {
+            // Ignore minor issues
+        }
+    }
+
+    sendResponse(["success" => true]);
+}
+
 // 13. GET SERIES LIST (WITH FILTERS)
 if ($method === 'GET' && $sub_path === '/series') {
     $q = isset($_GET['q']) ? $_GET['q'] : null;
