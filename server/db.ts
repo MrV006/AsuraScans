@@ -68,6 +68,7 @@ export interface Chapter {
   views: number;
   isPending?: boolean;
   submissions?: any[];
+  contributors?: any;
   createdAt: string;
   updatedAt: string;
 }
@@ -121,6 +122,7 @@ export interface PurchasedChapter {
   userId: string;
   seriesId: string;
   chapterId: string;
+  chapterNumber?: number;
   createdAt: string;
 }
 
@@ -161,9 +163,9 @@ const LOCAL_DB_PATH = path.join(process.cwd(), 'local-db.json');
 
 // Interface for general DB client
 class DatabaseManager {
-  private pool: mysql.Pool | null = null;
-  private isUsingMySQL = false;
-  private localData: {
+  public pool: mysql.Pool | null = null;
+  public isUsingMySQL = false;
+  public localData: {
     series: Series[];
     chapters: Chapter[];
     comments: Comment[];
@@ -459,7 +461,9 @@ class DatabaseManager {
         `ALTER TABLE series ADD COLUMN IF NOT EXISTS seoDescription TEXT`,
         `ALTER TABLE series ADD COLUMN IF NOT EXISTS seoKeywords TEXT`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS isPending TINYINT(1) DEFAULT 0`,
-        `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS submissions TEXT`
+        `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS submissions TEXT`,
+        `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS contributors TEXT`,
+        `ALTER TABLE purchased_chapters ADD COLUMN IF NOT EXISTS chapterNumber DOUBLE`
       ];
 
       for (const aq of alterQueries) {
@@ -1118,11 +1122,18 @@ class DatabaseManager {
             parsedSubmissions = typeof r.submissions === 'string' ? JSON.parse(r.submissions) : r.submissions;
           } catch (e) {}
         }
+        let parsedContributors: any = {};
+        if (r.contributors) {
+          try {
+            parsedContributors = typeof r.contributors === 'string' ? JSON.parse(r.contributors) : r.contributors;
+          } catch (e) {}
+        }
         return {
           ...r,
           images: r.images ? r.images.split(',') : [],
           isPending: r.isPending === 1 || r.isPending === true,
-          submissions: parsedSubmissions
+          submissions: parsedSubmissions,
+          contributors: parsedContributors
         };
       });
     }
@@ -1131,7 +1142,8 @@ class DatabaseManager {
       .map(c => ({
         ...c,
         isPending: !!c.isPending,
-        submissions: c.submissions || []
+        submissions: c.submissions || [],
+        contributors: c.contributors || {}
       }))
       .sort((a, b) => b.number - a.number);
   }
@@ -1147,11 +1159,18 @@ class DatabaseManager {
           parsedSubmissions = typeof r.submissions === 'string' ? JSON.parse(r.submissions) : r.submissions;
         } catch (e) {}
       }
+      let parsedContributors: any = {};
+      if (r.contributors) {
+        try {
+          parsedContributors = typeof r.contributors === 'string' ? JSON.parse(r.contributors) : r.contributors;
+        } catch (e) {}
+      }
       return {
         ...r,
         images: r.images ? r.images.split(',') : [],
         isPending: r.isPending === 1 || r.isPending === true,
-        submissions: parsedSubmissions
+        submissions: parsedSubmissions,
+        contributors: parsedContributors
       };
     }
     const found = this.localData.chapters.find(c => c.seriesId === seriesId && c.id === id);
@@ -1159,7 +1178,8 @@ class DatabaseManager {
     return {
       ...found,
       isPending: !!found.isPending,
-      submissions: found.submissions || []
+      submissions: found.submissions || [],
+      contributors: found.contributors || {}
     };
   }
 
@@ -1169,18 +1189,19 @@ class DatabaseManager {
     
     const imagesStr = Array.isArray(ch.images) ? ch.images.join(',') : '';
     const submissionsStr = ch.submissions ? JSON.stringify(ch.submissions) : '[]';
+    const contributorsStr = ch.contributors ? JSON.stringify(ch.contributors) : '{}';
     const isPendingVal = (ch.isPending === true || ch.isPending === 1) ? 1 : 0;
 
     if (this.isUsingMySQL && this.pool) {
       if (isEdit) {
         await this.pool.execute(
-          `UPDATE chapters SET number = ?, title = ?, images = ?, isPending = ?, submissions = ?, updatedAt = ? WHERE seriesId = ? AND id = ?`,
-          [ch.number, ch.title || '', imagesStr, isPendingVal, submissionsStr, now, ch.seriesId, ch.id]
+          `UPDATE chapters SET number = ?, title = ?, images = ?, isPending = ?, submissions = ?, contributors = ?, updatedAt = ? WHERE seriesId = ? AND id = ?`,
+          [ch.number, ch.title || '', imagesStr, isPendingVal, submissionsStr, contributorsStr, now, ch.seriesId, ch.id]
         );
       } else {
         await this.pool.execute(
-          `INSERT INTO chapters (id, seriesId, number, title, images, views, isPending, submissions, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [ch.id, ch.seriesId, ch.number, ch.title || '', imagesStr, ch.views || 0, isPendingVal, submissionsStr, now, now]
+          `INSERT INTO chapters (id, seriesId, number, title, images, views, isPending, submissions, contributors, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [ch.id, ch.seriesId, ch.number, ch.title || '', imagesStr, ch.views || 0, isPendingVal, submissionsStr, contributorsStr, now, now]
         );
       }
       return (await this.getChapterById(ch.seriesId, ch.id))!;
@@ -1195,6 +1216,7 @@ class DatabaseManager {
       views: ch.views || 0,
       isPending: ch.isPending === true || ch.isPending === 1,
       submissions: ch.submissions || [],
+      contributors: ch.contributors || {},
       createdAt: ch.createdAt || now,
       updatedAt: now
     };
@@ -2058,15 +2080,33 @@ class DatabaseManager {
   }
 
   async hasPurchasedChapter(userId: string, seriesId: string, chapterId: string): Promise<boolean> {
+    let hasByChapterId = false;
     if (this.isUsingMySQL && this.pool) {
       const [rows] = await this.pool.execute(
         'SELECT 1 FROM purchased_chapters WHERE userId = ? AND seriesId = ? AND chapterId = ? LIMIT 1',
         [userId, seriesId, chapterId]
       );
-      return (rows as any[]).length > 0;
+      hasByChapterId = (rows as any[]).length > 0;
+    } else {
+      if (!this.localData.purchased_chapters) this.localData.purchased_chapters = [];
+      hasByChapterId = this.localData.purchased_chapters.some(pc => pc.userId === userId && pc.seriesId === seriesId && pc.chapterId === chapterId);
     }
-    if (!this.localData.purchased_chapters) this.localData.purchased_chapters = [];
-    return this.localData.purchased_chapters.some(pc => pc.userId === userId && pc.seriesId === seriesId && pc.chapterId === chapterId);
+    if (hasByChapterId) return true;
+
+    // Fetch the current chapter to check by number
+    const chapter = await this.getChapterById(seriesId, chapterId);
+    if (!chapter) return false;
+
+    if (this.isUsingMySQL && this.pool) {
+      const [rows] = await this.pool.execute(
+        'SELECT 1 FROM purchased_chapters WHERE userId = ? AND seriesId = ? AND chapterNumber = ? LIMIT 1',
+        [userId, seriesId, chapter.number]
+      );
+      return (rows as any[]).length > 0;
+    } else {
+      if (!this.localData.purchased_chapters) this.localData.purchased_chapters = [];
+      return this.localData.purchased_chapters.some(pc => pc.userId === userId && pc.seriesId === seriesId && pc.chapterNumber === chapter.number);
+    }
   }
 
   async purchaseChapter(
@@ -2103,43 +2143,52 @@ class DatabaseManager {
     const transId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     const now = new Date().toISOString();
 
-    // Calculate revenue distribution
-    const approvedContributors = series?.contributors || [];
-    const translators = approvedContributors.filter((c: any) => c.status === 'approved' && c.role === 'translator');
-    const editors = approvedContributors.filter((c: any) => c.status === 'approved' && c.role === 'editor');
-    const cleaners = approvedContributors.filter((c: any) => c.status === 'approved' && (c.role === 'cleaner' || c.role === 'typesetter'));
+    // Calculate dynamic revenue distribution
+    const rolesSetting = await this.getSettings('revenue_roles') || [
+      { id: 'editor', name: 'ادیتور', percentage: 30 },
+      { id: 'translator', name: 'مترجم', percentage: 30 },
+      { id: 'cleaner', name: 'کلینر', percentage: 20 },
+      { id: 'website', name: 'وبسایت', percentage: 20 }
+    ];
 
     const distribution: { userId: string; roleLabel: string; amount: number }[] = [];
 
-    if (translators.length > 0) {
-      const share = Math.floor((price * 0.2) / translators.length);
-      translators.forEach((t: any) => {
-        distribution.push({ userId: t.userId, roleLabel: 'مترجم', amount: share });
-      });
+    for (const r of rolesSetting) {
+      if (r.id === 'website') continue;
+      
+      let assignedUserIds: string[] = [];
+      
+      // Check chapter-level contributors
+      if (chapter.contributors && Array.isArray(chapter.contributors[r.id]) && chapter.contributors[r.id].length > 0) {
+        assignedUserIds = chapter.contributors[r.id];
+      } else {
+        // Fall back to approved series-level contributors
+        const approvedContributors = series?.contributors || [];
+        assignedUserIds = approvedContributors
+          .filter((c: any) => c.status === 'approved' && c.role === r.id)
+          .map((c: any) => c.userId);
+      }
+
+      if (assignedUserIds.length > 0) {
+        const roleShareTotal = Math.floor(price * (r.percentage / 100));
+        const sharePerUser = Math.floor(roleShareTotal / assignedUserIds.length);
+        
+        assignedUserIds.forEach((uid: string) => {
+          distribution.push({ userId: uid, roleLabel: r.name, amount: sharePerUser });
+        });
+      }
     }
 
-    if (editors.length > 0) {
-      const share = Math.floor((price * 0.3) / editors.length);
-      editors.forEach((e: any) => {
-        distribution.push({ userId: e.userId, roleLabel: 'ادیتور', amount: share });
-      });
-    }
-
-    if (cleaners.length > 0) {
-      const share = Math.floor((price * 0.3) / cleaners.length);
-      cleaners.forEach((c: any) => {
-        distribution.push({ userId: c.userId, roleLabel: 'کلینر', amount: share });
-      });
-    }
-
-    // Group by userId to handle the case where same person is both editor and cleaner (receives 60%)
+    // Group by userId
     const userDistributionMap: Record<string, { amount: number; roles: string[] }> = {};
     distribution.forEach(d => {
       if (!userDistributionMap[d.userId]) {
         userDistributionMap[d.userId] = { amount: 0, roles: [] };
       }
       userDistributionMap[d.userId].amount += d.amount;
-      userDistributionMap[d.userId].roles.push(d.roleLabel);
+      if (!userDistributionMap[d.userId].roles.includes(d.roleLabel)) {
+        userDistributionMap[d.userId].roles.push(d.roleLabel);
+      }
     });
 
     let totalDistributed = 0;
@@ -2164,10 +2213,10 @@ class DatabaseManager {
           [transId, userId, user.displayName, -price, 'purchase', description, 'system', 'سیستم', now]
         );
 
-        // Insert purchased chapter record
+        // Insert purchased chapter record with chapterNumber
         await conn.execute(
-          'INSERT INTO purchased_chapters (id, userId, seriesId, chapterId, createdAt) VALUES (?, ?, ?, ?, ?)',
-          [purchaseId, userId, seriesId, chapterId, now]
+          'INSERT INTO purchased_chapters (id, userId, seriesId, chapterId, chapterNumber, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+          [purchaseId, userId, seriesId, chapterId, chapter.number, now]
         );
 
         // Credit contributors
@@ -2201,6 +2250,18 @@ class DatabaseManager {
             'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [adminTransId, adminUser.id, adminUser.displayName, adminProfit, 'credit', desc, 'system', 'سیستم', now]
           );
+        }
+
+        // Update website_revenue setting
+        const [revRows] = await conn.execute('SELECT * FROM settings WHERE id = ?', ['website_revenue']);
+        const revR = (revRows as any[])[0];
+        let currentRev = revR ? JSON.parse(revR.val) : { totalEarned: 0 };
+        currentRev.totalEarned = (currentRev.totalEarned || 0) + adminProfit;
+        const revValStr = JSON.stringify(currentRev);
+        if (revR) {
+          await conn.execute('UPDATE settings SET val = ? WHERE id = ?', [revValStr, 'website_revenue']);
+        } else {
+          await conn.execute('INSERT INTO settings (id, val) VALUES (?, ?)', ['website_revenue', revValStr]);
         }
 
         await conn.commit();
@@ -2245,6 +2306,7 @@ class DatabaseManager {
         userId,
         seriesId,
         chapterId,
+        chapterNumber: chapter.number,
         createdAt: now
       });
 
@@ -2294,6 +2356,12 @@ class DatabaseManager {
           createdAt: now
         });
       }
+
+      // Update website_revenue setting local
+      if (!this.localData.settings.website_revenue) {
+        this.localData.settings.website_revenue = { totalEarned: 0 };
+      }
+      this.localData.settings.website_revenue.totalEarned = (this.localData.settings.website_revenue.totalEarned || 0) + adminProfit;
 
       this.saveLocalData();
     }

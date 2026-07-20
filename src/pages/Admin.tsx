@@ -21,11 +21,13 @@ import {
   Sparkles,
   Search,
   Database,
+  Coins,
 } from "lucide-react";
 import { Series } from "../lib/types";
 import CooperationTab from "../components/CooperationTab";
 import SeoTab from "../components/SeoTab";
 import BackupTab from "../components/BackupTab";
+import RevenueTab from "../components/RevenueTab";
 
 import { ImageUploader } from "../components/ImageUploader";
 import { SortableImageList } from "../components/SortableImageList";
@@ -204,6 +206,8 @@ export default function Admin() {
     | "cooperation"
     | "slider"
     | "seo"
+    | "revenue"
+    | "backup"
   >("dashboard");
 
   // Auth Forms
@@ -935,6 +939,15 @@ export default function Admin() {
               className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "wallet" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
             >
               <Wallet size={18} /> مدیریت کیف پول‌ها
+            </button>
+          )}
+
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab("revenue")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "revenue" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <Coins size={18} /> سود، نقش‌ها و سهم چپترها
             </button>
           )}
 
@@ -3223,6 +3236,13 @@ export default function Admin() {
                 })}
               </div>
             </div>
+          )}
+
+          {activeTab === "revenue" && isSuperAdmin && (
+            <RevenueTab
+              seriesList={seriesList}
+              isSuperAdmin={isSuperAdmin}
+            />
           )}
 
           {activeTab === "backup" && isSuperAdmin && (

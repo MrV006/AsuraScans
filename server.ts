@@ -607,6 +607,27 @@ async function startServer() {
     try {
       const ch = await dbManager.getChapterById(req.params.seriesId, req.params.id);
       if (!ch) return res.status(404).json({ error: "Chapter not found" });
+
+      if (ch.isPending) {
+        const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
+        let allowed = false;
+        if (uid) {
+          const user = await dbManager.getUser(uid);
+          if (user && user.role === 'admin') {
+            allowed = true;
+          } else {
+            const series = await dbManager.getSeriesById(req.params.seriesId);
+            const isContributor = series && series.contributors && series.contributors.some(c => c.userId === uid && c.status === 'approved');
+            if (isContributor) {
+              allowed = true;
+            }
+          }
+        }
+        if (!allowed) {
+          return res.status(403).json({ error: "این چپتر در حال بررسی توسط مدیریت است و هنوز منتشر نشده است." });
+        }
+      }
+
       res.json(ch);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -753,9 +774,19 @@ async function startServer() {
       submissions.push(newSubmission);
       ch.submissions = submissions;
 
-      // If the editor is submitting final images, update chapter images as well
+      // Auto-record this user as the active contributor for this role on this chapter
+      if (role) {
+        if (!ch.contributors) ch.contributors = {};
+        if (!ch.contributors[role]) ch.contributors[role] = [];
+        if (!ch.contributors[role].includes(userId)) {
+          ch.contributors[role].push(userId);
+        }
+      }
+
+      // If the editor is submitting final images, update chapter images and mark as private pending approval
       if (role === "editor" && Array.isArray(images) && images.length > 0) {
         ch.images = images;
+        ch.isPending = true;
       }
 
       const saved = await dbManager.saveChapter(ch);
@@ -1110,6 +1141,141 @@ async function startServer() {
       await dbManager.deleteReport(req.params.id);
       io.emit("reports:updated");
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // -----------------------------------------------------------------
+  // REVENUE, ROLE SETTINGS, STAFF MANAGEMENT & ASSIGNMENT ROUTES
+  // -----------------------------------------------------------------
+  app.get("/api/admin/website-revenue", requireAdmin, async (req, res) => {
+    try {
+      const revenue = await dbManager.getSettings('website_revenue') || { totalEarned: 0 };
+      // Also fetch transactions related to website profit
+      let txs: any[] = [];
+      if (dbManager.isUsingMySQL && dbManager.pool) {
+        const [rows] = await dbManager.pool.execute(
+          "SELECT * FROM wallet_transactions WHERE type = 'credit' AND description LIKE '%سود سایت%' ORDER BY createdAt DESC LIMIT 100"
+        );
+        txs = rows as any[];
+      } else {
+        txs = (dbManager.localData.wallet_transactions || [])
+          .filter((t: any) => t.type === 'credit' && t.description.includes('سود سایت'))
+          .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, 100);
+      }
+      res.json({ totalEarned: revenue.totalEarned || 0, transactions: txs });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/revenue-roles", requireAdmin, async (req, res) => {
+    try {
+      const roles = await dbManager.getSettings('revenue_roles') || [
+        { id: 'editor', name: 'ادیتور', percentage: 30 },
+        { id: 'translator', name: 'مترجم', percentage: 30 },
+        { id: 'cleaner', name: 'کلینر', percentage: 20 },
+        { id: 'website', name: 'وبسایت', percentage: 20 }
+      ];
+      res.json(roles);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/revenue-roles", requireAdmin, async (req, res) => {
+    try {
+      const { roles } = req.body;
+      if (!Array.isArray(roles)) {
+        return res.status(400).json({ error: "لیست نقش‌ها ارسالی نامعتبر است." });
+      }
+      await dbManager.saveSettings('revenue_roles', roles);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/staff", requireAdmin, async (req, res) => {
+    try {
+      let users: any[] = [];
+      if (dbManager.isUsingMySQL && dbManager.pool) {
+        const [rows] = await dbManager.pool.execute(
+          "SELECT id, email, displayName, role FROM users WHERE role = 'staff' OR role = 'admin'"
+        );
+        users = rows as any[];
+      } else {
+        users = (dbManager.localData.users || [])
+          .filter((u: any) => u.role === 'staff' || u.role === 'admin')
+          .map((u: any) => ({ id: u.id, email: u.email, displayName: u.displayName, role: u.role }));
+      }
+      res.json(users);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/series/:seriesId/sales-summary", requireAdmin, async (req, res) => {
+    try {
+      const { seriesId } = req.params;
+      const series = await dbManager.getSeriesById(seriesId);
+      if (!series) return res.status(404).json({ error: "کار یافت نشد" });
+
+      const chapters = await dbManager.getChapters(seriesId);
+
+      let purchases: any[] = [];
+      if (dbManager.isUsingMySQL && dbManager.pool) {
+        const [rows] = await dbManager.pool.execute(
+          "SELECT * FROM purchased_chapters WHERE seriesId = ?",
+          [seriesId]
+        );
+        purchases = rows as any[];
+      } else {
+        purchases = (dbManager.localData.purchased_chapters || []).filter((pc: any) => pc.seriesId === seriesId);
+      }
+
+      const chapterMap: Record<string, number> = {};
+      purchases.forEach((p: any) => {
+        chapterMap[p.chapterId] = (chapterMap[p.chapterId] || 0) + 1;
+      });
+
+      const price = 400; // Toman
+      const list = chapters.map(ch => ({
+        id: ch.id,
+        number: ch.number,
+        title: ch.title,
+        salesCount: chapterMap[ch.id] || 0,
+        totalSalesAmount: (chapterMap[ch.id] || 0) * price,
+        contributors: ch.contributors || {}
+      }));
+
+      const totalPurchasesCount = purchases.length;
+      const totalSales = totalPurchasesCount * price;
+
+      res.json({
+        seriesTitle: series.title,
+        totalPurchasesCount,
+        totalSales,
+        byChapter: list
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/series/:seriesId/chapters/:chapterId/contributors", requireAdmin, async (req, res) => {
+    try {
+      const { seriesId, chapterId } = req.params;
+      const { contributors } = req.body;
+      const ch = await dbManager.getChapterById(seriesId, chapterId);
+      if (!ch) return res.status(404).json({ error: "چپتر یافت نشد" });
+
+      ch.contributors = contributors;
+      const saved = await dbManager.saveChapter(ch);
+      io.emit("chapters:updated", { chapterId: saved.id, seriesId: saved.seriesId });
+      res.json(saved);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

@@ -127,18 +127,6 @@ export default function Series() {
   };
 
   // Filter out scheduled chapters
-  const now = new Date();
-  const chaptersList = series.chapters || [];
-  const publishedChapters = chaptersList.filter(ch => {
-    if (!ch.publishAt) return true;
-    return new Date(ch.publishAt) <= now;
-  });
-
-  // Find the first chapter to read, or the last read chapter if history exists
-  const firstChapter = publishedChapters.length > 0 ? publishedChapters[publishedChapters.length - 1] : null;
-  const readLink = history ? `/reader/${id}/${history.chapterId}` : (firstChapter ? `/reader/${id}/${firstChapter.id}` : '#');
-  const readText = history ? `ادامه مطالعه (چپتر ${history.chapterNumber})` : 'شروع به خواندن';
-
   // Admin and Contributor Authorization
   const userRoles = profile?.roles || [profile?.role || 'user'];
   const isSuperAdmin = userRoles.includes('super_admin') || 
@@ -147,6 +135,26 @@ export default function Series() {
   const isGlobalAdmin = (userRoles.includes('super_admin') || userRoles.includes('admin') || isSuperAdmin) && !isSimulatingUser;
   const isApprovedContributor = series.contributors?.some((c: any) => c.userId === user?.uid && c.status === 'approved');
   const isStaffOrAdmin = isGlobalAdmin || isApprovedContributor;
+
+  const now = new Date();
+  const chaptersList = series.chapters || [];
+
+  const visibleChapters = chaptersList.filter(ch => {
+    if (ch.isPending && !isStaffOrAdmin) return false;
+    if (ch.publishAt && new Date(ch.publishAt) > now) return false;
+    return true;
+  });
+
+  const publishedChapters = chaptersList.filter(ch => {
+    if (ch.isPending) return false;
+    if (ch.publishAt && new Date(ch.publishAt) > now) return false;
+    return true;
+  });
+
+  // Find the first chapter to read, or the last read chapter if history exists
+  const firstChapter = publishedChapters.length > 0 ? publishedChapters[publishedChapters.length - 1] : null;
+  const readLink = history ? `/reader/${id}/${history.chapterId}` : (firstChapter ? `/reader/${id}/${firstChapter.id}` : '#');
+  const readText = history ? `ادامه مطالعه (چپتر ${history.chapterNumber})` : 'شروع به خواندن';
 
   // Edit / Delete logic
   const openEditModal = () => {
@@ -588,17 +596,17 @@ export default function Series() {
               )}
             </div>
 
-            {/* Chapters List */}
+             {/* Chapters List */}
             <div>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold text-white uppercase tracking-tighter flex items-center gap-2">
                   <span className="w-1 h-5 bg-[var(--color-asura-accent)] rounded-full"></span>چپترهای منتشر شده
                 </h2>
-                <span className="text-xs font-bold text-zinc-500">{chaptersList.length} چپتر در کل</span>
+                <span className="text-xs font-bold text-zinc-500">{visibleChapters.length} چپتر قابل مشاهده</span>
               </div>
               
               <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-xl divide-y divide-white/5 overflow-hidden max-h-[600px] overflow-y-auto overflow-x-hidden custom-scrollbar">
-                {chaptersList.map((ch) => (
+                {visibleChapters.map((ch) => (
                   <div 
                     key={ch.id} 
                     className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors group"
