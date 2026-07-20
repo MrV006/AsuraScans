@@ -10,6 +10,7 @@ import sharp from "sharp";
 import JSZip from "jszip";
 import fs from "fs";
 import crypto from "crypto";
+import { generateSeoHtml } from "./server/seo";
 
 async function startServer() {
   const app = express();
@@ -494,6 +495,16 @@ async function startServer() {
     }
   });
 
+  app.post("/api/series/:id/delete", requireAdmin, async (req, res) => {
+    try {
+      await dbManager.deleteSeries(req.params.id);
+      io.emit("series:deleted", { seriesId: req.params.id });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/series/:id/view", async (req, res) => {
     try {
       const views = await dbManager.incrementSeriesViews(req.params.id);
@@ -668,6 +679,16 @@ async function startServer() {
     }
   });
 
+  app.post("/api/series/:seriesId/chapters/:id/delete", requireAdmin, async (req, res) => {
+    try {
+      await dbManager.deleteChapter(req.params.seriesId, req.params.id);
+      io.emit("chapters:updated", { chapterId: req.params.id, seriesId: req.params.seriesId });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.put("/api/series/:seriesId/chapters/:id/approve", requireAdmin, async (req, res) => {
     try {
       const ch = await dbManager.getChapterById(req.params.seriesId, req.params.id);
@@ -780,6 +801,18 @@ async function startServer() {
   });
 
   app.delete("/api/comments/:id", async (req, res) => {
+    try {
+      const comment = await dbManager.getCommentById(req.params.id);
+      if (!comment) return res.status(404).json({ error: "Comment not found" });
+      await dbManager.deleteComment(req.params.id);
+      io.emit("comments:updated", { chapterId: comment.chapterId });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/comments/:id/delete", async (req, res) => {
     try {
       const comment = await dbManager.getCommentById(req.params.id);
       if (!comment) return res.status(404).json({ error: "Comment not found" });
@@ -1035,6 +1068,16 @@ async function startServer() {
     }
   });
 
+  app.post("/api/reports/:id/delete", requireAdmin, async (req, res) => {
+    try {
+      await dbManager.deleteReport(req.params.id);
+      io.emit("reports:updated");
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // -----------------------------------------------------------------
   // 9. WALLET & TRANSACTION API
   // -----------------------------------------------------------------
@@ -1223,7 +1266,8 @@ async function startServer() {
       }
       try {
         const template = await fs.promises.readFile(path.join(process.cwd(), 'index.html'), 'utf-8');
-        const html = await vite.transformIndexHtml(req.originalUrl, template);
+        const transformed = await vite.transformIndexHtml(req.originalUrl, template);
+        const html = await generateSeoHtml(req.path, transformed, req.get('host') || 'localhost', req.protocol);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
       } catch (e) {
         next(e);
@@ -1232,8 +1276,17 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get('*', async (req, res, next) => {
+      if (req.originalUrl.startsWith('/api') || req.originalUrl.includes('.')) {
+        return next();
+      }
+      try {
+        const template = await fs.promises.readFile(path.join(distPath, 'index.html'), 'utf-8');
+        const html = await generateSeoHtml(req.path, template, req.get('host') || 'localhost', req.protocol);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+      } catch (e) {
+        res.sendFile(path.join(distPath, 'index.html'));
+      }
     });
   }
 

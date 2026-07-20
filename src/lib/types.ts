@@ -31,6 +31,9 @@ export interface Series {
   type: string;
   chapters?: Chapter[];
   contributors?: any[];
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
   createdAt: any;
   updatedAt: any;
 }

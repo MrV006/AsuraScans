@@ -194,8 +194,8 @@ export const apiClient = {
   },
 
   async deleteSeries(id: string, adminUid: string) {
-    const res = await fetch(`${API_URL}/api/series/${id}`, {
-      method: 'DELETE',
+    const res = await fetch(`${API_URL}/api/series/${id}/delete`, {
+      method: 'POST',
       headers: this.getHeaders(adminUid)
     });
     if (!res.ok) {
@@ -239,8 +239,8 @@ export const apiClient = {
   },
 
   async deleteChapter(seriesId: string, id: string, adminUid: string) {
-    const res = await fetch(`${API_URL}/api/series/${seriesId}/chapters/${id}`, {
-      method: 'DELETE',
+    const res = await fetch(`${API_URL}/api/series/${seriesId}/chapters/${id}/delete`, {
+      method: 'POST',
       headers: this.getHeaders(adminUid)
     });
     if (!res.ok) {
@@ -283,8 +283,8 @@ export const apiClient = {
   },
 
   async deleteComment(commentId: string) {
-    const res = await fetch(`${API_URL}/api/comments/${commentId}`, {
-      method: 'DELETE',
+    const res = await fetch(`${API_URL}/api/comments/${commentId}/delete`, {
+      method: 'POST',
       headers: this.getHeaders()
     });
     return res.json();
@@ -435,8 +435,8 @@ export const apiClient = {
   },
 
   async deleteReportAdmin(reportId: string, adminUid: string) {
-    const res = await fetch(`${API_URL}/api/reports/${reportId}`, {
-      method: 'DELETE',
+    const res = await fetch(`${API_URL}/api/reports/${reportId}/delete`, {
+      method: 'POST',
       headers: this.getHeaders(adminUid)
     });
     return res.json();

@@ -39,3 +39,11 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
 }
+
+/* Remove Recharts click focus outline and boxes */
+.recharts-wrapper, .recharts-surface, .recharts-wrapper * {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
+  -webkit-tap-highlight-color: transparent;
+}

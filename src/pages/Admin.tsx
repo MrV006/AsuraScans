@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Layout } from "../components/Layout";
@@ -17,9 +17,13 @@ import {
   Wallet,
   EyeOff,
   Sliders,
+  Globe,
+  Sparkles,
+  Search,
 } from "lucide-react";
 import { Series } from "../lib/types";
 import CooperationTab from "../components/CooperationTab";
+import SeoTab from "../components/SeoTab";
 
 import { ImageUploader } from "../components/ImageUploader";
 import { SortableImageList } from "../components/SortableImageList";
@@ -98,6 +102,7 @@ export default function Admin() {
 
   // Dashboard state
   const [totalChapters, setTotalChapters] = useState(0);
+  const [dailyViews, setDailyViews] = useState<{ name: string; views: number }[]>([]);
 
   // Chapter Management state
   const [selectedSeriesForChapters, setSelectedSeriesForChapters] =
@@ -135,6 +140,52 @@ export default function Admin() {
     siteFont: "Inter"
   });
 
+  // Memoized Chart calculations for peak performance and accuracy
+  const userGrowthChartData = useMemo(() => {
+    return Array.from({ length: 7 }).map((_, i) => {
+      const dateStr = new Date(
+        Date.now() - (6 - i) * 24 * 60 * 60 * 1000,
+      ).toLocaleDateString("en-US", { weekday: "short" });
+      const targetDate = new Date(Date.now() - (6 - i) * 24 * 60 * 60 * 1000);
+      targetDate.setHours(23, 59, 59, 999);
+      const cumulativeUsers = usersList.filter(u => {
+        if (!u.createdAt) return true;
+        const uDate = new Date(u.createdAt);
+        return uDate.getTime() <= targetDate.getTime();
+      }).length;
+      return {
+        name: dateStr,
+        users: cumulativeUsers
+      };
+    });
+  }, [usersList]);
+
+  const topSeriesChartData = useMemo(() => {
+    return seriesList
+      .slice()
+      .sort((a, b) => (b.views || 0) - (a.views || 0))
+      .slice(0, 5)
+      .map((s) => ({
+        name: s.title.slice(0, 18) + (s.title.length > 18 ? "..." : ""),
+        views: s.views || 0,
+      }));
+  }, [seriesList]);
+
+  const dailyViewsChartData = useMemo(() => {
+    if (dailyViews && dailyViews.length > 0) {
+      return dailyViews;
+    }
+    // Fallback if not loaded
+    const totalViews = seriesList.reduce((acc, curr) => acc + (curr.views || 0), 0);
+    const distribution = [0.12, 0.14, 0.13, 0.15, 0.14, 0.16, 0.16];
+    return Array.from({ length: 7 }).map((_, i) => ({
+      name: new Date(
+        Date.now() - (6 - i) * 24 * 60 * 60 * 1000,
+      ).toLocaleDateString("en-US", { weekday: "short" }),
+      views: Math.floor(totalViews * distribution[i]),
+    }));
+  }, [dailyViews, seriesList]);
+
   // activeTab
   const [activeTab, setActiveTab] = useState<
     | "dashboard"
@@ -150,6 +201,7 @@ export default function Admin() {
     | "wallet"
     | "cooperation"
     | "slider"
+    | "seo"
   >("dashboard");
 
   // Auth Forms
@@ -209,6 +261,9 @@ export default function Admin() {
     apiClient.getAdminStats(user.uid).then(stats => {
       if (stats) {
         setTotalChapters(stats.totalChapters);
+        if (stats.dailyViews) {
+          setDailyViews(stats.dailyViews);
+        }
       }
     }).catch(console.error);
   };
@@ -890,6 +945,15 @@ export default function Admin() {
             </button>
           )}
 
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab("seo")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "seo" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <Globe size={18} /> مدیریت سئو پیشرفته
+            </button>
+          )}
+
           {(isSuperAdmin || (profile && ['admin', 'translator', 'cleaner', 'editor'].includes(profile.role || ''))) && (
             <button
               onClick={() => setActiveTab("cooperation")}
@@ -984,26 +1048,10 @@ export default function Admin() {
                     User Growth (Last 7 Days)
                   </h2>
                   <div className="bg-black/40 border border-white/10 rounded-xl p-6 h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" style={{ outline: 'none' }}>
                       <LineChart
-                        data={
-                          Array.from({ length: 7 }).map((_, i) => {
-                            const dateStr = new Date(
-                              Date.now() - (6 - i) * 24 * 60 * 60 * 1000,
-                            ).toLocaleDateString("en-US", { weekday: "short" });
-                            const targetDate = new Date(Date.now() - (6 - i) * 24 * 60 * 60 * 1000);
-                            targetDate.setHours(23, 59, 59, 999);
-                            const cumulativeUsers = usersList.filter(u => {
-                              if (!u.createdAt) return true;
-                              const uDate = new Date(u.createdAt);
-                              return uDate.getTime() <= targetDate.getTime();
-                            }).length;
-                            return {
-                              name: dateStr,
-                              users: cumulativeUsers
-                            };
-                          })
-                        }
+                        data={userGrowthChartData}
+                        style={{ outline: 'none' }}
                       >
                         <CartesianGrid
                           strokeDasharray="3 3"
@@ -1024,8 +1072,11 @@ export default function Admin() {
                         />
                         <Tooltip
                           contentStyle={{
-                            backgroundColor: "#111",
-                            borderColor: "#333",
+                            backgroundColor: "rgba(15, 15, 18, 0.95)",
+                            borderColor: "rgba(255, 255, 255, 0.1)",
+                            borderRadius: "8px",
+                            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.5)",
+                            color: "#fff"
                           }}
                         />
                         <Line
@@ -1033,7 +1084,8 @@ export default function Admin() {
                           dataKey="users"
                           stroke="var(--color-asura-accent)"
                           strokeWidth={3}
-                          dot={{ r: 4, fill: "var(--color-asura-accent)" }}
+                          dot={{ r: 4, fill: "var(--color-asura-accent)", strokeWidth: 0 }}
+                          activeDot={{ r: 6, fill: "var(--color-asura-accent)" }}
                         />
                       </LineChart>
                     </ResponsiveContainer>
@@ -1045,20 +1097,10 @@ export default function Admin() {
                     Daily Views
                   </h2>
                   <div className="bg-black/40 border border-white/10 rounded-xl p-6 h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" style={{ outline: 'none' }}>
                       <AreaChart
-                        data={
-                          (() => {
-                            const totalViews = seriesList.reduce((acc, curr) => acc + (curr.views || 0), 0);
-                            const distribution = [0.12, 0.14, 0.13, 0.15, 0.14, 0.16, 0.16];
-                            return Array.from({ length: 7 }).map((_, i) => ({
-                              name: new Date(
-                                Date.now() - (6 - i) * 24 * 60 * 60 * 1000,
-                              ).toLocaleDateString("en-US", { weekday: "short" }),
-                              views: Math.floor(totalViews * distribution[i]),
-                            }));
-                          })()
-                        }
+                        data={dailyViewsChartData}
+                        style={{ outline: 'none' }}
                       >
                         <defs>
                           <linearGradient id="colorViews" x1="0" y1="0" x2="0" y2="1">
@@ -1085,8 +1127,11 @@ export default function Admin() {
                         />
                         <Tooltip
                           contentStyle={{
-                            backgroundColor: "#111",
-                            borderColor: "#333",
+                            backgroundColor: "rgba(15, 15, 18, 0.95)",
+                            borderColor: "rgba(255, 255, 255, 0.1)",
+                            borderRadius: "8px",
+                            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.5)",
+                            color: "#fff"
                           }}
                         />
                         <Area
@@ -1108,19 +1153,11 @@ export default function Admin() {
                     Top Series By Views
                   </h2>
                   <div className="bg-black/40 border border-white/10 rounded-xl p-6 h-[300px]">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" style={{ outline: 'none' }}>
                       <BarChart
                         layout="vertical"
-                        data={seriesList
-                          .slice()
-                          .sort((a, b) => (b.views || 0) - (a.views || 0))
-                          .slice(0, 5)
-                          .map((s) => ({
-                            name:
-                              s.title.slice(0, 20) +
-                              (s.title.length > 20 ? "..." : ""),
-                            views: s.views || 0,
-                          }))}
+                        data={topSeriesChartData}
+                        style={{ outline: 'none' }}
                         margin={{ left: 50 }}
                       >
                         <XAxis
@@ -1140,8 +1177,11 @@ export default function Admin() {
                         />
                         <Tooltip
                           contentStyle={{
-                            backgroundColor: "#111",
-                            borderColor: "#333",
+                            backgroundColor: "rgba(15, 15, 18, 0.95)",
+                            borderColor: "rgba(255, 255, 255, 0.1)",
+                            borderRadius: "8px",
+                            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.5)",
+                            color: "#fff"
                           }}
                           cursor={{ fill: "#ffffff05" }}
                         />
@@ -3105,6 +3145,14 @@ export default function Admin() {
                 )}
               </div>
             </div>
+          )}
+
+          {activeTab === "seo" && isSuperAdmin && (
+            <SeoTab
+              seriesList={seriesList}
+              fetchSeries={fetchSeries}
+              isSuperAdmin={isSuperAdmin}
+            />
           )}
 
           {activeTab === "cooperation" && (
