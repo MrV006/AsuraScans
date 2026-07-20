@@ -20,10 +20,12 @@ import {
   Globe,
   Sparkles,
   Search,
+  Database,
 } from "lucide-react";
 import { Series } from "../lib/types";
 import CooperationTab from "../components/CooperationTab";
 import SeoTab from "../components/SeoTab";
+import BackupTab from "../components/BackupTab";
 
 import { ImageUploader } from "../components/ImageUploader";
 import { SortableImageList } from "../components/SortableImageList";
@@ -969,6 +971,15 @@ export default function Admin() {
               className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "slider" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
             >
               <Sliders size={18} /> مدیریت اسلایدر صفحه اصلی
+            </button>
+          )}
+
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab("backup")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "backup" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <Database size={18} /> پشتیبان‌گیری و مهاجرت دیتابیس
             </button>
           )}
         </div>
@@ -3212,6 +3223,10 @@ export default function Admin() {
                 })}
               </div>
             </div>
+          )}
+
+          {activeTab === "backup" && isSuperAdmin && (
+            <BackupTab isSuperAdmin={isSuperAdmin} />
           )}
         </div>
       </div>

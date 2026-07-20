@@ -2300,6 +2300,309 @@ class DatabaseManager {
 
     return { success: true, newBalance };
   }
+
+  async backupAllData(): Promise<any> {
+    const backup: any = {};
+    const now = new Date().toISOString();
+
+    if (this.isUsingMySQL && this.pool) {
+      try {
+        // 1. Users
+        const [userRows] = await this.pool.execute('SELECT * FROM users');
+        backup.users = (userRows as any[]).map(r => ({
+          ...r,
+          banned: r.banned === 1,
+          canCreateSeries: r.canCreateSeries === 1,
+          hasCompletedSetup: r.hasCompletedSetup === 1,
+          roles: r.rolesText ? r.rolesText.split(',') : (r.role ? [r.role] : ['user']),
+          permissions: r.permissionsText ? r.permissionsText.split(',') : []
+        }));
+
+        // 2. Series
+        const [seriesRows] = await this.pool.execute('SELECT * FROM series');
+        backup.series = (seriesRows as any[]).map(r => ({
+          ...r,
+          alternativeTitles: r.alternativeTitles ? r.alternativeTitles.split(',') : [],
+          genres: r.genres ? r.genres.split(',') : [],
+          tags: r.tags ? r.tags.split(',') : [],
+          isHero: r.isHero === 1,
+          contributors: r.contributors ? JSON.parse(r.contributors) : []
+        }));
+
+        // 3. Chapters
+        const [chapterRows] = await this.pool.execute('SELECT * FROM chapters');
+        backup.chapters = (chapterRows as any[]).map(r => ({
+          ...r,
+          images: r.images ? r.images.split(',') : [],
+          isPending: r.isPending === 1,
+          submissions: r.submissions ? JSON.parse(r.submissions) : []
+        }));
+
+        // 4. Comments
+        const [commentRows] = await this.pool.execute('SELECT * FROM comments');
+        backup.comments = (commentRows as any[]).map(r => ({
+          ...r,
+          likes: r.likes ? JSON.parse(r.likes) : [],
+          dislikes: r.dislikes ? JSON.parse(r.dislikes) : []
+        }));
+
+        // 5. Bookmarks
+        const [bookmarkRows] = await this.pool.execute('SELECT * FROM bookmarks');
+        backup.bookmarks = bookmarkRows;
+
+        // 6. History
+        const [historyRows] = await this.pool.execute('SELECT * FROM history');
+        backup.history = historyRows;
+
+        // 7. Ratings
+        const [ratingRows] = await this.pool.execute('SELECT * FROM ratings');
+        backup.ratings = ratingRows;
+
+        // 8. Settings
+        const [settingRows] = await this.pool.execute('SELECT * FROM settings');
+        const settingsRecord: Record<string, any> = {};
+        for (const s of (settingRows as any[])) {
+          try {
+            settingsRecord[s.id] = JSON.parse(s.val);
+          } catch (e) {
+            settingsRecord[s.id] = s.val;
+          }
+        }
+        backup.settings = settingsRecord;
+
+        // 9. Reports
+        const [reportRows] = await this.pool.execute('SELECT * FROM reports');
+        backup.reports = reportRows;
+
+        // 10. Notifications
+        const [notifRows] = await this.pool.execute('SELECT * FROM notifications');
+        backup.notifications = (notifRows as any[]).map(r => ({
+          ...r,
+          isRead: r.isRead === 1
+        }));
+
+        // 11. Wallet Transactions
+        const [transRows] = await this.pool.execute('SELECT * FROM wallet_transactions');
+        backup.wallet_transactions = transRows;
+
+        // 12. Purchased Chapters
+        const [purchasedRows] = await this.pool.execute('SELECT * FROM purchased_chapters');
+        backup.purchased_chapters = purchasedRows;
+
+      } catch (err) {
+        console.error("MySQL Backup error, falling back to localData", err);
+        return this.localData;
+      }
+    } else {
+      // Local Database
+      backup.users = (this.localData.users || []).map(u => ({
+        ...u,
+        roles: u.roles || (u.role ? [u.role] : ['user']),
+        permissions: u.permissions || []
+      }));
+      backup.series = this.localData.series || [];
+      backup.chapters = this.localData.chapters || [];
+      backup.comments = this.localData.comments || [];
+      backup.bookmarks = this.localData.bookmarks || [];
+      backup.history = this.localData.history || [];
+      backup.ratings = this.localData.ratings || [];
+      backup.settings = this.localData.settings || {};
+      backup.reports = this.localData.reports || [];
+      backup.notifications = this.localData.notifications || [];
+      backup.wallet_transactions = this.localData.wallet_transactions || [];
+      backup.purchased_chapters = this.localData.purchased_chapters || [];
+    }
+
+    return backup;
+  }
+
+  async restoreAllData(data: any): Promise<{ success: boolean; error?: string }> {
+    if (!data || typeof data !== 'object') {
+      return { success: false, error: 'اطلاعات ارسالی معتبر نیست' };
+    }
+
+    const cleanData = {
+      users: Array.isArray(data.users) ? data.users : [],
+      series: Array.isArray(data.series) ? data.series : [],
+      chapters: Array.isArray(data.chapters) ? data.chapters : [],
+      comments: Array.isArray(data.comments) ? data.comments : [],
+      bookmarks: Array.isArray(data.bookmarks) ? data.bookmarks : [],
+      history: Array.isArray(data.history) ? data.history : [],
+      ratings: Array.isArray(data.ratings) ? data.ratings : [],
+      settings: (data.settings && typeof data.settings === 'object') ? data.settings : {},
+      reports: Array.isArray(data.reports) ? data.reports : [],
+      notifications: Array.isArray(data.notifications) ? data.notifications : [],
+      wallet_transactions: Array.isArray(data.wallet_transactions) ? data.wallet_transactions : [],
+      purchased_chapters: Array.isArray(data.purchased_chapters) ? data.purchased_chapters : []
+    };
+
+    if (this.isUsingMySQL && this.pool) {
+      const conn = await this.pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        await conn.query('SET FOREIGN_KEY_CHECKS = 0');
+
+        // Delete all tables
+        const tables = [
+          'users',
+          'series',
+          'chapters',
+          'comments',
+          'bookmarks',
+          'history',
+          'ratings',
+          'settings',
+          'reports',
+          'notifications',
+          'wallet_transactions',
+          'purchased_chapters'
+        ];
+        for (const table of tables) {
+          await conn.execute(`DELETE FROM ${table}`);
+        }
+
+        // Insert Users
+        for (const u of cleanData.users) {
+          const rolesArr = u.roles || (u.role ? [u.role] : ['user']);
+          const permsArr = u.permissions || [];
+          await conn.execute(
+            `INSERT INTO users (id, email, displayName, avatarUrl, banned, role, melliCode, firstName, lastName, phoneNumber, canCreateSeries, rolesText, permissionsText, password, hasCompletedSetup, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              u.id, u.email, u.displayName, u.avatarUrl || null,
+              u.banned ? 1 : 0, u.role || 'user', u.melliCode || '',
+              u.firstName || '', u.lastName || '', u.phoneNumber || '',
+              u.canCreateSeries ? 1 : 0, rolesArr.join(','), permsArr.join(','),
+              u.password || null, u.hasCompletedSetup ? 1 : 0, u.createdAt || new Date().toISOString()
+            ]
+          );
+        }
+
+        // Insert Series
+        for (const s of cleanData.series) {
+          const altTitlesStr = Array.isArray(s.alternativeTitles) ? s.alternativeTitles.join(',') : (s.alternativeTitles || '');
+          const genresStr = Array.isArray(s.genres) ? s.genres.join(',') : (s.genres || '');
+          const tagsStr = Array.isArray(s.tags) ? s.tags.join(',') : (s.tags || '');
+          const contributorsStr = Array.isArray(s.contributors) ? JSON.stringify(s.contributors) : (typeof s.contributors === 'string' ? s.contributors : '[]');
+          await conn.execute(
+            `INSERT INTO series (id, title, alternativeTitles, cover, banner, author, artist, synopsis, genres, tags, status, rating, type, views, contributors, isHero, seoTitle, seoDescription, seoKeywords, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              s.id, s.title, altTitlesStr, s.cover || null, s.banner || null,
+              s.author || '', s.artist || '', s.synopsis || '', genresStr, tagsStr,
+              s.status || 'Ongoing', s.rating || 0, s.type || 'Manhwa', s.views || 0,
+              contributorsStr, s.isHero ? 1 : 0, s.seoTitle || null, s.seoDescription || null,
+              s.seoKeywords || null, s.createdAt || new Date().toISOString(), s.updatedAt || new Date().toISOString()
+            ]
+          );
+        }
+
+        // Insert Chapters
+        for (const c of cleanData.chapters) {
+          const imagesStr = Array.isArray(c.images) ? c.images.join(',') : (c.images || '');
+          const submissionsStr = Array.isArray(c.submissions) ? JSON.stringify(c.submissions) : (typeof c.submissions === 'string' ? c.submissions : '[]');
+          await conn.execute(
+            `INSERT INTO chapters (id, seriesId, number, title, images, views, isPending, submissions, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              c.id, c.seriesId, c.number, c.title || '', imagesStr, c.views || 0,
+              c.isPending ? 1 : 0, submissionsStr, c.createdAt || new Date().toISOString(), c.updatedAt || new Date().toISOString()
+            ]
+          );
+        }
+
+        // Insert Comments
+        for (const c of cleanData.comments) {
+          const likesStr = Array.isArray(c.likes) ? JSON.stringify(c.likes) : (typeof c.likes === 'string' ? c.likes : '[]');
+          const dislikesStr = Array.isArray(c.dislikes) ? JSON.stringify(c.dislikes) : (typeof c.dislikes === 'string' ? c.dislikes : '[]');
+          await conn.execute(
+            `INSERT INTO comments (id, chapterId, userId, userName, userAvatar, content, likes, dislikes, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              c.id, c.chapterId, c.userId, c.userName, c.userAvatar || null,
+              c.content, likesStr, dislikesStr, c.createdAt || new Date().toISOString()
+            ]
+          );
+        }
+
+        // Insert Bookmarks
+        for (const b of cleanData.bookmarks) {
+          await conn.execute(
+            `INSERT INTO bookmarks (userId, seriesId, createdAt) VALUES (?, ?, ?)`,
+            [b.userId, b.seriesId, b.createdAt || new Date().toISOString()]
+          );
+        }
+
+        // Insert History
+        for (const h of cleanData.history) {
+          await conn.execute(
+            `INSERT INTO history (userId, seriesId, chapterId, chapterNumber, updatedAt) VALUES (?, ?, ?, ?, ?)`,
+            [h.userId, h.seriesId, h.chapterId, h.chapterNumber, h.updatedAt || new Date().toISOString()]
+          );
+        }
+
+        // Insert Ratings
+        for (const r of cleanData.ratings) {
+          await conn.execute(
+            `INSERT INTO ratings (userId, seriesId, score, createdAt) VALUES (?, ?, ?, ?)`,
+            [r.userId, r.seriesId, r.score, r.createdAt || new Date().toISOString()]
+          );
+        }
+
+        // Insert Settings
+        for (const [key, val] of Object.entries(cleanData.settings)) {
+          const valStr = typeof val === 'object' ? JSON.stringify(val) : String(val);
+          await conn.execute(
+            `INSERT INTO settings (id, val) VALUES (?, ?)`,
+            [key, valStr]
+          );
+        }
+
+        // Insert Reports
+        for (const r of cleanData.reports) {
+          await conn.execute(
+            `INSERT INTO reports (id, userId, userName, title, content, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [r.id, r.userId, r.userName, r.title, r.content, r.status || 'pending', r.createdAt || new Date().toISOString()]
+          );
+        }
+
+        // Insert Notifications
+        for (const n of cleanData.notifications) {
+          await conn.execute(
+            `INSERT INTO notifications (id, userId, type, title, body, link, isRead, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [n.id, n.userId, n.type || 'system', n.title, n.body || null, n.link || null, n.isRead ? 1 : 0, n.createdAt || new Date().toISOString()]
+          );
+        }
+
+        // Insert Wallet Transactions
+        for (const t of cleanData.wallet_transactions) {
+          await conn.execute(
+            `INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [t.id, t.userId, t.userName, t.amount, t.type, t.description || null, t.creatorId || 'system', t.creatorName || 'سیستم', t.createdAt || new Date().toISOString()]
+          );
+        }
+
+        // Insert Purchased Chapters
+        for (const p of cleanData.purchased_chapters) {
+          await conn.execute(
+            `INSERT INTO purchased_chapters (id, userId, seriesId, chapterId, createdAt) VALUES (?, ?, ?, ?, ?)`,
+            [p.id, p.userId, p.seriesId, p.chapterId, p.createdAt || new Date().toISOString()]
+          );
+        }
+
+        await conn.query('SET FOREIGN_KEY_CHECKS = 1');
+        await conn.commit();
+        return { success: true };
+      } catch (err: any) {
+        await conn.rollback();
+        console.error("MySQL Restore error", err);
+        return { success: false, error: err.message };
+      } finally {
+        conn.release();
+      }
+    } else {
+      // Local Database
+      this.localData = cleanData;
+      this.saveLocalData();
+      return { success: true };
+    }
+  }
 }
 
 export const dbManager = new DatabaseManager();

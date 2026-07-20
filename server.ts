@@ -977,6 +977,43 @@ async function startServer() {
     }
   });
 
+  app.get("/api/admin/backup", requireAdmin, async (req, res) => {
+    try {
+      const adminUid = req.headers['x-admin-uid'] as string;
+      const user = await dbManager.getUser(adminUid);
+      if (!user || !isSuperAdminUser(user)) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به پشتیبان‌گیری می‌باشد." });
+      }
+
+      const backupData = await dbManager.backupAllData();
+      res.setHeader('Content-disposition', 'attachment; filename=asura-clone-backup.json');
+      res.setHeader('Content-type', 'application/json');
+      res.send(JSON.stringify(backupData, null, 2));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/restore", requireAdmin, async (req, res) => {
+    try {
+      const adminUid = req.headers['x-admin-uid'] as string;
+      const user = await dbManager.getUser(adminUid);
+      if (!user || !isSuperAdminUser(user)) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به بازگردانی پشتیبان می‌باشد." });
+      }
+
+      const result = await dbManager.restoreAllData(req.body);
+      if (result.success) {
+        io.emit("system:restored");
+        res.json({ success: true, message: "دیتابیس با موفقیت بازگردانی شد." });
+      } else {
+        res.status(400).json({ error: result.error || "خطا در بازگردانی دیتابیس." });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/admin/comments", requireAdmin, async (req, res) => {
     try {
       const list = await dbManager.getAllComments();
