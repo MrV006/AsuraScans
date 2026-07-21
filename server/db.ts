@@ -52,6 +52,7 @@ export interface Series {
   views: number;
   contributors?: Contributor[];
   isHero?: boolean;
+  slug?: string;
   seoTitle?: string;
   seoDescription?: string;
   seoKeywords?: string;
@@ -345,6 +346,7 @@ class DatabaseManager {
           seoTitle TEXT,
           seoDescription TEXT,
           seoKeywords TEXT,
+          slug VARCHAR(255) DEFAULT NULL,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )`,
@@ -460,6 +462,7 @@ class DatabaseManager {
         `ALTER TABLE series ADD COLUMN IF NOT EXISTS seoTitle TEXT`,
         `ALTER TABLE series ADD COLUMN IF NOT EXISTS seoDescription TEXT`,
         `ALTER TABLE series ADD COLUMN IF NOT EXISTS seoKeywords TEXT`,
+        `ALTER TABLE series ADD COLUMN IF NOT EXISTS slug VARCHAR(255) DEFAULT NULL`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS isPending TINYINT(1) DEFAULT 0`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS submissions TEXT`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS contributors TEXT`,
@@ -802,10 +805,49 @@ class DatabaseManager {
   // -----------------------------------------------------------------
   // SERIES METHODS
   // -----------------------------------------------------------------
+  private async attachLatestChapters(list: any[]): Promise<any[]> {
+    if (this.isUsingMySQL && this.pool) {
+      for (const s of list) {
+        try {
+          const [chapRows] = await this.pool.execute(
+            'SELECT * FROM chapters WHERE seriesId = ? AND isPending = 0 ORDER BY number DESC LIMIT 1',
+            [s.id]
+          );
+          const chap = (chapRows as any[])[0];
+          s.chapters = chap ? [{
+            ...chap,
+            images: chap.images ? chap.images.split(',') : [],
+            isPending: false,
+            submissions: [],
+            contributors: {}
+          }] : [];
+        } catch (e) {
+          s.chapters = [];
+        }
+      }
+      return list;
+    }
+
+    return list.map(s => {
+      const seriesChapters = this.localData.chapters
+        .filter(c => c.seriesId === s.id && !c.isPending)
+        .sort((a, b) => b.number - a.number);
+      return {
+        ...s,
+        chapters: seriesChapters.slice(0, 1).map(c => ({
+          ...c,
+          isPending: !!c.isPending,
+          submissions: c.submissions || [],
+          contributors: c.contributors || {}
+        }))
+      };
+    });
+  }
+
   async getSeries(): Promise<Series[]> {
     if (this.isUsingMySQL && this.pool) {
       const [rows] = await this.pool.execute('SELECT * FROM series ORDER BY createdAt DESC');
-      return (rows as any[]).map(r => {
+      const res = (rows as any[]).map(r => {
         let parsedContributors: any[] = [];
         if (r.contributors) {
           try {
@@ -822,11 +864,13 @@ class DatabaseManager {
           contributors: parsedContributors
         };
       });
+      return this.attachLatestChapters(res);
     }
-    return this.localData.series.map(s => ({
+    const res = this.localData.series.map(s => ({
       ...s,
       contributors: s.contributors || []
     }));
+    return this.attachLatestChapters(res);
   }
 
   async searchSeries(filters: {
@@ -911,7 +955,7 @@ class DatabaseManager {
         list = list.slice(start, end);
       }
 
-      return list;
+      return this.attachLatestChapters(list);
     }
 
     let list = [...this.localData.series];
@@ -965,15 +1009,16 @@ class DatabaseManager {
       list = list.slice(start, end);
     }
 
-    return list.map(s => ({
+    const res = list.map(s => ({
       ...s,
       contributors: s.contributors || []
     }));
+    return this.attachLatestChapters(res);
   }
 
   async getSeriesById(id: string): Promise<Series | null> {
     if (this.isUsingMySQL && this.pool) {
-      const [rows] = await this.pool.execute('SELECT * FROM series WHERE id = ?', [id]);
+      const [rows] = await this.pool.execute('SELECT * FROM series WHERE id = ? OR slug = ?', [id, id]);
       const r = (rows as any[])[0];
       if (!r) return null;
       let parsedContributors: any[] = [];
@@ -988,14 +1033,16 @@ class DatabaseManager {
         genres: r.genres ? r.genres.split(',') : [],
         tags: r.tags ? r.tags.split(',') : [],
         contributors: parsedContributors,
-        isHero: !!r.isHero
+        isHero: !!r.isHero,
+        slug: r.slug || ''
       };
     }
-    const found = this.localData.series.find(s => s.id === id);
+    const found = this.localData.series.find(s => s.id === id || (s as any).slug === id);
     if (!found) return null;
     return {
       ...found,
-      contributors: found.contributors || []
+      contributors: found.contributors || [],
+      slug: (found as any).slug || ''
     };
   }
 
@@ -1011,13 +1058,13 @@ class DatabaseManager {
     if (this.isUsingMySQL && this.pool) {
       if (isEdit) {
         await this.pool.execute(
-          `UPDATE series SET title = ?, alternativeTitles = ?, cover = ?, banner = ?, author = ?, artist = ?, synopsis = ?, genres = ?, tags = ?, status = ?, type = ?, contributors = ?, isHero = ?, seoTitle = ?, seoDescription = ?, seoKeywords = ?, updatedAt = ? WHERE id = ?`,
-          [s.title, altTitlesStr, s.cover, s.banner, s.author, s.artist, s.synopsis, genresStr, tagsStr, s.status, s.type, contributorsStr, s.isHero ? 1 : 0, s.seoTitle || null, s.seoDescription || null, s.seoKeywords || null, now, s.id]
+          `UPDATE series SET title = ?, alternativeTitles = ?, cover = ?, banner = ?, author = ?, artist = ?, synopsis = ?, genres = ?, tags = ?, status = ?, type = ?, contributors = ?, isHero = ?, seoTitle = ?, seoDescription = ?, seoKeywords = ?, slug = ?, updatedAt = ? WHERE id = ?`,
+          [s.title, altTitlesStr, s.cover, s.banner, s.author, s.artist, s.synopsis, genresStr, tagsStr, s.status, s.type, contributorsStr, s.isHero ? 1 : 0, s.seoTitle || null, s.seoDescription || null, s.seoKeywords || null, s.slug || null, now, s.id]
         );
       } else {
         await this.pool.execute(
-          `INSERT INTO series (id, title, alternativeTitles, cover, banner, author, artist, synopsis, genres, tags, status, rating, type, views, contributors, isHero, seoTitle, seoDescription, seoKeywords, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [s.id, s.title, altTitlesStr, s.cover, s.banner, s.author, s.artist, s.synopsis, genresStr, tagsStr, s.status || 'Ongoing', s.rating || 0, s.type || 'Manhwa', s.views || 0, contributorsStr, s.isHero ? 1 : 0, s.seoTitle || null, s.seoDescription || null, s.seoKeywords || null, now, now]
+          `INSERT INTO series (id, title, alternativeTitles, cover, banner, author, artist, synopsis, genres, tags, status, rating, type, views, contributors, isHero, seoTitle, seoDescription, seoKeywords, slug, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [s.id, s.title, altTitlesStr, s.cover, s.banner, s.author, s.artist, s.synopsis, genresStr, tagsStr, s.status || 'Ongoing', s.rating || 0, s.type || 'Manhwa', s.views || 0, contributorsStr, s.isHero ? 1 : 0, s.seoTitle || null, s.seoDescription || null, s.seoKeywords || null, s.slug || null, now, now]
         );
       }
       return (await this.getSeriesById(s.id))!;
@@ -1043,6 +1090,7 @@ class DatabaseManager {
       seoTitle: s.seoTitle || '',
       seoDescription: s.seoDescription || '',
       seoKeywords: s.seoKeywords || '',
+      slug: s.slug || '',
       createdAt: s.createdAt || now,
       updatedAt: now
     };

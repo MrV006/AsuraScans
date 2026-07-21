@@ -26,6 +26,7 @@ export interface Series {
   tags: string[];
   isHero?: boolean;
   isFeatured?: boolean;
+  slug?: string;
   status: string;
   rating: number;
   views?: number;

@@ -18,6 +18,7 @@ export interface Series {
   synopsis: string;
   genres: string[];
   tags: string[];
+  slug?: string;
   status: 'Ongoing' | 'Completed' | 'Hiatus';
   rating: number;
   type: 'Manhwa' | 'Manga' | 'Manhua';

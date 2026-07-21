@@ -151,9 +151,15 @@ export default function Series() {
     return true;
   });
 
+  const getReadLink = (chIdentifier: string) => {
+    const sId = series.slug || series.id;
+    const token = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+    return `/reader/${sId}/${chIdentifier}?sec=${token}`;
+  };
+
   // Find the first chapter to read, or the last read chapter if history exists
   const firstChapter = publishedChapters.length > 0 ? publishedChapters[publishedChapters.length - 1] : null;
-  const readLink = history ? `/reader/${id}/${history.chapterId}` : (firstChapter ? `/reader/${id}/${firstChapter.id}` : '#');
+  const readLink = history ? getReadLink(history.chapterId) : (firstChapter ? getReadLink(`chapter-${firstChapter.number}`) : '#');
   const readText = history ? `ادامه مطالعه (چپتر ${history.chapterNumber})` : 'شروع به خواندن';
 
   // Edit / Delete logic
@@ -294,6 +300,31 @@ export default function Series() {
   // Group contributors by approval status
   const approvedContributors = series.contributors?.filter((c: any) => c.status === 'approved') || [];
   const pendingContributors = series.contributors?.filter((c: any) => c.status === 'pending') || [];
+
+  const getChapterContributorsText = (ch: any) => {
+    if (!ch.contributors) return null;
+    const items: string[] = [];
+    const rolesMap: { [key: string]: string } = {
+      translator: 'مترجم',
+      cleaner: 'کلینر',
+      typesetter: 'تایپستر',
+      editor: 'ادیتور'
+    };
+
+    Object.entries(ch.contributors).forEach(([role, uids]: [string, any]) => {
+      if (Array.isArray(uids) && uids.length > 0) {
+        const names = uids.map(uid => {
+          const found = series.contributors?.find((c: any) => c.userId === uid);
+          return found ? found.displayName : 'همکار';
+        });
+        const roleLabel = rolesMap[role] || role;
+        items.push(`${roleLabel}: ${names.join(' و ')}`);
+      }
+    });
+
+    if (items.length === 0) return null;
+    return items.join(' | ');
+  };
 
   return (
     <Layout>
@@ -612,7 +643,7 @@ export default function Series() {
                     className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors group"
                   >
                     <Link 
-                      to={`/reader/${series.id}/${ch.id}`}
+                      to={getReadLink(`chapter-${ch.number}`)}
                       className="flex-1 flex items-center gap-4"
                     >
                       <div className="w-12 h-12 bg-black/40 border border-white/5 rounded flex items-center justify-center shrink-0 group-hover:border-[var(--color-asura-accent)]/30 transition-colors">
@@ -627,10 +658,18 @@ export default function Series() {
                             </span>
                           )}
                         </h4>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex flex-wrap items-center gap-2 mt-1">
                            <span className="text-[10px] text-zinc-500 italic">
                              {ch.createdAt?.toDate ? formatDistanceToNow(ch.createdAt.toDate(), { addSuffix: true }) : 'به تازگی'}
                            </span>
+                           {getChapterContributorsText(ch) && (
+                             <>
+                               <span className="text-zinc-700 text-[10px]">•</span>
+                               <span className="text-[10px] text-[var(--color-asura-accent-light)] font-bold">
+                                 {getChapterContributorsText(ch)}
+                               </span>
+                             </>
+                           )}
                         </div>
                       </div>
                     </Link>

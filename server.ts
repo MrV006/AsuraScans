@@ -456,6 +456,34 @@ async function startServer() {
     }
   });
 
+  const resolveSeriesId = async (idOrSlug: string): Promise<string> => {
+    const series = await dbManager.getSeriesById(idOrSlug);
+    return series ? series.id : idOrSlug;
+  };
+
+  const resolveSeriesAndChapter = async (seriesIdOrSlug: string, chapterIdOrSlug: string): Promise<{ seriesId: string, chapterId: string }> => {
+    const resolvedSeriesId = await resolveSeriesId(seriesIdOrSlug);
+
+    // Check if chapter exists by ID
+    let chapter = await dbManager.getChapterById(resolvedSeriesId, chapterIdOrSlug);
+    if (!chapter) {
+      // Try by number if chapterIdOrSlug starts with "chapter-" or is a number
+      const match = chapterIdOrSlug.match(/chapter-(\d+(\.\d+)?)/) || chapterIdOrSlug.match(/^(\d+(\.\d+)?)$/);
+      if (match) {
+        const num = parseFloat(match[1]);
+        const chaps = await dbManager.getChapters(resolvedSeriesId);
+        const found = chaps.find(c => c.number === num);
+        if (found) {
+          chapter = found;
+        }
+      }
+    }
+    return {
+      seriesId: resolvedSeriesId,
+      chapterId: chapter ? chapter.id : chapterIdOrSlug
+    };
+  };
+
   app.get("/api/series/:id", async (req, res) => {
     try {
       const s = await dbManager.getSeriesById(req.params.id);
@@ -585,15 +613,16 @@ async function startServer() {
   // -----------------------------------------------------------------
   app.get("/api/series/:seriesId/chapters", async (req, res) => {
     try {
+      const resolvedSeriesId = await resolveSeriesId(req.params.seriesId);
       const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
       const user = uid ? await dbManager.getUser(uid) : null;
-      const series = await dbManager.getSeriesById(req.params.seriesId);
+      const series = await dbManager.getSeriesById(resolvedSeriesId);
 
       const isContributor = series && series.contributors && series.contributors.some(c => c.userId === uid && c.status === 'approved');
       const isAdmin = user && user.role === 'admin';
       const canSeePending = isAdmin || isContributor;
 
-      let chs = await dbManager.getChapters(req.params.seriesId);
+      let chs = await dbManager.getChapters(resolvedSeriesId);
       if (!canSeePending) {
         chs = chs.filter(c => !c.isPending);
       }
@@ -605,7 +634,8 @@ async function startServer() {
 
   app.get("/api/series/:seriesId/chapters/:id", async (req, res) => {
     try {
-      const ch = await dbManager.getChapterById(req.params.seriesId, req.params.id);
+      const resolved = await resolveSeriesAndChapter(req.params.seriesId, req.params.id);
+      const ch = await dbManager.getChapterById(resolved.seriesId, resolved.chapterId);
       if (!ch) return res.status(404).json({ error: "Chapter not found" });
 
       if (ch.isPending) {
@@ -616,7 +646,7 @@ async function startServer() {
           if (user && user.role === 'admin') {
             allowed = true;
           } else {
-            const series = await dbManager.getSeriesById(req.params.seriesId);
+            const series = await dbManager.getSeriesById(resolved.seriesId);
             const isContributor = series && series.contributors && series.contributors.some(c => c.userId === uid && c.status === 'approved');
             if (isContributor) {
               allowed = true;
@@ -747,8 +777,9 @@ async function startServer() {
 
   app.post("/api/series/:seriesId/chapters/:id/view", async (req, res) => {
     try {
-      const views = await dbManager.incrementChapterViews(req.params.seriesId, req.params.id);
-      io.to(`chapter:${req.params.id}`).emit("chapters:views", { views });
+      const resolved = await resolveSeriesAndChapter(req.params.seriesId, req.params.id);
+      const views = await dbManager.incrementChapterViews(resolved.seriesId, resolved.chapterId);
+      io.to(`chapter:${resolved.chapterId}`).emit("chapters:views", { views });
       res.json({ views });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -758,7 +789,8 @@ async function startServer() {
   app.post("/api/series/:seriesId/chapters/:id/submit", async (req, res) => {
     try {
       const { userId, userName, role, fileUrl, note, images } = req.body;
-      const ch = await dbManager.getChapterById(req.params.seriesId, req.params.id);
+      const resolved = await resolveSeriesAndChapter(req.params.seriesId, req.params.id);
+      const ch = await dbManager.getChapterById(resolved.seriesId, resolved.chapterId);
       if (!ch) return res.status(404).json({ error: "Chapter not found" });
 
       const submissions = ch.submissions || [];
@@ -1269,7 +1301,8 @@ async function startServer() {
     try {
       const { seriesId, chapterId } = req.params;
       const { contributors } = req.body;
-      const ch = await dbManager.getChapterById(seriesId, chapterId);
+      const resolved = await resolveSeriesAndChapter(seriesId, chapterId);
+      const ch = await dbManager.getChapterById(resolved.seriesId, resolved.chapterId);
       if (!ch) return res.status(404).json({ error: "چپتر یافت نشد" });
 
       ch.contributors = contributors;
@@ -1363,7 +1396,8 @@ async function startServer() {
   app.get("/api/users/:userId/purchases/:seriesId/:chapterId", async (req, res) => {
     try {
       const { userId, seriesId, chapterId } = req.params;
-      const purchased = await dbManager.hasPurchasedChapter(userId, seriesId, chapterId);
+      const resolved = await resolveSeriesAndChapter(seriesId, chapterId);
+      const purchased = await dbManager.hasPurchasedChapter(userId, resolved.seriesId, resolved.chapterId);
       res.json({ purchased });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1377,11 +1411,12 @@ async function startServer() {
         return res.status(400).json({ error: "پارامترهای ارسالی نامعتبر هستند." });
       }
 
-      const result = await dbManager.purchaseChapter(userId, seriesId, chapterId);
+      const resolved = await resolveSeriesAndChapter(seriesId, chapterId);
+      const result = await dbManager.purchaseChapter(userId, resolved.seriesId, resolved.chapterId);
       if (result.success) {
         // Emit wallet update and purchase update
         io.emit(`wallet:updated:${userId}`, { userId, balance: result.newBalance });
-        io.emit(`chapter:purchased:${userId}:${chapterId}`, { purchased: true });
+        io.emit(`chapter:purchased:${userId}:${resolved.chapterId}`, { purchased: true });
         res.json({ success: true, balance: result.newBalance });
       } else {
         res.status(400).json({ error: result.error });

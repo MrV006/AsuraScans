@@ -92,7 +92,15 @@ export default function Reader() {
   const [visibleIndices, setVisibleIndices] = useState<Set<number>>(new Set());
   const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
 
-  const chapterIdx = series?.chapters ? series.chapters.findIndex(c => c.id === chapterId) : -1;
+  const chapterIdx = series?.chapters ? series.chapters.findIndex(c => {
+    if (c.id === chapterId) return true;
+    const match = chapterId?.match(/chapter-(\d+(\.\d+)?)/) || chapterId?.match(/^(\d+(\.\d+)?)$/);
+    if (match) {
+      const num = parseFloat(match[1]);
+      return c.number === num;
+    }
+    return false;
+  }) : -1;
   const chapter = chapterIdx >= 0 && series?.chapters ? series.chapters[chapterIdx] : (series?.chapters ? series.chapters[0] : null);
   
   // Apply our custom natural sorting algorithm to the chapter images unless sortMode is set to 'input'

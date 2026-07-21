@@ -714,66 +714,77 @@ export default function CooperationTab({
                               </div>
 
                               {/* Submit work Form */}
-                              <div className="bg-zinc-950 p-5 rounded-2xl border border-white/5 space-y-4">
-                                <h5 className="text-xs font-black text-white flex items-center gap-1">
-                                  <Send size={14} className="text-[var(--color-asura-accent)]" /> 
-                                  میز ارسال کار به عنوان <span className="text-[var(--color-asura-accent-light)] font-black">{getRoleLabel(myRole)}</span>
-                                </h5>
+                              {!ch.isPending ? (
+                                <div className="bg-emerald-500/5 border border-emerald-500/20 p-5 rounded-2xl flex flex-col gap-1 text-emerald-400">
+                                  <h5 className="text-xs font-black flex items-center gap-1.5">
+                                    <CheckCircle size={14} /> چپتر تایید نهایی و منتشر شده است
+                                  </h5>
+                                  <p className="text-[10px] text-zinc-400 mt-1">
+                                    این چپتر توسط مدیریت کل تایید نهایی شده و روی سایت پابلیک است. امکان ارسال گزارش کار جدید، آپلود مجدد یا تغییر مقادیر برای کادر فنی مسدود می‌باشد.
+                                  </p>
+                                </div>
+                              ) : (
+                                <div className="bg-zinc-950 p-5 rounded-2xl border border-white/5 space-y-4">
+                                  <h5 className="text-xs font-black text-white flex items-center gap-1">
+                                    <Send size={14} className="text-[var(--color-asura-accent)]" /> 
+                                    میز ارسال کار به عنوان <span className="text-[var(--color-asura-accent-light)] font-black">{getRoleLabel(myRole)}</span>
+                                  </h5>
 
-                                <div className="space-y-3">
-                                  <div>
-                                    <label className="block text-[10px] text-zinc-400 font-bold mb-1">لینک مستقیم فایل کار (گوگل درایو، مگا یا مدیافایر):</label>
-                                    <input
-                                      type="text"
-                                      placeholder="https://drive.google.com/..."
-                                      value={submitFileUrl}
-                                      onChange={(e) => setSubmitFileUrl(e.target.value)}
-                                      className="w-full bg-black border border-white/5 text-white rounded-xl p-2.5 text-xs font-bold text-left focus:outline-none focus:border-[var(--color-asura-accent)]"
-                                    />
-                                  </div>
-
-                                  {myRole === "editor" && (
+                                  <div className="space-y-3">
                                     <div>
-                                      <label className="block text-[10px] text-zinc-400 font-bold mb-1">
-                                        تصاویر نهایی چپتر (مخصوص ادیتور - لینک مستقیم تصاویر را با کاما یا خط جدید جدا کنید):
-                                      </label>
-                                      <textarea
-                                        rows={3}
-                                        placeholder="https://site.com/img1.jpg&#10;https://site.com/img2.jpg"
-                                        value={submitImages}
-                                        onChange={(e) => setSubmitImages(e.target.value)}
-                                        className="w-full bg-black border border-white/5 text-white rounded-xl p-2.5 text-xs font-bold text-left focus:outline-none focus:border-[var(--color-asura-accent)] font-sans"
+                                      <label className="block text-[10px] text-zinc-400 font-bold mb-1">لینک مستقیم فایل کار (گوگل درایو، مگا یا مدیافایر):</label>
+                                      <input
+                                        type="text"
+                                        placeholder="https://drive.google.com/..."
+                                        value={submitFileUrl}
+                                        onChange={(e) => setSubmitFileUrl(e.target.value)}
+                                        className="w-full bg-black border border-white/5 text-white rounded-xl p-2.5 text-xs font-bold text-left focus:outline-none focus:border-[var(--color-asura-accent)]"
                                       />
-                                      <span className="text-[9px] text-zinc-500 block mt-1">با بارگذاری و ارسال این لینک‌ها، تصاویر چپتر روی سایت مستقیماً آپدیت خواهند شد (به صورت پرایوت).</span>
                                     </div>
-                                  )}
 
-                                  <div>
-                                    <label className="block text-[10px] text-zinc-400 font-bold mb-1">توضیحات یا یادداشت برای همکاران و مدیریت:</label>
-                                    <textarea
-                                      rows={2}
-                                      placeholder="مثلاً: ترجمه این چپتر انجام شد. خسته نباشید."
-                                      value={submitNote}
-                                      onChange={(e) => setSubmitNote(e.target.value)}
-                                      className="w-full bg-black border border-white/5 text-white rounded-xl p-2.5 text-xs font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
-                                    />
-                                  </div>
+                                    {myRole === "editor" && (
+                                      <div>
+                                        <label className="block text-[10px] text-zinc-400 font-bold mb-1">
+                                          تصاویر نهایی چپتر (مخصوص ادیتور - لینک مستقیم تصاویر را با کاما یا خط جدید جدا کنید):
+                                        </label>
+                                        <textarea
+                                          rows={3}
+                                          placeholder="https://site.com/img1.jpg&#10;https://site.com/img2.jpg"
+                                          value={submitImages}
+                                          onChange={(e) => setSubmitImages(e.target.value)}
+                                          className="w-full bg-black border border-white/5 text-white rounded-xl p-2.5 text-xs font-bold text-left focus:outline-none focus:border-[var(--color-asura-accent)] font-sans"
+                                        />
+                                        <span className="text-[9px] text-zinc-500 block mt-1">با بارگذاری و ارسال این لینک‌ها، تصاویر چپتر روی سایت مستقیماً آپدیت خواهند شد (به صورت پرایوت).</span>
+                                      </div>
+                                    )}
 
-                                  {submitError && <p className="text-red-400 text-xs font-bold">{submitError}</p>}
-                                  {submitSuccess && <p className="text-emerald-400 text-xs font-black">{submitSuccess}</p>}
+                                    <div>
+                                      <label className="block text-[10px] text-zinc-400 font-bold mb-1">توضیحات یا یادداشت برای همکاران و مدیریت:</label>
+                                      <textarea
+                                        rows={2}
+                                        placeholder="مثلاً: ترجمه این چپتر انجام شد. خسته نباشید."
+                                        value={submitNote}
+                                        onChange={(e) => setSubmitNote(e.target.value)}
+                                        className="w-full bg-black border border-white/5 text-white rounded-xl p-2.5 text-xs font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                                      />
+                                    </div>
 
-                                  <div className="flex gap-2 justify-end pt-2">
-                                    <button
-                                      onClick={() => handleSubmitChapterWork(ch)}
-                                      disabled={submittingWork}
-                                      className="bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] disabled:opacity-50 text-white font-black text-xs px-5 py-2.5 rounded-xl transition-all flex items-center gap-1.5"
-                                    >
-                                      <Send size={13} />
-                                      {submittingWork ? "در حال ارسال..." : "ارسال نهایی گزارش کار"}
-                                    </button>
+                                    {submitError && <p className="text-red-400 text-xs font-bold">{submitError}</p>}
+                                    {submitSuccess && <p className="text-emerald-400 text-xs font-black">{submitSuccess}</p>}
+
+                                    <div className="flex gap-2 justify-end pt-2">
+                                      <button
+                                        onClick={() => handleSubmitChapterWork(ch)}
+                                        disabled={submittingWork}
+                                        className="bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] disabled:opacity-50 text-white font-black text-xs px-5 py-2.5 rounded-xl transition-all flex items-center gap-1.5"
+                                      >
+                                        <Send size={13} />
+                                        {submittingWork ? "در حال ارسال..." : "ارسال نهایی گزارش کار"}
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
+                              )}
 
                               {/* Admin approval panel for pending chapters */}
                               {isGlobalAdmin && ch.isPending && (

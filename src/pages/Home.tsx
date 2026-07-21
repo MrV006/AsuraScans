@@ -77,37 +77,10 @@ export default function Home() {
         apiClient.getSeries({ sortBy: "oldest", limit: 8 }),
       ]);
 
-      // Helper to fetch and map only the single latest chapter for cleaner UI
-      const mapWithChapters = async (list: Series[]) => {
-        return Promise.all(list.map(async (s: any) => {
-          try {
-            const chapters = await apiClient.getChapters(s.id);
-            return {
-              ...s,
-              chapters: Array.isArray(chapters) ? chapters.slice(0, 1) : []
-            };
-          } catch {
-            return { ...s, chapters: [] };
-          }
-        }));
-      };
-
-      const [
-        latestWithChapters,
-        viewsWithChapters,
-        popularWithChapters,
-        oldestWithChapters
-      ] = await Promise.all([
-        mapWithChapters(latest),
-        mapWithChapters(views),
-        mapWithChapters(popular),
-        mapWithChapters(oldest)
-      ]);
-
-      setLatestList(latestWithChapters);
-      setViewsList(viewsWithChapters);
-      setPopularList(popularWithChapters);
-      setOldestList(oldestWithChapters);
+      setLatestList(latest);
+      setViewsList(views);
+      setPopularList(popular);
+      setOldestList(oldest);
 
       // Filter slider items (marked isHero) from all lists combined, or load them
       const allFetched = [...latest, ...views, ...popular, ...oldest];
@@ -405,6 +378,7 @@ export default function Home() {
                   <AnimatePresence mode="wait">
                     {sliderItems.map((series, i) => {
                       if (i !== currentSlide) return null;
+                      const seriesSlugOrId = series.slug || series.id;
                       return (
                         <motion.div
                            key={series.id}
@@ -416,10 +390,10 @@ export default function Home() {
                            dir="rtl"
                         >
                           {/* Full-bleed clickable slide background Link */}
-                          <Link to={`/series/${series.id}`} className="absolute inset-0 z-10" />
+                          <Link to={`/series/${seriesSlugOrId}`} className="absolute inset-0 z-25 cursor-pointer" />
 
                           {/* Banner Background - higher opacity on mobile to look vibrant and clear */}
-                          <img 
+                           <img 
                             src={series.banner || series.cover} 
                             alt={series.title} 
                             className="absolute inset-0 w-full h-full object-cover object-center opacity-55 md:opacity-30 transition-transform duration-1000 scale-105" 
@@ -428,32 +402,32 @@ export default function Home() {
                           
                           {/* Slide details (RTL layout) */}
                           <div className="absolute inset-0 max-w-7xl mx-auto px-6 md:px-12 flex items-center z-20">
-                            <div className="flex gap-8 items-center w-full">
+                            <div className="flex gap-4 md:gap-8 items-center w-full">
                               
-                              {/* Poster (md+) */}
-                              <div className="hidden md:block w-48 h-64 shrink-0 rounded-2xl overflow-hidden shadow-2xl border border-white/10 relative transform hover:scale-[1.02] transition-transform duration-300">
+                              {/* Poster */}
+                              <div className="block w-20 h-28 md:w-44 md:h-60 shrink-0 rounded-2xl overflow-hidden shadow-2xl border border-white/10 relative transform hover:scale-[1.02] transition-transform duration-300">
                                 <img src={series.cover} alt={series.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                <div className="absolute top-3 right-3 bg-[var(--color-asura-accent)] text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-md">HOT</div>
+                                <div className="absolute top-2 right-2 bg-[var(--color-asura-accent)] text-white text-[8px] md:text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-md">HOT</div>
                               </div>
 
                               {/* Details */}
                               <div className="flex-1 text-right max-w-2xl">
-                                <div className="flex flex-wrap gap-2 mb-3">
+                                <div className="flex flex-wrap gap-1.5 mb-2 md:mb-3">
                                   {(Array.isArray(series.genres) ? series.genres : (typeof series.genres === "string" ? series.genres.split(",") : [])).slice(0, 3).map(g => (
-                                    <span key={g} className="bg-white/10 backdrop-blur-md text-zinc-300 text-[10px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wide border border-white/5">{g.trim()}</span>
+                                    <span key={g} className="bg-white/10 backdrop-blur-md text-zinc-300 text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded border border-white/5">{g.trim()}</span>
                                   ))}
                                 </div>
-                                <h1 className="text-2xl md:text-5xl font-black text-white mb-4 leading-tight">
+                                <h1 className="text-lg md:text-3xl font-extrabold text-white mb-2 leading-tight md:leading-snug">
                                   {series.title}
                                 </h1>
-                                <p className="text-zinc-300 md:text-zinc-400 text-xs md:text-sm leading-relaxed mb-6 line-clamp-3">
+                                <p className="text-zinc-300 md:text-zinc-400 text-[11px] md:text-xs leading-relaxed mb-4 line-clamp-2 md:line-clamp-3">
                                   {series.synopsis}
                                 </p>
                                 
                                 <div className="flex items-center gap-4 relative z-30">
                                   <Link 
-                                    to={`/series/${series.id}`} 
-                                    className="bg-gradient-to-r from-[var(--color-asura-accent)] to-[#ff843a] hover:opacity-95 text-white px-7 py-3 rounded-xl font-bold text-xs transition-all shadow-lg shadow-[var(--color-asura-accent)]/15"
+                                    to={`/series/${seriesSlugOrId}`} 
+                                    className="bg-gradient-to-r from-[var(--color-asura-accent)] to-[#ff843a] hover:scale-105 active:scale-95 text-white px-5 py-2 md:px-7 md:py-3 rounded-xl font-bold text-[10px] md:text-xs transition-all shadow-lg shadow-[var(--color-asura-accent)]/15 relative z-30"
                                   >
                                     شروع خواندن
                                   </Link>
@@ -471,13 +445,13 @@ export default function Home() {
                 {/* Left / Right Nav Arrows (Visibile on hover) */}
                 <button 
                   onClick={handlePrevSlide}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-black/40 hover:bg-[var(--color-asura-accent)] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 border border-white/5"
+                  className="absolute left-4 top-1/2 -translate-y-1/2 z-30 w-9 h-9 md:w-10 md:h-10 bg-black/40 hover:bg-[var(--color-asura-accent)] hover:scale-110 active:scale-90 text-white rounded-full flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-300 border border-white/5"
                 >
                   <ChevronLeft size={20} />
                 </button>
                 <button 
                   onClick={handleNextSlide}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-black/40 hover:bg-[var(--color-asura-accent)] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300 border border-white/5"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 z-30 w-9 h-9 md:w-10 md:h-10 bg-black/40 hover:bg-[var(--color-asura-accent)] hover:scale-110 active:scale-90 text-white rounded-full flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-300 border border-white/5"
                 >
                   <ChevronRight size={20} />
                 </button>

@@ -240,6 +240,7 @@ export default function Admin() {
     type: "Manhwa",
     isHero: false,
     isFeatured: false,
+    slug: "",
   });
 
   // Chapter Form
@@ -541,6 +542,7 @@ export default function Admin() {
         type: seriesForm.type,
         isHero: seriesForm.isHero,
         isFeatured: seriesForm.isFeatured,
+        slug: seriesForm.slug,
       };
 
       await apiClient.saveSeries(payload);
@@ -558,6 +560,7 @@ export default function Admin() {
         type: "Manhwa",
         isHero: false,
         isFeatured: false,
+        slug: "",
       });
       fetchSeries();
     } catch (error: any) {
@@ -599,6 +602,7 @@ export default function Admin() {
       type: s.type,
       isHero: s.isHero || false,
       isFeatured: s.isFeatured || false,
+      slug: s.slug || "",
     });
     setActiveTab("series");
   };
@@ -2021,6 +2025,7 @@ export default function Admin() {
                         type: "Manhwa",
                         isHero: false,
                         isFeatured: false,
+                        slug: "",
                       });
                       setActiveTab("manage");
                     }}
@@ -2041,6 +2046,19 @@ export default function Admin() {
                     onChange={(e) =>
                       setSeriesForm({ ...seriesForm, title: e.target.value })
                     }
+                    className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">
+                    Custom Slug / Custom Link Path (e.g. "solo-leveling")
+                  </label>
+                  <input
+                    value={seriesForm.slug}
+                    onChange={(e) =>
+                      setSeriesForm({ ...seriesForm, slug: e.target.value })
+                    }
+                    placeholder="Leave empty to use title-based slug"
                     className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white"
                   />
                 </div>
