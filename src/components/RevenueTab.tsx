@@ -89,10 +89,17 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
     setLoadingRevenue(true);
     try {
       const data = await apiClient.get("/api/admin/website-revenue");
-      setWebsiteRevenue(data.totalEarned || 0);
-      setRevenueTransactions(data.transactions || []);
+      if (data && !data.error) {
+        setWebsiteRevenue(data.totalEarned || 0);
+        setRevenueTransactions(Array.isArray(data.transactions) ? data.transactions : []);
+      } else {
+        setWebsiteRevenue(0);
+        setRevenueTransactions([]);
+      }
     } catch (err) {
       console.error("Error fetching website revenue:", err);
+      setWebsiteRevenue(0);
+      setRevenueTransactions([]);
     } finally {
       setLoadingRevenue(false);
     }
@@ -102,9 +109,15 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
     setLoadingRoles(true);
     try {
       const data = await apiClient.get("/api/admin/revenue-roles");
-      setRoles(data);
+      if (Array.isArray(data)) {
+        setRoles(data);
+      } else {
+        console.error("Revenue roles data is not an array:", data);
+        setRoles([]);
+      }
     } catch (err) {
       console.error("Error fetching revenue roles:", err);
+      setRoles([]);
     } finally {
       setLoadingRoles(false);
     }
@@ -114,9 +127,15 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
     setLoadingStaff(true);
     try {
       const data = await apiClient.get("/api/admin/staff");
-      setStaff(data);
+      if (Array.isArray(data)) {
+        setStaff(data);
+      } else {
+        console.error("Staff data is not an array:", data);
+        setStaff([]);
+      }
     } catch (err) {
       console.error("Error fetching staff:", err);
+      setStaff([]);
     } finally {
       setLoadingStaff(false);
     }
@@ -126,9 +145,15 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
     setLoadingSales(true);
     try {
       const data = await apiClient.get(`/api/admin/series/${seriesId}/sales-summary`);
-      setSalesSummary(data);
+      if (data && !data.error && Array.isArray(data.byChapter)) {
+        setSalesSummary(data);
+      } else {
+        console.error("Sales summary invalid or has error:", data);
+        setSalesSummary(null);
+      }
     } catch (err) {
       console.error("Error fetching sales summary:", err);
+      setSalesSummary(null);
     } finally {
       setLoadingSales(false);
     }
@@ -310,7 +335,7 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
             ) : (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {roles.map(r => {
+                  {Array.isArray(roles) && roles.map(r => {
                     const isDefault = r.id === "website" || r.id === "translator" || r.id === "editor";
                     return (
                       <div key={r.id} className="bg-black/30 p-4 rounded-xl border border-white/5 flex flex-col justify-between space-y-3 relative group">
@@ -568,8 +593,9 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                           {/* Contributor badge view */}
                           {!isEditing && (
                             <div className="flex flex-wrap gap-1.5 pt-1">
-                              {roles.filter(r => r.id !== "website").map(r => {
-                                const assignedIds = ch.contributors?.[r.id] || [];
+                              {Array.isArray(roles) && roles.filter(r => r.id !== "website").map(r => {
+                                const rawAssigned = ch.contributors?.[r.id];
+                                const assignedIds = Array.isArray(rawAssigned) ? rawAssigned : [];
                                 return (
                                   <div key={r.id} className="bg-white/5 px-2 py-0.5 rounded text-[9px] text-zinc-400 border border-white/5 flex items-center gap-1 font-bold">
                                     <span className="text-zinc-500">{r.name}:</span>
@@ -592,11 +618,11 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                             <div className="bg-zinc-950 p-3 rounded-lg border border-white/5 space-y-3">
                               <span className="text-[10px] font-bold text-zinc-400 block border-b border-white/5 pb-1 mb-1">انتخاب پرسنل برای سهم فروش چپتر {ch.number}:</span>
                               
-                              {roles.filter(r => r.id !== "website").map(r => (
+                              {Array.isArray(roles) && roles.filter(r => r.id !== "website").map(r => (
                                 <div key={r.id} className="space-y-1.5">
                                   <span className="text-[10px] font-black text-zinc-300 block">{r.name}</span>
                                   <div className="flex flex-wrap gap-1">
-                                    {staff.map(member => {
+                                    {Array.isArray(staff) && staff.map(member => {
                                       const isSelected = (chapterAssignments[r.id] || []).includes(member.id);
                                       return (
                                         <button
@@ -613,7 +639,7 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                                         </button>
                                       );
                                     })}
-                                    {staff.length === 0 && (
+                                    {(!staff || staff.length === 0) && (
                                       <span className="text-[9px] text-zinc-500">هیچ پرسنل فعالی یافت نشد.</span>
                                     )}
                                   </div>

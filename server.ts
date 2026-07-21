@@ -523,6 +523,25 @@ async function startServer() {
     }
   });
 
+  app.post("/api/admin/series/:id/change-id", requireAdmin, async (req, res) => {
+    try {
+      const { newId } = req.body;
+      if (!newId || typeof newId !== "string" || !newId.trim()) {
+        return res.status(400).json({ error: "شناسه جدید نامعتبر است." });
+      }
+      const success = await dbManager.updateSeriesId(req.params.id, newId.trim());
+      if (success) {
+        io.emit("series:deleted", { seriesId: req.params.id });
+        io.emit("series:updated", { seriesId: newId.trim() });
+        res.json({ success: true });
+      } else {
+        res.status(404).json({ error: "کار یافت نشد" });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/series/:id/delete", requireAdmin, async (req, res) => {
     try {
       await dbManager.deleteSeries(req.params.id);

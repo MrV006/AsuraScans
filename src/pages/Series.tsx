@@ -971,7 +971,7 @@ export default function Series() {
                 <div className="flex justify-between items-center mt-1">
                   <button 
                     type="button" 
-                    onClick={() => setRatingReviewText(prev => prev + " [spoiler]متن مخفی[/spoiler] ")}
+                    onClick={() => setRatingReviewText(prev => prev + " [spoiler][/spoiler] ")}
                     className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-zinc-400 text-[10px] font-bold uppercase rounded-lg border border-white/10 transition-colors"
                   >
                     + Spoiler Tag

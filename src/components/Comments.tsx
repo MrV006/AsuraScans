@@ -29,14 +29,14 @@ function SpoilerText({ text }: { text: string; key?: React.Key }) {
         e.stopPropagation();
         setRevealed(!revealed);
       }}
-      className={`relative inline-block cursor-pointer px-2 py-0.5 rounded-lg transition-all duration-300 font-bold text-xs ${
+      className={`cursor-pointer px-1.5 py-0.5 rounded transition-all duration-300 font-medium ${
         revealed 
-          ? 'bg-zinc-800 text-zinc-200 border border-zinc-700' 
-          : 'bg-red-500/15 hover:bg-red-500/20 text-red-400 border border-red-500/30'
+          ? 'bg-zinc-800/80 text-zinc-100 border border-zinc-700/50' 
+          : 'bg-zinc-900 text-zinc-900 select-none hover:bg-zinc-850 border border-zinc-900'
       }`}
-      title={revealed ? "برای مخفی کردن کلیک کنید" : "برای مشاهده اسپویلر کلیک کنید"}
+      title="اسپویلر - برای نمایش کلیک کنید"
     >
-      {revealed ? text : "⚠️ اسپویلر (برای مشاهده کلیک کنید)"}
+      {text}
     </span>
   );
 }
@@ -192,9 +192,9 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
     const onChange = (val: string) => isReply ? setReplyText(val) : setNewComment(val);
     const insertSpoilerForForm = () => {
       if (isReply) {
-        setReplyText(prev => prev + "[spoiler]متن مخفی[/spoiler]");
+        setReplyText(prev => prev + "[spoiler][/spoiler]");
       } else {
-        setNewComment(prev => prev + "[spoiler]متن مخفی[/spoiler]");
+        setNewComment(prev => prev + "[spoiler][/spoiler]");
       }
     };
 

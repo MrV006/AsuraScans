@@ -205,6 +205,19 @@ export const apiClient = {
     return res.json();
   },
 
+  async changeSeriesId(id: string, newId: string, adminUid: string) {
+    const res = await fetch(`${API_URL}/api/admin/series/${id}/change-id`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify({ newId })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در تغییر شناسه مانهوا.');
+    }
+    return res.json();
+  },
+
   async incrementSeriesViews(id: string) {
     const res = await fetch(`${API_URL}/api/series/${id}/view`, {
       method: 'POST',

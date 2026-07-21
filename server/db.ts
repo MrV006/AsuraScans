@@ -225,7 +225,8 @@ class DatabaseManager {
           database: process.env.DB_NAME,
           waitForConnections: true,
           connectionLimit: 10,
-          queueLimit: 0
+          queueLimit: 0,
+          charset: 'utf8mb4'
         });
         
         // Test connection
@@ -474,6 +475,20 @@ class DatabaseManager {
           await this.pool.execute(aq);
         } catch (err) {
           // ignore error if already exists
+        }
+      }
+
+      // Convert tables and all their columns to utf8mb4 to support Persian properly
+      const tablesToConvert = [
+        'users', 'series', 'chapters', 'comments', 'bookmarks', 
+        'history', 'ratings', 'settings', 'reports', 'notifications', 
+        'wallet_transactions', 'purchased_chapters'
+      ];
+      for (const table of tablesToConvert) {
+        try {
+          await this.pool.execute(`ALTER TABLE ${table} CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+        } catch (err) {
+          console.warn(`Could not convert table ${table} to utf8mb4:`, err);
         }
       }
 
@@ -1140,6 +1155,52 @@ class DatabaseManager {
     this.localData.ratings = this.localData.ratings.filter(r => r.seriesId !== id);
     this.saveLocalData();
     return true;
+  }
+
+  async updateSeriesId(oldId: string, newId: string): Promise<boolean> {
+    if (this.isUsingMySQL && this.pool) {
+      const connection = await this.pool.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        const [existing] = await connection.execute('SELECT id FROM series WHERE id = ?', [newId]);
+        if ((existing as any[]).length > 0) {
+          throw new Error('شناسه جدید از قبل وجود دارد.');
+        }
+
+        await connection.execute('UPDATE series SET id = ? WHERE id = ?', [newId, oldId]);
+        await connection.execute('UPDATE chapters SET seriesId = ? WHERE seriesId = ?', [newId, oldId]);
+        await connection.execute('UPDATE comments SET seriesId = ? WHERE seriesId = ?', [newId, oldId]);
+        await connection.execute('UPDATE bookmarks SET seriesId = ? WHERE seriesId = ?', [newId, oldId]);
+        await connection.execute('UPDATE history SET seriesId = ? WHERE seriesId = ?', [newId, oldId]);
+        await connection.execute('UPDATE ratings SET seriesId = ? WHERE seriesId = ?', [newId, oldId]);
+        await connection.execute('UPDATE purchased_chapters SET seriesId = ? WHERE seriesId = ?', [newId, oldId]);
+
+        await connection.commit();
+        return true;
+      } catch (err) {
+        await connection.rollback();
+        throw err;
+      } finally {
+        connection.release();
+      }
+    } else {
+      const sIdx = this.localData.series.findIndex(s => s.id === oldId);
+      if (sIdx >= 0) {
+        if (this.localData.series.some(s => s.id === newId)) {
+          throw new Error('شناسه جدید از قبل وجود دارد.');
+        }
+        this.localData.series[sIdx].id = newId;
+        this.localData.chapters.forEach(c => { if (c.seriesId === oldId) c.seriesId = newId; });
+        this.localData.bookmarks.forEach(b => { if (b.seriesId === oldId) b.seriesId = newId; });
+        this.localData.history.forEach(h => { if (h.seriesId === oldId) h.seriesId = newId; });
+        this.localData.ratings.forEach(r => { if (r.seriesId === oldId) r.seriesId = newId; });
+        this.localData.purchased_chapters.forEach(pc => { if (pc.seriesId === oldId) pc.seriesId = newId; });
+        this.saveLocalData();
+        return true;
+      }
+      return false;
+    }
   }
 
   async incrementSeriesViews(id: string): Promise<number> {

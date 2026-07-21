@@ -22,6 +22,8 @@ import {
   Search,
   Database,
   Coins,
+  Eye,
+  Trash2,
 } from "lucide-react";
 import { Series } from "../lib/types";
 import CooperationTab from "../components/CooperationTab";
@@ -999,29 +1001,20 @@ export default function Admin() {
               <Database size={18} /> پشتیبان‌گیری و مهاجرت دیتابیس
             </button>
           )}
+
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab("simulation")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "simulation" ? "bg-amber-500 text-black font-black" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <Eye size={18} /> شبیه‌ساز کاربر
+            </button>
+          )}
         </div>
 
         <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 md:p-8 overflow-hidden">
           {activeTab === "dashboard" && (
             <div className="space-y-8">
-              {isSuperAdmin && (
-                <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4" dir="rtl">
-                  <div>
-                    <h3 className="text-base font-black text-amber-400 mb-1 font-sans">شبیه‌ساز کاربر عادی برای تست عملکردها</h3>
-                    <p className="text-xs text-zinc-400 leading-relaxed">با فعال‌سازی این دکمه، شما می‌توانید کل وبسایت را دقیقاً مشابه با یک خواننده معمولی تجربه کنید تا سیستم کسر از موجودی، دسترسی‌ها و محدودیت‌ها را تست کنید.</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setIsSimulatingUser(true);
-                    }}
-                    className="flex-shrink-0 bg-amber-500 hover:bg-amber-600 text-black font-black text-xs px-5 py-3 rounded-xl transition-all shadow-lg shadow-amber-500/10 flex items-center justify-center gap-2"
-                  >
-                    <EyeOff size={16} />
-                    فعال‌سازی حالت شبیه‌ساز کاربر عادی
-                  </button>
-                </div>
-              )}
-
               <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4">
                 Platform Overview
               </h2>
@@ -2062,6 +2055,44 @@ export default function Admin() {
                     className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white"
                   />
                 </div>
+                {editingSeries && isSuperAdmin && (
+                  <div className="border border-amber-500/20 bg-amber-500/5 p-4 rounded-xl space-y-3">
+                    <label className="block text-xs font-black text-amber-400 uppercase mb-1">
+                      تغییر شناسه ثابت دیتابیس (آدرس قدیمی)
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        id="new-series-db-id"
+                        defaultValue={editingSeries.id}
+                        placeholder="مثال: solo-leveling"
+                        className="flex-1 bg-black/60 border border-amber-500/30 rounded-lg px-4 py-2 text-white text-xs font-mono focus:outline-none focus:border-amber-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const val = (document.getElementById("new-series-db-id") as HTMLInputElement)?.value?.trim();
+                          if (!val) return alert("شناسه معتبر نیست.");
+                          if (val === editingSeries.id) return alert("شناسه جدید با شناسه فعلی برابر است.");
+                          if (confirm(`آیا مطمئن هستید که می‌خواهید شناسه این اثر را از "${editingSeries.id}" به "${val}" تغییر دهید؟ تمام لینک‌ها، چپترها و خریدها به شناسه جدید منتقل خواهند شد.`)) {
+                            try {
+                              await apiClient.changeSeriesId(editingSeries.id, val, user!.uid);
+                              alert("شناسه با موفقیت تغییر یافت. لطفاً پنل را مجدداً بارگذاری کنید.");
+                              window.location.reload();
+                            } catch (e: any) {
+                              alert(e.message);
+                            }
+                          }
+                        }}
+                        className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-black font-black text-xs rounded-lg transition-colors shrink-0"
+                      >
+                        به‌روزرسانی شناسه
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-zinc-500 leading-relaxed font-bold">
+                      ⚠️ هشدار: تغییر شناسه دیتابیس، آدرس‌های قدیمی را به کلی نامعتبر می‌کند. فقط در مواقع نیاز مبرم از این ویژگی استفاده کنید.
+                    </p>
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">
                     Cover Image URL
@@ -3265,6 +3296,52 @@ export default function Admin() {
 
           {activeTab === "backup" && isSuperAdmin && (
             <BackupTab isSuperAdmin={isSuperAdmin} />
+          )}
+
+          {activeTab === "simulation" && isSuperAdmin && (
+            <div className="space-y-6" dir="rtl">
+              <h2 className="text-xl font-black text-white pb-4 border-b border-white/10 flex items-center gap-2">
+                <Eye className="text-amber-500" /> شبیه‌ساز کاربر عادی برای تست عملکردها
+              </h2>
+              
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6">
+                <h3 className="text-base font-black text-amber-400 mb-2 font-sans">کنترل شبیه‌سازی کاربران</h3>
+                <p className="text-xs text-zinc-400 leading-relaxed mb-6">
+                  با فعال‌سازی این بخش، شما می‌توانید کل وبسایت را دقیقاً مشابه با یک خواننده معمولی تجربه کنید تا سیستم کسر از موجودی مانهواها، دسترسی‌های چپترها و محدودیت‌های خرید را در وبسایت تست کنید.
+                </p>
+                
+                <div className="flex flex-wrap gap-4">
+                  <button
+                    onClick={() => {
+                      setIsSimulatingUser(true);
+                      alert("شبیه‌ساز با موفقیت فعال شد. شما اکنون به عنوان کاربر عادی شبیه‌سازی می‌شوید.");
+                    }}
+                    className={`px-5 py-3 rounded-xl font-black text-xs transition-all flex items-center gap-2 shadow-lg ${
+                      isSimulatingUser
+                        ? "bg-amber-500 text-black shadow-amber-500/20"
+                        : "bg-white/10 hover:bg-white/15 text-white border border-white/5"
+                    }`}
+                  >
+                    <Eye size={16} />
+                    {isSimulatingUser ? "شبیه‌ساز در حال حاضر فعال است" : "فعال‌سازی حالت شبیه‌ساز کاربر"}
+                  </button>
+                  
+                  {(isSimulatingUser || localStorage.getItem('asura_simulate_user') === 'true') && (
+                    <button
+                      onClick={() => {
+                        setIsSimulatingUser(false);
+                        localStorage.removeItem('asura_simulate_user');
+                        alert("حالت شبیه‌سازی با موفقیت ریست و غیرفعال گردید.");
+                      }}
+                      className="bg-red-500 hover:bg-red-600 text-white font-black text-xs px-5 py-3 rounded-xl transition-all shadow-lg shadow-red-500/10 flex items-center gap-2"
+                    >
+                      <Trash2 size={16} />
+                      پاک کردن و غیرفعال‌سازی شبیه‌ساز (ریست)
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>
