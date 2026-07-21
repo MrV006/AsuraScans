@@ -68,6 +68,12 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
   const [editingChapterId, setEditingChapterId] = useState<string | null>(null);
   const [chapterAssignments, setChapterAssignments] = useState<Record<string, string[]>>({});
 
+  // Settlement Form States
+  const [showSettleModal, setShowSettleModal] = useState(false);
+  const [settleAmount, setSettleAmount] = useState("");
+  const [settleDescription, setSettleDescription] = useState("");
+  const [submittingSettle, setSubmittingSettle] = useState(false);
+
   // Initial Fetching
   useEffect(() => {
     fetchWebsiteRevenue();
@@ -84,6 +90,63 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
       fetchSalesSummary(selectedSeriesId);
     }
   }, [selectedSeriesId]);
+
+  const handleSettleRevenue = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseInt(settleAmount);
+    if (!amount || amount <= 0) {
+      alert("لطفا مبلغ معتبری وارد کنید.");
+      return;
+    }
+
+    setSubmittingSettle(true);
+    try {
+      const res = await apiClient.post("/api/admin/settle-website-revenue", {
+        amount,
+        description: settleDescription.trim()
+      });
+      if (res.success) {
+        alert("تسویه حساب با موفقیت ثبت شد و از سود تجمعی وبسایت کسر گردید.");
+        setSettleAmount("");
+        setSettleDescription("");
+        setShowSettleModal(false);
+        fetchWebsiteRevenue();
+      } else {
+        alert("خطا در ثبت تسویه حساب: " + (res.error || "خطای ناشناخته"));
+      }
+    } catch (err: any) {
+      alert("خطا: " + err.message);
+    } finally {
+      setSubmittingSettle(false);
+    }
+  };
+
+  const getUniqueContributorsForSeries = () => {
+    if (!salesSummary || !Array.isArray(salesSummary.byChapter)) return {};
+    const map: Record<string, string[]> = {};
+    
+    roles.forEach(r => {
+      if (r.id !== "website") {
+        map[r.id] = [];
+      }
+    });
+
+    salesSummary.byChapter.forEach((ch: any) => {
+      if (ch.contributors) {
+        Object.entries(ch.contributors).forEach(([roleId, uids]) => {
+          if (Array.isArray(uids) && map[roleId]) {
+            uids.forEach(uid => {
+              if (uid && !map[roleId].includes(uid)) {
+                map[roleId].push(uid);
+              }
+            });
+          }
+        });
+      }
+    });
+
+    return map;
+  };
 
   const fetchWebsiteRevenue = async () => {
     setLoadingRevenue(true);
@@ -275,17 +338,71 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
 
       {/* 2. Top Stats Section */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-gradient-to-br from-indigo-500/10 to-purple-500/5 border border-indigo-500/15 rounded-2xl p-6 relative overflow-hidden shadow-xl">
+        <div className="bg-gradient-to-br from-indigo-500/10 to-purple-500/5 border border-indigo-500/15 rounded-2xl p-6 relative overflow-hidden shadow-xl flex flex-col justify-between min-h-[160px]">
           <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl"></div>
-          <Coins className="text-indigo-400 absolute left-4 bottom-4 opacity-15" size={72} />
-          <h3 className="text-xs font-bold text-zinc-400 mb-2">کل درآمد تجمعی وبسایت</h3>
-          <p className="text-3xl font-black text-white font-mono mt-2 flex items-baseline gap-1">
-            {websiteRevenue.toLocaleString("fa-IR")}
-            <span className="text-xs text-zinc-500 font-bold">تومان</span>
-          </p>
-          <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 mt-4">
-            <TrendingUp size={12} className="text-emerald-500" />
-            <span>محاسبه زنده بر اساس ۲۰٪ پیش‌فرض یا تنظیم شده</span>
+          <Coins className="text-indigo-400 absolute left-4 bottom-4 opacity-15 animate-pulse" size={72} />
+          <div className="z-10">
+            <h3 className="text-xs font-bold text-zinc-400 mb-2">موجودی فعلی سود وبسایت (پس از تسویه)</h3>
+            <p className="text-3xl font-black text-white font-mono mt-2 flex items-baseline gap-1">
+              {websiteRevenue.toLocaleString("fa-IR")}
+              <span className="text-xs text-zinc-500 font-bold">تومان</span>
+            </p>
+            <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 mt-4">
+              <TrendingUp size={12} className="text-emerald-500" />
+              <span>محاسبه زنده بر اساس ۲۰٪ سهم وبسایت</span>
+            </div>
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-indigo-500/10 z-10">
+            {!showSettleModal ? (
+              <button
+                onClick={() => setShowSettleModal(true)}
+                className="w-full py-2 bg-indigo-500 hover:bg-indigo-600 text-black font-black text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5"
+              >
+                <Percent size={14} />
+                ثبت تسویه حساب و کسر از درآمد
+              </button>
+            ) : (
+              <form onSubmit={handleSettleRevenue} className="space-y-2.5">
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    placeholder="مبلغ (تومان)"
+                    value={settleAmount}
+                    onChange={e => setSettleAmount(e.target.value)}
+                    className="w-full bg-black/60 border border-indigo-500/30 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-zinc-600 font-mono text-left focus:outline-none focus:border-indigo-500"
+                    required
+                  />
+                  <input
+                    type="text"
+                    placeholder="توضیح (بابت...)"
+                    value={settleDescription}
+                    onChange={e => setSettleDescription(e.target.value)}
+                    className="w-full bg-black/60 border border-indigo-500/30 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500 text-right"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={submittingSettle}
+                    className="flex-1 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-black font-black text-[10px] rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {submittingSettle ? "در حال ثبت..." : "ثبت تسویه"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSettleModal(false);
+                      setSettleAmount("");
+                      setSettleDescription("");
+                    }}
+                    className="px-2.5 py-1.5 bg-white/10 hover:bg-white/15 text-white font-bold text-[10px] rounded-lg transition-colors"
+                  >
+                    انصراف
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
 
@@ -477,15 +594,20 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {revenueTransactions.map((tx, idx) => (
-                      <tr key={tx.id || idx} className="hover:bg-white/5 transition-colors">
-                        <td className="p-3 text-emerald-400 font-mono font-black">+{tx.amount.toLocaleString("fa-IR")} ت</td>
-                        <td className="p-3 text-white font-bold">{tx.description}</td>
-                        <td className="p-3 text-zinc-500 font-mono text-[10px]">
-                          {new Date(tx.createdAt).toLocaleDateString("fa-IR")} {new Date(tx.createdAt).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" })}
-                        </td>
-                      </tr>
-                    ))}
+                    {revenueTransactions.map((tx, idx) => {
+                      const isNegative = tx.amount < 0;
+                      return (
+                        <tr key={tx.id || idx} className="hover:bg-white/5 transition-colors">
+                          <td className={`p-3 font-mono font-black ${isNegative ? "text-red-400" : "text-emerald-400"}`}>
+                            {isNegative ? "" : "+"}{tx.amount.toLocaleString("fa-IR")} ت
+                          </td>
+                          <td className="p-3 text-white font-bold">{tx.description}</td>
+                          <td className="p-3 text-zinc-500 font-mono text-[10px]">
+                            {new Date(tx.createdAt).toLocaleDateString("fa-IR")} {new Date(tx.createdAt).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" })}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -560,6 +682,38 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                   <div className="text-right">
                     <span className="block text-[10px] text-zinc-500 font-bold">درآمد کل حاصله</span>
                     <span className="block text-sm font-black text-emerald-400 font-mono mt-0.5">{salesSummary.totalSales.toLocaleString("fa-IR")} ت</span>
+                  </div>
+                </div>
+
+                {/* Series-level contributors block */}
+                <div className="bg-black/30 p-4 rounded-xl border border-indigo-500/10 space-y-3 relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-16 h-16 bg-indigo-500/5 rounded-full blur-xl"></div>
+                  <h4 className="text-xs font-black text-white flex items-center gap-1.5 border-b border-white/5 pb-2">
+                    <Users size={14} className="text-indigo-400 animate-pulse" />
+                    کل دست‌اندرکاران این اثر
+                  </h4>
+                  <div className="space-y-2">
+                    {Object.entries(getUniqueContributorsForSeries()).map(([roleId, uids]: [string, any]) => {
+                      const role = roles.find(r => r.id === roleId);
+                      if (!role) return null;
+                      const members = uids.map((uid: string) => staff.find(s => s.id === uid)).filter(Boolean);
+                      return (
+                        <div key={roleId} className="flex items-center justify-between text-[11px] font-bold">
+                          <span className="text-zinc-400">{role.name}:</span>
+                          <div className="flex flex-wrap gap-1 justify-end">
+                            {members.length > 0 ? (
+                              members.map((member: any) => (
+                                <span key={member.id} className="bg-indigo-500/10 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/15">
+                                  {member.displayName}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-zinc-600 font-normal">تعیین نشده</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 

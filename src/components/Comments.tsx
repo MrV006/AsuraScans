@@ -190,11 +190,25 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
     const isReply = !!parentId;
     const value = isReply ? replyText : newComment;
     const onChange = (val: string) => isReply ? setReplyText(val) : setNewComment(val);
+    const textareaId = isReply ? `reply-textarea-${parentId || 'new'}` : 'comment-textarea-main';
+
     const insertSpoilerForForm = () => {
-      if (isReply) {
-        setReplyText(prev => prev + "[spoiler][/spoiler]");
+      const el = document.getElementById(textareaId) as HTMLTextAreaElement;
+      if (el) {
+        const start = el.selectionStart;
+        const end = el.selectionEnd;
+        const selected = value.substring(start, end);
+        const replacement = `[spoiler]${selected}[/spoiler]`;
+        const newValue = value.substring(0, start) + replacement + value.substring(end);
+        onChange(newValue);
+        
+        setTimeout(() => {
+          el.focus();
+          const newCursorPos = start + 9 + selected.length;
+          el.setSelectionRange(newCursorPos, newCursorPos);
+        }, 10);
       } else {
-        setNewComment(prev => prev + "[spoiler][/spoiler]");
+        onChange(value + "[spoiler][/spoiler]");
       }
     };
 
@@ -210,6 +224,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
           </div>
           <div className="flex-1">
             <textarea
+              id={textareaId}
               value={value}
               onChange={(e) => onChange(e.target.value)}
               autoFocus={autoFocus}

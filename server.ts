@@ -1203,16 +1203,16 @@ async function startServer() {
   app.get("/api/admin/website-revenue", requireAdmin, async (req, res) => {
     try {
       const revenue = await dbManager.getSettings('website_revenue') || { totalEarned: 0 };
-      // Also fetch transactions related to website profit
+      // Also fetch transactions related to website profit and settlements
       let txs: any[] = [];
       if (dbManager.isUsingMySQL && dbManager.pool) {
         const [rows] = await dbManager.pool.execute(
-          "SELECT * FROM wallet_transactions WHERE type = 'credit' AND description LIKE '%سود سایت%' ORDER BY createdAt DESC LIMIT 100"
+          "SELECT * FROM wallet_transactions WHERE (description LIKE '%سود سایت%' OR description LIKE '%تسویه حساب%') ORDER BY createdAt DESC LIMIT 100"
         );
         txs = rows as any[];
       } else {
         txs = (dbManager.localData.wallet_transactions || [])
-          .filter((t: any) => t.type === 'credit' && t.description.includes('سود سایت'))
+          .filter((t: any) => t.description.includes('سود سایت') || t.description.includes('تسویه حساب'))
           .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
           .slice(0, 100);
       }
@@ -1222,12 +1222,66 @@ async function startServer() {
     }
   });
 
+  app.post("/api/admin/settle-website-revenue", requireAdmin, async (req, res) => {
+    try {
+      const { amount, description } = req.body;
+      const deductAmount = Math.floor(Number(amount));
+      if (!deductAmount || deductAmount <= 0) {
+        return res.status(400).json({ error: "مبلغ ارسالی برای تسویه حساب معتبر نیست." });
+      }
+
+      // Read current website revenue
+      let currentRev = await dbManager.getSettings('website_revenue') || { totalEarned: 0 };
+      const previousTotal = currentRev.totalEarned || 0;
+      
+      currentRev.totalEarned = previousTotal - deductAmount;
+      await dbManager.saveSettings('website_revenue', currentRev);
+
+      // Create a transaction to record this payout
+      const now = new Date().toISOString();
+      const transId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      const desc = description ? `تسویه حساب: ${description}` : `کاهش و تسویه حساب از سود سایت`;
+
+      if (dbManager.isUsingMySQL && dbManager.pool) {
+        const [adminRows] = await dbManager.pool.execute("SELECT * FROM users WHERE role = 'admin' OR email = 'amirrezaveisi45@gmail.com' LIMIT 1");
+        const adminUser = (adminRows as any[])[0];
+        const adminId = adminUser ? adminUser.id : 'system';
+        const adminName = adminUser ? adminUser.displayName : 'مدیر کل';
+        
+        await dbManager.pool.execute(
+          'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [transId, adminId, adminName, -deductAmount, 'debit', desc, 'system', 'سیستم', now]
+        );
+      } else {
+        if (!dbManager.localData.wallet_transactions) {
+          dbManager.localData.wallet_transactions = [];
+        }
+        dbManager.localData.wallet_transactions.push({
+          id: transId,
+          userId: 'system',
+          userName: 'مدیر کل',
+          amount: -deductAmount,
+          type: 'debit',
+          description: desc,
+          creatorId: 'system',
+          creatorName: 'سیستم',
+          createdAt: now
+        });
+        dbManager.saveLocalData();
+      }
+
+      res.json({ success: true, newBalance: currentRev.totalEarned });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/admin/revenue-roles", requireAdmin, async (req, res) => {
     try {
       const roles = await dbManager.getSettings('revenue_roles') || [
         { id: 'editor', name: 'ادیتور', percentage: 30 },
-        { id: 'translator', name: 'مترجم', percentage: 30 },
-        { id: 'cleaner', name: 'کلینر', percentage: 20 },
+        { id: 'translator', name: 'مترجم', percentage: 20 },
+        { id: 'cleaner', name: 'کلینر', percentage: 30 },
         { id: 'website', name: 'وبسایت', percentage: 20 }
       ];
       res.json(roles);

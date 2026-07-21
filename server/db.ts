@@ -296,7 +296,7 @@ class DatabaseManager {
   }
 
   // Save to local JSON file
-  private saveLocalData() {
+  public saveLocalData() {
     try {
       fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(this.localData, null, 2), 'utf8');
     } catch (err) {

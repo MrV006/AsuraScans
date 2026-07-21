@@ -963,15 +963,35 @@ export default function Series() {
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-zinc-300">دیدگاه یا نقد شما درباره این اثر (اختیاری)</label>
                 <textarea
+                  id="series-review-textarea"
                   value={ratingReviewText}
                   onChange={(e) => setRatingReviewText(e.target.value)}
                   placeholder="نظرتان را درباره گرافیک، داستان یا ترجمه این مانهوا بنویسید..."
-                  className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50 transition-colors resize-none h-28"
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50 transition-colors resize-none h-28 text-right"
+                  dir="rtl"
                 />
                 <div className="flex justify-between items-center mt-1">
                   <button 
                     type="button" 
-                    onClick={() => setRatingReviewText(prev => prev + " [spoiler][/spoiler] ")}
+                    onClick={() => {
+                      const el = document.getElementById("series-review-textarea") as HTMLTextAreaElement;
+                      if (el) {
+                        const start = el.selectionStart;
+                        const end = el.selectionEnd;
+                        const selected = ratingReviewText.substring(start, end);
+                        const replacement = `[spoiler]${selected}[/spoiler]`;
+                        const newValue = ratingReviewText.substring(0, start) + replacement + ratingReviewText.substring(end);
+                        setRatingReviewText(newValue);
+                        
+                        setTimeout(() => {
+                          el.focus();
+                          const newCursorPos = start + 9 + selected.length;
+                          el.setSelectionRange(newCursorPos, newCursorPos);
+                        }, 10);
+                      } else {
+                        setRatingReviewText(prev => prev + "[spoiler][/spoiler]");
+                      }
+                    }}
                     className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-zinc-400 text-[10px] font-bold uppercase rounded-lg border border-white/10 transition-colors"
                   >
                     + Spoiler Tag
