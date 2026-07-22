@@ -59,6 +59,55 @@ export default function CooperationTab({
   const [submitError, setSubmitError] = useState("");
   const [submitSuccess, setSubmitSuccess] = useState("");
 
+  // Direct File Upload state
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState("");
+
+  const handleDirectFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, role: string) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setUploadingFile(true);
+    setUploadStatus("در حال بارگذاری و پردازش فایل...");
+    setSubmitError("");
+
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append("files", files[i]);
+    }
+
+    try {
+      const res = await apiClient.post("/api/admin/upload", formData, {
+        headers: {
+          'x-admin-uid': user?.uid,
+          'x-user-uid': user?.uid
+        }
+      });
+
+      if (res && res.urls && res.urls.length > 0) {
+        if (role === "translator" || role === "cleaner") {
+          setSubmitFileUrl(res.urls[0]);
+          setUploadStatus(`فایل با موفقیت بارگذاری شد: ${res.urls[0]}`);
+        } else if (role === "editor") {
+          const newUrls = res.urls;
+          const currentArr = submitImages.trim() ? submitImages.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : [];
+          const combined = [...currentArr, ...newUrls];
+          setSubmitImages(combined.join("\n"));
+          setUploadStatus(`${newUrls.length} تصویر با موفقیت بارگذاری و استخراج گردید.`);
+        } else {
+          setSubmitFileUrl(res.urls[0]);
+          setUploadStatus("فایل بارگذاری شد.");
+        }
+      } else {
+        setSubmitError("پاسخ نامعتبر از سرور دریافت شد.");
+      }
+    } catch (err: any) {
+      setSubmitError(err.response?.data?.error || err.message || "خطا در بارگذاری فایل");
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
   // Admin approval processing state
   const [processingActionId, setProcessingActionId] = useState<string | null>(null);
 
@@ -725,14 +774,59 @@ export default function CooperationTab({
                                 </div>
                               ) : (
                                 <div className="bg-zinc-950 p-5 rounded-2xl border border-white/5 space-y-4">
-                                  <h5 className="text-xs font-black text-white flex items-center gap-1">
-                                    <Send size={14} className="text-[var(--color-asura-accent)]" /> 
-                                    میز ارسال کار به عنوان <span className="text-[var(--color-asura-accent-light)] font-black">{getRoleLabel(myRole)}</span>
-                                  </h5>
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-3">
+                                    <h5 className="text-xs font-black text-white flex items-center gap-1.5">
+                                      <Send size={14} className="text-[var(--color-asura-accent)]" /> 
+                                      میز ارسال کار به عنوان <span className="text-[var(--color-asura-accent-light)] font-black">{getRoleLabel(myRole)}</span>
+                                    </h5>
+                                    <div className="bg-white/5 px-3 py-1 rounded-lg text-[11px] font-bold text-zinc-300 border border-white/5">
+                                      سهم شما از فروش چپتر: <span className="text-emerald-400 font-black">{myRole === 'translator' ? '۲۰٪' : myRole === 'cleaner' ? '۳۰٪' : myRole === 'editor' ? '۳۰٪' : 'پیش‌فرض'}</span>
+                                    </div>
+                                  </div>
 
-                                  <div className="space-y-3">
+                                  <div className="space-y-4">
+                                    {/* Direct File Upload Control */}
+                                    <div className="bg-black/40 border border-dashed border-white/10 hover:border-[var(--color-asura-accent)] p-4 rounded-xl transition-colors">
+                                      <label className="block text-xs font-bold text-white mb-1 flex items-center gap-1.5">
+                                        <UploadCloud size={15} className="text-[var(--color-asura-accent)]" />
+                                        {myRole === "translator" && "آپلود مستقیم فایل ترجمه (فایل Word با پسوند doc. یا docx.)"}
+                                        {myRole === "cleaner" && "آپلود مستقیم فایل کلین (فایل Zip یا تصاویر پاک‌سازی شده)"}
+                                        {myRole === "editor" && "آپلود مستقیم فایل ادیت/تایپوگرافی (فایل Zip یا صفحات نهایی مانهوا)"}
+                                        {myRole !== "translator" && myRole !== "cleaner" && myRole !== "editor" && "آپلود مستقیم فایل کار"}
+                                      </label>
+                                      <p className="text-[10px] text-zinc-400 mb-3">
+                                        {myRole === "translator" && "فایل وُرد پس از تایید مدیریت خودکار از هاست پاک می‌شود تا فضای سیستم اشغال نشود."}
+                                        {myRole === "cleaner" && "فایل زیپ کلین پس از انتشار عمومی خودکار جهت بهینه‌سازی حافظه پاک خواهد شد."}
+                                        {myRole === "editor" && "فایل‌های زیپ نهایی استخراج شده و به عنوان صفحات اختصاصی پرایوت چپتر ذخیره می‌شوند."}
+                                      </p>
+
+                                      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+                                        <input
+                                          type="file"
+                                          accept={
+                                            myRole === "translator" 
+                                              ? ".doc,.docx,.txt" 
+                                              : myRole === "cleaner" 
+                                              ? ".zip,image/*" 
+                                              : ".zip,image/*"
+                                          }
+                                          multiple={myRole === "editor" || myRole === "cleaner"}
+                                          onChange={(e) => handleDirectFileUpload(e, myRole)}
+                                          disabled={uploadingFile}
+                                          className="block w-full text-xs text-zinc-400 file:mr-0 file:ml-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-[var(--color-asura-accent)] file:text-white hover:file:bg-[var(--color-asura-accent-hover)] cursor-pointer"
+                                        />
+                                      </div>
+
+                                      {uploadingFile && (
+                                        <p className="text-[11px] text-amber-400 font-bold mt-2 animate-pulse">{uploadStatus}</p>
+                                      )}
+                                      {!uploadingFile && uploadStatus && (
+                                        <p className="text-[11px] text-emerald-400 font-bold mt-2">{uploadStatus}</p>
+                                      )}
+                                    </div>
+
                                     <div>
-                                      <label className="block text-[10px] text-zinc-400 font-bold mb-1">لینک مستقیم فایل کار (گوگل درایو، مگا یا مدیافایر):</label>
+                                      <label className="block text-[10px] text-zinc-400 font-bold mb-1">لینک مستقیم فایل کار (در صورت استفاده از گوگل درایو یا مگا):</label>
                                       <input
                                         type="text"
                                         placeholder="https://drive.google.com/..."
@@ -745,7 +839,7 @@ export default function CooperationTab({
                                     {myRole === "editor" && (
                                       <div>
                                         <label className="block text-[10px] text-zinc-400 font-bold mb-1">
-                                          تصاویر نهایی چپتر (مخصوص ادیتور - لینک مستقیم تصاویر را با کاما یا خط جدید جدا کنید):
+                                          تصاویر نهایی چپتر (مخصوص ادیتور - لینک مستقیم یا خروجی آپلود زیپ):
                                         </label>
                                         <textarea
                                           rows={3}
@@ -754,7 +848,7 @@ export default function CooperationTab({
                                           onChange={(e) => setSubmitImages(e.target.value)}
                                           className="w-full bg-black border border-white/5 text-white rounded-xl p-2.5 text-xs font-bold text-left focus:outline-none focus:border-[var(--color-asura-accent)] font-sans"
                                         />
-                                        <span className="text-[9px] text-zinc-500 block mt-1">با بارگذاری و ارسال این لینک‌ها، تصاویر چپتر روی سایت مستقیماً آپدیت خواهند شد (به صورت پرایوت).</span>
+                                        <span className="text-[9px] text-zinc-500 block mt-1">با بارگذاری فایل زیپ یا ارسال این لینک‌ها، صفحات چپتر به صورت پرایوت برای بررسی ادمین آماده می‌گردند.</span>
                                       </div>
                                     )}
 
@@ -775,7 +869,7 @@ export default function CooperationTab({
                                     <div className="flex gap-2 justify-end pt-2">
                                       <button
                                         onClick={() => handleSubmitChapterWork(ch)}
-                                        disabled={submittingWork}
+                                        disabled={submittingWork || uploadingFile}
                                         className="bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] disabled:opacity-50 text-white font-black text-xs px-5 py-2.5 rounded-xl transition-all flex items-center gap-1.5"
                                       >
                                         <Send size={13} />

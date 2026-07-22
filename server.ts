@@ -765,6 +765,27 @@ async function startServer() {
       if (!ch) return res.status(404).json({ error: "Chapter not found" });
 
       ch.isPending = false;
+
+      // Purge temporary Word files (.doc, .docx) and raw cleaner files from uploads directory to keep server storage lean
+      if (Array.isArray(ch.submissions)) {
+        for (const sub of ch.submissions) {
+          if (sub.role === 'translator' || sub.role === 'cleaner') {
+            if (sub.fileUrl && sub.fileUrl.startsWith('/uploads/')) {
+              const relName = sub.fileUrl.replace(/^\/uploads\//, '');
+              const fullPath = path.join(uploadsDir, relName);
+              try {
+                if (fs.existsSync(fullPath)) {
+                  await fs.promises.unlink(fullPath);
+                }
+              } catch (e) {
+                console.error("Failed to delete temp file:", e);
+              }
+            }
+            sub.fileUrl = ""; // Purge raw file reference after publication
+          }
+        }
+      }
+
       const saved = await dbManager.saveChapter(ch);
       io.emit("chapters:updated", { chapterId: saved.id, seriesId: saved.seriesId });
 
@@ -1511,6 +1532,20 @@ async function startServer() {
       const urls: string[] = [];
 
       for (const file of files) {
+        const ext = path.extname(file.originalname).toLowerCase();
+        const isDoc = [".doc", ".docx", ".pdf", ".txt", ".rtf"].includes(ext) || 
+                      file.mimetype.includes("word") || 
+                      file.mimetype.includes("document") || 
+                      file.mimetype.includes("text/");
+
+        if (isDoc) {
+          const safeName = `doc-${Date.now()}-${Math.floor(Math.random() * 1000000)}${ext || '.docx'}`;
+          const filePath = path.join(uploadsDir, safeName);
+          await fs.promises.writeFile(filePath, file.buffer);
+          urls.push(`/uploads/${safeName}`);
+          continue;
+        }
+
         const isZip = file.originalname.endsWith(".zip") || 
                       file.mimetype === "application/zip" || 
                       file.mimetype === "application/x-zip-compressed";
@@ -1524,23 +1559,30 @@ async function startServer() {
             return !entry.dir && p.match(/\.(jpe?g|png|webp|gif|bmp)$/i) && !p.includes("__MACOSX");
           });
 
-          // Sort numerically/alphabetically (natural sort)
-          filenames.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+          // If zip contains images, extract WebP pages
+          if (filenames.length > 0) {
+            filenames.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
 
-          for (const filename of filenames) {
-            const entry = zipContents.files[filename];
-            const buffer = await entry.async("nodebuffer");
+            for (const filename of filenames) {
+              const entry = zipContents.files[filename];
+              const buffer = await entry.async("nodebuffer");
 
-            // Convert to highly compressed WebP
-            const webpBuffer = await sharp(buffer)
-              .webp({ quality: 75 })
-              .toBuffer();
+              const webpBuffer = await sharp(buffer)
+                .webp({ quality: 75 })
+                .toBuffer();
 
-            const uniqueName = `page-${Date.now()}-${Math.floor(Math.random() * 1000000)}.webp`;
-            const filePath = path.join(uploadsDir, uniqueName);
-            await fs.promises.writeFile(filePath, webpBuffer);
+              const uniqueName = `page-${Date.now()}-${Math.floor(Math.random() * 1000000)}.webp`;
+              const filePath = path.join(uploadsDir, uniqueName);
+              await fs.promises.writeFile(filePath, webpBuffer);
 
-            urls.push(`/uploads/${uniqueName}`);
+              urls.push(`/uploads/${uniqueName}`);
+            }
+          } else {
+            // Raw zip document without images
+            const safeName = `archive-${Date.now()}-${Math.floor(Math.random() * 1000000)}.zip`;
+            const filePath = path.join(uploadsDir, safeName);
+            await fs.promises.writeFile(filePath, file.buffer);
+            urls.push(`/uploads/${safeName}`);
           }
         } else {
           // Direct image upload
