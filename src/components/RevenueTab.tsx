@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { apiClient } from "../lib/apiClient";
 import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  ResponsiveContainer,
+  Legend
+} from "recharts";
+import {
   Coins,
   Percent,
   TrendingUp,
@@ -17,7 +25,8 @@ import {
   ChevronDown,
   AlertTriangle,
   Award,
-  Search
+  Search,
+  PieChart as PieChartIcon
 } from "lucide-react";
 import { Series } from "../lib/types";
 
@@ -432,9 +441,72 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
       {/* 3. Main Split Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* RIGHT COLUMN (2/3): Roles settings & Website revenue transactions */}
+        {/* RIGHT COLUMN (2/3): Financial Dashboard, Roles settings & Website revenue transactions */}
         <div className="lg:col-span-2 space-y-8">
           
+          {/* Financial Dashboard Chart Card */}
+          <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="border-b border-white/5 pb-3 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-white flex items-center gap-2">
+                  <PieChartIcon className="text-[var(--color-asura-accent-light)]" size={16} />
+                  داشبورد نمودار مالی و توزیع درصد سهم‌ها
+                </h3>
+                <p className="text-[10px] text-zinc-500 mt-0.5">نمایش گرافیکی و تفکیک شده سهم مترجم، ادیتور، کلینر و وبسایت از فروش هر چپتر</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+              <div className="h-56 w-full flex items-center justify-center">
+                {roles && roles.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={roles.map(r => ({ name: r.name, value: r.percentage }))}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={80}
+                        paddingAngle={4}
+                        dataKey="value"
+                      >
+                        {roles.map((entry, index) => {
+                          const colors = ["#8b5cf6", "#10b981", "#3b82f6", "#f59e0b", "#ec4899", "#14b8a6"];
+                          return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />;
+                        })}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ backgroundColor: "#09090b", borderColor: "#27272a", borderRadius: "12px", color: "#fff", fontSize: "12px", fontWeight: "bold" }}
+                        formatter={(val: any) => [`${val}٪`, "سهم"]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p className="text-xs text-zinc-500">در حال بارگذاری نمودار...</p>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-zinc-400 border-b border-white/5 pb-2">تفکیک درصدی نقش‌ها</h4>
+                <div className="space-y-2">
+                  {roles.map((r, i) => {
+                    const colors = ["#8b5cf6", "#10b981", "#3b82f6", "#f59e0b", "#ec4899", "#14b8a6"];
+                    const color = colors[i % colors.length];
+                    return (
+                      <div key={r.id} className="flex items-center justify-between text-xs p-2 rounded-lg bg-black/30 border border-white/5">
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded-full" style={{ backgroundColor: color }}></span>
+                          <span className="font-black text-white">{r.name}</span>
+                        </div>
+                        <span className="font-mono font-bold text-[var(--color-asura-accent-light)]">{r.percentage}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Roles config card */}
           <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 shadow-xl space-y-6">
             <div className="border-b border-white/5 pb-3">
