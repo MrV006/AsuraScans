@@ -691,24 +691,64 @@ export default function CooperationTab({
                           {isExpanded && (
                             <div className="p-4 border-t border-white/5 bg-black/20 space-y-6 text-right">
                               {/* Progress Map / Workflow steps */}
-                              <div className="bg-zinc-950 p-4 rounded-xl border border-white/5">
-                                <h5 className="text-[11px] font-black text-zinc-400 mb-3 uppercase tracking-wider">نقشه راه و روند چپتر {ch.number}</h5>
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
-                                  <div className={`p-2.5 rounded-xl border ${transSubs.length > 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-black/30 border-white/5 text-zinc-500"}`}>
-                                    <div className="text-[10px] font-bold">مرحله ۱: ترجمه</div>
-                                    <div className="text-[9px] mt-1 font-black">{transSubs.length > 0 ? `ارسال شده توسط ${transSubs[transSubs.length-1].userName}` : "منتظر مترجم"}</div>
+                              <div className="bg-zinc-950 p-5 rounded-2xl border border-white/5 space-y-4">
+                                <div className="flex items-center justify-between">
+                                  <h5 className="text-[11px] font-black text-zinc-300 flex items-center gap-1.5 uppercase tracking-wider">
+                                    <Sparkles size={13} className="text-[var(--color-asura-accent)]" />
+                                    وضعیت و پیشرفت ساخت چپتر {ch.number}
+                                  </h5>
+                                  <span className="text-xs font-black font-mono text-[var(--color-asura-accent-light)] bg-white/5 px-2.5 py-1 rounded-lg border border-white/5">
+                                    {((transSubs.length > 0 ? 25 : 0) + (cleanSubs.length > 0 ? 25 : 0) + (editSubs.length > 0 ? 25 : 0) + (!ch.isPending ? 25 : 0))}%
+                                  </span>
+                                </div>
+
+                                {/* Visual Progress Bar */}
+                                <div className="relative w-full bg-black/60 h-2.5 rounded-full overflow-hidden border border-white/5">
+                                  <div 
+                                    className="h-full bg-gradient-to-r from-[var(--color-asura-accent)] via-purple-500 to-emerald-500 transition-all duration-500 rounded-full"
+                                    style={{ width: `${(transSubs.length > 0 ? 25 : 0) + (cleanSubs.length > 0 ? 25 : 0) + (editSubs.length > 0 ? 25 : 0) + (!ch.isPending ? 25 : 0)}%` }}
+                                  />
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2 text-center">
+                                  <div className={`p-3 rounded-xl border transition-all ${transSubs.length > 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-black/40 border-white/5 text-zinc-500"}`}>
+                                    <div className="flex items-center justify-center gap-1.5 text-[11px] font-black">
+                                      <CheckCircle size={13} className={transSubs.length > 0 ? "text-emerald-400" : "text-zinc-600"} />
+                                      ۱. ترجمه (Word)
+                                    </div>
+                                    <div className="text-[9px] mt-1.5 font-bold truncate">
+                                      {transSubs.length > 0 ? `توسط ${transSubs[transSubs.length-1].userName}` : "منتظر دریافت"}
+                                    </div>
                                   </div>
-                                  <div className={`p-2.5 rounded-xl border ${cleanSubs.length > 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-black/30 border-white/5 text-zinc-500"}`}>
-                                    <div className="text-[10px] font-bold">مرحله ۲: کلین</div>
-                                    <div className="text-[9px] mt-1 font-black">{cleanSubs.length > 0 ? `ارسال شده توسط ${cleanSubs[cleanSubs.length-1].userName}` : "منتظر کلینر"}</div>
+
+                                  <div className={`p-3 rounded-xl border transition-all ${cleanSubs.length > 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-black/40 border-white/5 text-zinc-500"}`}>
+                                    <div className="flex items-center justify-center gap-1.5 text-[11px] font-black">
+                                      <CheckCircle size={13} className={cleanSubs.length > 0 ? "text-emerald-400" : "text-zinc-600"} />
+                                      ۲. کلین و پاک‌سازی
+                                    </div>
+                                    <div className="text-[9px] mt-1.5 font-bold truncate">
+                                      {cleanSubs.length > 0 ? `توسط ${cleanSubs[cleanSubs.length-1].userName}` : "منتظر دریافت"}
+                                    </div>
                                   </div>
-                                  <div className={`p-2.5 rounded-xl border ${editSubs.length > 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-black/30 border-white/5 text-zinc-500"}`}>
-                                    <div className="text-[10px] font-bold">مرحله ۳: ادیت و تایپ</div>
-                                    <div className="text-[9px] mt-1 font-black">{editSubs.length > 0 ? `ارسال شده توسط ${editSubs[editSubs.length-1].userName}` : "منتظر ادیتور"}</div>
+
+                                  <div className={`p-3 rounded-xl border transition-all ${editSubs.length > 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-black/40 border-white/5 text-zinc-500"}`}>
+                                    <div className="flex items-center justify-center gap-1.5 text-[11px] font-black">
+                                      <CheckCircle size={13} className={editSubs.length > 0 ? "text-emerald-400" : "text-zinc-600"} />
+                                      ۳. ادیت و تایپ
+                                    </div>
+                                    <div className="text-[9px] mt-1.5 font-bold truncate">
+                                      {editSubs.length > 0 ? `توسط ${editSubs[editSubs.length-1].userName}` : "منتظر دریافت"}
+                                    </div>
                                   </div>
-                                  <div className={`p-2.5 rounded-xl border ${!ch.isPending ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-black/30 border-white/5 text-zinc-500"}`}>
-                                    <div className="text-[10px] font-bold">مرحله ۴: تایید نهایی</div>
-                                    <div className="text-[9px] mt-1 font-black">{!ch.isPending ? "انتشار عمومی" : "منتظر تایید مدیریت"}</div>
+
+                                  <div className={`p-3 rounded-xl border transition-all ${!ch.isPending ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-black/40 border-white/5 text-zinc-500"}`}>
+                                    <div className="flex items-center justify-center gap-1.5 text-[11px] font-black">
+                                      <CheckCircle size={13} className={!ch.isPending ? "text-emerald-400" : "text-zinc-600"} />
+                                      ۴. تایید و انتشار
+                                    </div>
+                                    <div className="text-[9px] mt-1.5 font-bold truncate">
+                                      {!ch.isPending ? "انتشار عمومی" : "در انتظار مدیریت"}
+                                    </div>
                                   </div>
                                 </div>
                               </div>

@@ -863,6 +863,28 @@ async function startServer() {
 
       const saved = await dbManager.saveChapter(ch);
       io.emit("chapters:updated", { chapterId: saved.id, seriesId: saved.seriesId });
+
+      // Trigger real-time notifications for contributors & team members
+      try {
+        const series = await dbManager.getSeriesById(saved.seriesId);
+        if (series && Array.isArray(series.contributors)) {
+          for (const contrib of series.contributors) {
+            if (contrib.userId && contrib.userId !== userId) {
+              const notif = await dbManager.addNotification(
+                contrib.userId,
+                "workflow",
+                `ارسال فایل جدید چپتر ${saved.number}`,
+                `${userName || 'همکار'} فایل بخش ${role === 'translator' ? 'ترجمه' : role === 'cleaner' ? 'کلین' : 'ادیت'} چپتر ${saved.number} را ثبت کرد.`,
+                "/admin"
+              );
+              io.to(`user:${contrib.userId}`).emit("notification:new", notif);
+            }
+          }
+        }
+      } catch (notifErr) {
+        console.error("Failed to notify contributors:", notifErr);
+      }
+
       res.json(saved);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1292,6 +1314,68 @@ async function startServer() {
       }
 
       res.json({ success: true, newBalance: currentRev.totalEarned });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/logs", requireAdmin, async (req, res) => {
+    try {
+      const logs: any[] = [];
+
+      // 1. Fetch wallet transactions (payouts, charges, sales)
+      if (dbManager.isUsingMySQL && dbManager.pool) {
+        const [txRows] = await dbManager.pool.execute(
+          "SELECT * FROM wallet_transactions ORDER BY createdAt DESC LIMIT 30"
+        );
+        (txRows as any[]).forEach(tx => {
+          logs.push({
+            id: tx.id,
+            type: tx.amount < 0 ? 'payout' : 'charge',
+            title: tx.amount < 0 ? 'تسویه و پرداخت مالی' : 'شارژ / تراکنش',
+            description: `${tx.userName || 'کاربر'}: ${tx.description} (${Math.abs(tx.amount).toLocaleString("fa-IR")} ت)`,
+            createdAt: tx.createdAt
+          });
+        });
+
+        const [chapRows] = await dbManager.pool.execute(
+          "SELECT * FROM chapters ORDER BY createdAt DESC LIMIT 30"
+        );
+        (chapRows as any[]).forEach(ch => {
+          logs.push({
+            id: `ch-${ch.id}`,
+            type: ch.isPending ? 'upload' : 'approval',
+            title: ch.isPending ? 'بارگذاری / ثبت چپتر' : 'تایید و انتشار چپتر',
+            description: `چپتر ${ch.number} (${ch.title || 'بدون عنوان'}) - ${ch.isPending ? 'در انتظار تایید' : 'منتشر شده عمومی'}`,
+            createdAt: ch.createdAt
+          });
+        });
+      } else {
+        const txs = dbManager.localData.wallet_transactions || [];
+        txs.slice(-30).forEach((tx: any) => {
+          logs.push({
+            id: tx.id,
+            type: tx.amount < 0 ? 'payout' : 'charge',
+            title: tx.amount < 0 ? 'تسویه و پرداخت مالی' : 'شارژ / تراکنش',
+            description: `${tx.userName || 'کاربر'}: ${tx.description} (${Math.abs(tx.amount).toLocaleString("fa-IR")} ت)`,
+            createdAt: tx.createdAt
+          });
+        });
+
+        const chaps = dbManager.localData.chapters || [];
+        chaps.slice(-30).forEach((ch: any) => {
+          logs.push({
+            id: `ch-${ch.id}`,
+            type: ch.isPending ? 'upload' : 'approval',
+            title: ch.isPending ? 'بارگذاری / ثبت چپتر' : 'تایید و انتشار چپتر',
+            description: `چپتر ${ch.number} (${ch.title || 'بدون عنوان'}) - ${ch.isPending ? 'در انتظار تایید' : 'منتشر شده عمومی'}`,
+            createdAt: ch.createdAt || new Date().toISOString()
+          });
+        });
+      }
+
+      logs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      res.json(logs.slice(0, 30));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

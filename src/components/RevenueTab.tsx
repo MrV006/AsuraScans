@@ -26,7 +26,13 @@ import {
   AlertTriangle,
   Award,
   Search,
-  PieChart as PieChartIcon
+  PieChart as PieChartIcon,
+  Activity,
+  FileText,
+  History,
+  Sparkles,
+  Clock,
+  CheckCircle2
 } from "lucide-react";
 import { Series } from "../lib/types";
 
@@ -83,15 +89,34 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
   const [settleDescription, setSettleDescription] = useState("");
   const [submittingSettle, setSubmittingSettle] = useState(false);
 
+  // Activity Logs States
+  const [activityLogs, setActivityLogs] = useState<any[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+
   // Initial Fetching
   useEffect(() => {
     fetchWebsiteRevenue();
     fetchRoles();
     fetchStaff();
+    fetchActivityLogs();
     if (seriesList.length > 0) {
       setSelectedSeriesId(seriesList[0].id);
     }
   }, [seriesList]);
+
+  const fetchActivityLogs = async () => {
+    setLoadingLogs(true);
+    try {
+      const logs = await apiClient.get("/api/admin/logs");
+      if (Array.isArray(logs)) {
+        setActivityLogs(logs);
+      }
+    } catch (e) {
+      console.error("Failed to fetch activity logs:", e);
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
 
   // Fetch sales when series selection changes
   useEffect(() => {
@@ -637,49 +662,98 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
             </form>
           </div>
 
-          {/* Website accumulated profits transaction table */}
-          <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 shadow-xl">
-            <div className="border-b border-white/5 pb-3 mb-4 flex items-center justify-between">
+          {/* Activity Logs Widget (Recent Uploads, Approvals, Payouts) */}
+          <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="border-b border-white/5 pb-3 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-white flex items-center gap-2">
-                  <Award className="text-purple-400" size={16} />
-                  ریز تراکنش‌های سود سایت (۲۰٪ یا درصد وبسایت)
+                  <Activity className="text-amber-400" size={16} />
+                  ویجت لاگ فعالیت‌های اخیر سیستم
                 </h3>
-                <p className="text-[10px] text-zinc-500 mt-0.5">لیست ۱۰۰ تراکنش نهایی مربوط به سهم وبسایت از فروش چپترها</p>
+                <p className="text-[10px] text-zinc-500 mt-0.5">مانیتورینگ زنده آخرین آپلودها، تایید چپترها و تسویه‌حساب‌های پرداختی</p>
               </div>
+              <button
+                onClick={fetchActivityLogs}
+                className="p-1.5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white rounded-lg transition-colors border border-white/5"
+                title="به‌روزرسانی لاگ‌ها"
+              >
+                <RefreshCw size={13} className={loadingLogs ? "animate-spin" : ""} />
+              </button>
+            </div>
+
+            {loadingLogs ? (
+              <div className="flex justify-center items-center py-8">
+                <div className="w-6 h-6 border-2 border-zinc-800 border-t-amber-400 rounded-full animate-spin"></div>
+              </div>
+            ) : activityLogs.length === 0 ? (
+              <div className="text-center py-6 text-zinc-500 text-xs font-bold">هیچ فعالیتی به تازگی ثبت نشده است.</div>
+            ) : (
+              <div className="space-y-2.5 max-h-[250px] overflow-y-auto pr-1 scrollbar-thin">
+                {activityLogs.map((log, idx) => (
+                  <div key={log.id || idx} className="bg-black/30 p-3 rounded-xl border border-white/5 flex items-center justify-between text-xs transition-colors hover:bg-white/5">
+                    <div className="flex items-center gap-2.5">
+                      {log.type === 'upload' && <FileText size={15} className="text-blue-400 shrink-0" />}
+                      {log.type === 'approval' && <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />}
+                      {log.type === 'payout' && <DollarSign size={15} className="text-amber-400 shrink-0" />}
+                      {log.type === 'charge' && <Coins size={15} className="text-purple-400 shrink-0" />}
+                      <div>
+                        <span className="font-bold text-white block">{log.title}</span>
+                        <span className="text-[10px] text-zinc-400 block mt-0.5">{log.description}</span>
+                      </div>
+                    </div>
+                    <span className="text-[9px] font-mono text-zinc-500 shrink-0 dir-ltr">
+                      {new Date(log.createdAt).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Payment History Ledger Section (Immutable ledger) */}
+          <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="border-b border-white/5 pb-3">
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <History className="text-emerald-400" size={16} />
+                دفتر کل و سابقه پرداخت‌ها (Payment History Ledger)
+              </h3>
+              <p className="text-[10px] text-zinc-500 mt-0.5">سابقه تسویه‌حساب‌های مالکین و همکاران کادر تولید (غیرقابل تغییر و شفاف)</p>
             </div>
 
             {loadingRevenue ? (
-              <div className="flex justify-center items-center py-10">
-                <div className="w-8 h-8 border-4 border-zinc-800 border-t-[var(--color-asura-accent)] rounded-full animate-spin"></div>
+              <div className="flex justify-center items-center py-8">
+                <div className="w-6 h-6 border-2 border-zinc-800 border-t-emerald-400 rounded-full animate-spin"></div>
               </div>
-            ) : revenueTransactions.length === 0 ? (
-              <div className="text-center py-8 text-zinc-500 text-xs font-bold">تاکنون تراکنشی ثبت نگردیده است. با خرید چپتر مانهواها توسط کاربران، سود سایت به صورت خودکار در این جدول ثبت خواهد شد.</div>
+            ) : revenueTransactions.filter(t => t.amount < 0).length === 0 ? (
+              <div className="text-center py-6 text-zinc-500 text-xs font-bold">تاکنون پرداختی یا تسویه‌حسابی ثبت نشده است.</div>
             ) : (
-              <div className="overflow-x-auto bg-black/10 border border-white/5 rounded-xl max-h-[300px] overflow-y-auto">
+              <div className="overflow-x-auto bg-black/20 border border-white/5 rounded-xl max-h-[250px] overflow-y-auto">
                 <table className="w-full text-right text-xs">
                   <thead>
-                    <tr className="border-b border-white/5 text-zinc-500">
-                      <th className="p-3 font-black text-right">سود سایت</th>
-                      <th className="p-3 font-black text-right">توضیحات اثر / چپتر</th>
-                      <th className="p-3 font-black text-right font-mono">ساعت و تاریخ</th>
+                    <tr className="border-b border-white/5 text-zinc-500 bg-black/40">
+                      <th className="p-3 font-black text-right">مبلغ پرداختی</th>
+                      <th className="p-3 font-black text-right">عنوان و توضیحات تسویه</th>
+                      <th className="p-3 font-black text-right">تاریخ و زمان ثبت</th>
+                      <th className="p-3 font-black text-center">وضعیت</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
-                    {revenueTransactions.map((tx, idx) => {
-                      const isNegative = tx.amount < 0;
-                      return (
-                        <tr key={tx.id || idx} className="hover:bg-white/5 transition-colors">
-                          <td className={`p-3 font-mono font-black ${isNegative ? "text-red-400" : "text-emerald-400"}`}>
-                            {isNegative ? "" : "+"}{tx.amount.toLocaleString("fa-IR")} ت
-                          </td>
-                          <td className="p-3 text-white font-bold">{tx.description}</td>
-                          <td className="p-3 text-zinc-500 font-mono text-[10px]">
-                            {new Date(tx.createdAt).toLocaleDateString("fa-IR")} {new Date(tx.createdAt).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" })}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {revenueTransactions.filter(t => t.amount < 0).map((tx, idx) => (
+                      <tr key={tx.id || idx} className="hover:bg-white/5 transition-colors">
+                        <td className="p-3 font-mono font-black text-red-400">
+                          {Math.abs(tx.amount).toLocaleString("fa-IR")} تومان
+                        </td>
+                        <td className="p-3 text-white font-bold">{tx.description}</td>
+                        <td className="p-3 text-zinc-400 font-mono text-[10px]">
+                          {new Date(tx.createdAt).toLocaleDateString("fa-IR")}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-black px-2 py-0.5 rounded-full">
+                            تسویه شده
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>

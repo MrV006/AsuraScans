@@ -367,11 +367,11 @@ export default function Home() {
                 onTouchStart={handleTouchStart}
                 onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
-                className="relative w-full overflow-hidden bg-[var(--color-asura-dark)] h-[350px] md:h-[480px] border-b border-white/5 group select-none"
+                className="relative w-full overflow-hidden bg-zinc-950 h-[300px] md:h-[420px] border-b border-white/10 group select-none shadow-2xl"
               >
-                {/* Gradient Overlay for high-end cinematic feel */}
-                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[var(--color-asura-dark)]/40 to-[var(--color-asura-dark)] z-10 pointer-events-none"></div>
-                <div className="absolute inset-0 bg-gradient-to-l from-transparent to-black/85 z-10 pointer-events-none"></div>
+                {/* Gradient Overlays for high-end cinematic feel */}
+                <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-asura-dark)] via-black/40 to-transparent z-10 pointer-events-none"></div>
+                <div className="absolute inset-0 bg-gradient-to-l from-transparent via-black/60 to-black/90 z-10 pointer-events-none"></div>
 
                 {/* Slides Container */}
                 <div className="relative w-full h-full">
@@ -379,59 +379,61 @@ export default function Home() {
                     {sliderItems.map((series, i) => {
                       if (i !== currentSlide) return null;
                       const seriesSlugOrId = series.slug || series.id;
+                      const displayImage = series.banner || series.cover;
                       return (
                         <motion.div
                            key={series.id}
-                           initial={{ opacity: 0 }}
-                           animate={{ opacity: 1 }}
-                           exit={{ opacity: 0 }}
-                           transition={{ duration: 0.8 }}
+                           initial={{ opacity: 0, scale: 0.98 }}
+                           animate={{ opacity: 1, scale: 1 }}
+                           exit={{ opacity: 0, scale: 1.02 }}
+                           transition={{ duration: 0.4, ease: "easeOut" }}
                            className="absolute inset-0 w-full h-full"
                            dir="rtl"
                         >
                           {/* Full-bleed clickable slide background Link */}
                           <Link to={`/series/${seriesSlugOrId}`} className="absolute inset-0 z-25 cursor-pointer" />
 
-                          {/* Banner Background - higher opacity on mobile to look vibrant and clear */}
-                           <img 
-                            src={series.banner || series.cover} 
+                          {/* Single High-Res Banner Backdrop */}
+                          <img 
+                            src={displayImage} 
                             alt={series.title} 
-                            className="absolute inset-0 w-full h-full object-cover object-center opacity-55 md:opacity-30 transition-transform duration-1000 scale-105" 
+                            className="absolute inset-0 w-full h-full object-cover object-center opacity-70 transition-transform duration-700 ease-out hover:scale-105" 
                             referrerPolicy="no-referrer"
                           />
                           
-                          {/* Slide details (RTL layout) */}
+                          {/* Slide details overlay */}
                           <div className="absolute inset-0 max-w-7xl mx-auto px-6 md:px-12 flex items-center z-20">
-                            <div className="flex gap-4 md:gap-8 items-center w-full">
+                            <div className="flex flex-col justify-end pb-8 md:pb-12 max-w-xl text-right">
                               
-                              {/* Poster */}
-                              <div className="block w-20 h-28 md:w-44 md:h-60 shrink-0 rounded-2xl overflow-hidden shadow-2xl border border-white/10 relative transform hover:scale-[1.02] transition-transform duration-300">
-                                <img src={series.cover} alt={series.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                <div className="absolute top-2 right-2 bg-[var(--color-asura-accent)] text-white text-[8px] md:text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-md">HOT</div>
+                              {/* Genre Badges & Type */}
+                              <div className="flex items-center gap-2 mb-3">
+                                <span className="bg-[var(--color-asura-accent)] text-white text-[10px] md:text-xs font-black px-2.5 py-0.5 rounded-full shadow-md uppercase">
+                                  {series.type || "مانهوا"}
+                                </span>
+                                {(Array.isArray(series.genres) ? series.genres : (typeof series.genres === "string" ? series.genres.split(",") : [])).slice(0, 3).map(g => (
+                                  <span key={g} className="bg-black/60 backdrop-blur-md text-zinc-200 text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-white/10">
+                                    {g.trim()}
+                                  </span>
+                                ))}
                               </div>
 
-                              {/* Details */}
-                              <div className="flex-1 text-right max-w-2xl">
-                                <div className="flex flex-wrap gap-1.5 mb-2 md:mb-3">
-                                  {(Array.isArray(series.genres) ? series.genres : (typeof series.genres === "string" ? series.genres.split(",") : [])).slice(0, 3).map(g => (
-                                    <span key={g} className="bg-white/10 backdrop-blur-md text-zinc-300 text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded border border-white/5">{g.trim()}</span>
-                                  ))}
-                                </div>
-                                <h1 className="text-lg md:text-3xl font-extrabold text-white mb-2 leading-tight md:leading-snug">
-                                  {series.title}
-                                </h1>
-                                <p className="text-zinc-300 md:text-zinc-400 text-[11px] md:text-xs leading-relaxed mb-4 line-clamp-2 md:line-clamp-3">
-                                  {series.synopsis}
-                                </p>
-                                
-                                <div className="flex items-center gap-4 relative z-30">
-                                  <Link 
-                                    to={`/series/${seriesSlugOrId}`} 
-                                    className="bg-gradient-to-r from-[var(--color-asura-accent)] to-[#ff843a] hover:scale-105 active:scale-95 text-white px-5 py-2 md:px-7 md:py-3 rounded-xl font-bold text-[10px] md:text-xs transition-all shadow-lg shadow-[var(--color-asura-accent)]/15 relative z-30"
-                                  >
-                                    شروع خواندن
-                                  </Link>
-                                </div>
+                              {/* Title */}
+                              <h1 className="text-xl md:text-4xl font-black text-white mb-4 leading-tight drop-shadow-md">
+                                {series.title}
+                              </h1>
+
+                              {/* Action Buttons */}
+                              <div className="flex items-center gap-3 relative z-30 pt-1">
+                                <Link 
+                                  to={`/series/${seriesSlugOrId}`} 
+                                  className="bg-gradient-to-r from-[var(--color-asura-accent)] to-[#ff843a] hover:opacity-95 active:scale-95 text-white px-6 py-2.5 md:px-8 md:py-3 rounded-xl font-black text-xs transition-all shadow-lg shadow-[var(--color-asura-accent)]/20 relative z-30 flex items-center gap-2"
+                                >
+                                  <span>شروع خواندن</span>
+                                  <ChevronLeft size={16} />
+                                </Link>
+                                <span className="text-xs font-bold text-amber-400 bg-black/60 backdrop-blur-md px-3 py-2 rounded-xl border border-white/10 flex items-center gap-1">
+                                  ★ {series.rating || 5.0}
+                                </span>
                               </div>
 
                             </div>
@@ -442,27 +444,27 @@ export default function Home() {
                   </AnimatePresence>
                 </div>
 
-                {/* Left / Right Nav Arrows (Visibile on hover) */}
+                {/* Nav Controls */}
                 <button 
                   onClick={handlePrevSlide}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 z-30 w-9 h-9 md:w-10 md:h-10 bg-black/40 hover:bg-[var(--color-asura-accent)] hover:scale-110 active:scale-90 text-white rounded-full flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-300 border border-white/5"
+                  className="absolute left-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-black/50 hover:bg-[var(--color-asura-accent)] active:scale-95 text-white rounded-xl flex items-center justify-center transition-all duration-200 border border-white/10 backdrop-blur-md"
                 >
                   <ChevronLeft size={20} />
                 </button>
                 <button 
                   onClick={handleNextSlide}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 z-30 w-9 h-9 md:w-10 md:h-10 bg-black/40 hover:bg-[var(--color-asura-accent)] hover:scale-110 active:scale-90 text-white rounded-full flex items-center justify-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-300 border border-white/5"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-black/50 hover:bg-[var(--color-asura-accent)] active:scale-95 text-white rounded-xl flex items-center justify-center transition-all duration-200 border border-white/10 backdrop-blur-md"
                 >
                   <ChevronRight size={20} />
                 </button>
 
-                {/* Slide indicator dots */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 flex gap-2.5 bg-black/30 backdrop-blur-sm px-4 py-1.5 rounded-full border border-white/5">
+                {/* Slide dots */}
+                <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex gap-2 bg-black/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
                   {sliderItems.map((_, idx) => (
                     <button
                       key={idx}
                       onClick={() => setCurrentSlide(idx)}
-                      className={`h-2 rounded-full transition-all duration-300 ${idx === currentSlide ? "w-6 bg-[var(--color-asura-accent)]" : "w-2 bg-zinc-500"}`}
+                      className={`h-2 rounded-full transition-all duration-300 ${idx === currentSlide ? "w-6 bg-[var(--color-asura-accent)]" : "w-2 bg-zinc-600 hover:bg-zinc-400"}`}
                     />
                   ))}
                 </div>

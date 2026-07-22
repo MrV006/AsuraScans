@@ -825,36 +825,39 @@ class DatabaseManager {
       for (const s of list) {
         try {
           const [chapRows] = await this.pool.execute(
-            'SELECT * FROM chapters WHERE seriesId = ? AND isPending = 0 ORDER BY number DESC LIMIT 1',
-            [s.id]
+            'SELECT * FROM chapters WHERE (seriesId = ? OR seriesId = ?) AND (isPending = 0 OR isPending IS NULL) ORDER BY number DESC LIMIT 1',
+            [s.id, s.slug || s.id]
           );
           const chap = (chapRows as any[])[0];
           s.chapters = chap ? [{
             ...chap,
-            images: chap.images ? chap.images.split(',') : [],
+            images: chap.images ? (typeof chap.images === 'string' ? chap.images.split(',') : chap.images) : [],
             isPending: false,
             submissions: [],
             contributors: {}
-          }] : [];
+          }] : (s.chapters || []);
         } catch (e) {
-          s.chapters = [];
+          s.chapters = s.chapters || [];
         }
       }
       return list;
     }
 
     return list.map(s => {
-      const seriesChapters = this.localData.chapters
-        .filter(c => c.seriesId === s.id && !c.isPending)
-        .sort((a, b) => b.number - a.number);
+      const seriesChapters = (this.localData.chapters || [])
+        .filter(c => (c.seriesId === s.id || (s.slug && c.seriesId === s.slug)) && (!c.isPending || String(c.isPending) === '0' || String(c.isPending) === 'false'))
+        .sort((a, b) => Number(b.number) - Number(a.number));
+      
+      const latest = seriesChapters.slice(0, 1).map(c => ({
+        ...c,
+        isPending: !!c.isPending,
+        submissions: c.submissions || [],
+        contributors: c.contributors || {}
+      }));
+
       return {
         ...s,
-        chapters: seriesChapters.slice(0, 1).map(c => ({
-          ...c,
-          isPending: !!c.isPending,
-          submissions: c.submissions || [],
-          contributors: c.contributors || {}
-        }))
+        chapters: latest.length > 0 ? latest : (s.chapters || [])
       };
     });
   }
