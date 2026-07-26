@@ -1538,7 +1538,29 @@ export default function Admin() {
                         </tr>
                       );
                     })}
-                  {usersList.length === 0 && (
+                  {usersList.filter((u) => {
+                    if (!userSearchQuery) return true;
+                    const q = userSearchQuery.toLowerCase();
+                    const displayName = (u.displayName || "").toLowerCase();
+                    const email = (u.email || "").toLowerCase();
+                    const id = (u.id || "").toLowerCase();
+                    const melliCode = (u.melliCode || "").toLowerCase();
+                    const firstName = (u.firstName || "").toLowerCase();
+                    const lastName = (u.lastName || "").toLowerCase();
+                    const fullName = `${firstName} ${lastName}`.toLowerCase();
+                    const phoneNumber = (u.phoneNumber || "").toLowerCase();
+
+                    return (
+                      displayName.includes(q) ||
+                      email.includes(q) ||
+                      id.includes(q) ||
+                      melliCode.includes(q) ||
+                      firstName.includes(q) ||
+                      lastName.includes(q) ||
+                      fullName.includes(q) ||
+                      phoneNumber.includes(q)
+                    );
+                  }).length === 0 && (
                     <tr>
                       <td colSpan={5} className="py-8 text-center text-zinc-500 font-bold">
                         هیچ کاربری یافت نشد.
