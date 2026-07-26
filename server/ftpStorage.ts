@@ -62,3 +62,26 @@ export async function uploadFileToFtp(
     client.close();
   }
 }
+
+export async function testFtpConnection(config: FtpConfig): Promise<{ success: boolean; message: string }> {
+  if (!config.host || !config.user || !config.password) {
+    return { success: false, message: "لطفاً آدرس هاست، نام کاربری و کلمه عبور FTP را وارد نمایید." };
+  }
+  const client = new ftp.Client();
+  client.ftp.verbose = false;
+  try {
+    await client.access({
+      host: config.host,
+      port: Number(config.port) || 21,
+      user: config.user,
+      password: config.password,
+      secure: Boolean(config.secure)
+    });
+    await client.list("/");
+    return { success: true, message: "اتصال با موفقیت به هاست دانلود برقرار شد!" };
+  } catch (err: any) {
+    return { success: false, message: `خطا در اتصال: ${err.message || err}` };
+  } finally {
+    client.close();
+  }
+}

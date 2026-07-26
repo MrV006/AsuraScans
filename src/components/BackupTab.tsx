@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useAuth } from "../contexts/AuthContext";
 import { 
   Download, 
   Upload, 
@@ -18,6 +19,9 @@ interface BackupTabProps {
 }
 
 export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
+  const { user } = useAuth();
+  const getAdminUid = () => user?.uid || localStorage.getItem("asura_user_id") || localStorage.getItem("userUid") || "";
+
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -35,8 +39,8 @@ export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
   const handleDownloadManifest = async () => {
     setDownloadingManifest(true);
     try {
-      const adminUid = localStorage.getItem("userUid") || "";
-      const res = await fetch("/api/admin/migration-manifest", {
+      const adminUid = getAdminUid();
+      const res = await fetch(`/api/admin/migration-manifest?adminUid=${encodeURIComponent(adminUid)}`, {
         headers: {
           "x-admin-uid": adminUid
         }
@@ -69,13 +73,15 @@ export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
   } | null>(null);
 
   useEffect(() => {
-    fetchStats();
-  }, []);
+    if (user?.uid) {
+      fetchStats();
+    }
+  }, [user]);
 
   const fetchStats = async () => {
     try {
-      const adminUid = localStorage.getItem("userUid") || "";
-      const res = await fetch("/api/admin/stats", {
+      const adminUid = getAdminUid();
+      const res = await fetch(`/api/admin/stats?adminUid=${encodeURIComponent(adminUid)}`, {
         headers: {
           "x-admin-uid": adminUid
         }
@@ -100,16 +106,16 @@ export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
     setIsExporting(true);
     setMessage(null);
     try {
-      const adminUid = localStorage.getItem("userUid") || "";
-      const res = await fetch("/api/admin/backup", {
+      const adminUid = getAdminUid();
+      const res = await fetch(`/api/admin/backup?adminUid=${encodeURIComponent(adminUid)}`, {
         headers: {
           "x-admin-uid": adminUid
         }
       });
       
       if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || "خطا در خروجی گرفتن از دیتابیس");
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `خطا در دریافت فایل نسخه پشتیبان (کد ${res.status})`);
       }
 
       const blob = await res.blob();
@@ -156,9 +162,9 @@ export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
       fileReader.onload = async (event) => {
         try {
           const jsonContent = JSON.parse(event.target?.result as string);
-          const adminUid = localStorage.getItem("userUid") || "";
+          const adminUid = getAdminUid();
           
-          const res = await fetch("/api/admin/restore", {
+          const res = await fetch(`/api/admin/restore?adminUid=${encodeURIComponent(adminUid)}`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

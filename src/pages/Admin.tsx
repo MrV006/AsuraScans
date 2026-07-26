@@ -30,6 +30,7 @@ import CooperationTab from "../components/CooperationTab";
 import SeoTab from "../components/SeoTab";
 import BackupTab from "../components/BackupTab";
 import RevenueTab from "../components/RevenueTab";
+import DownloadHostTab from "../components/DownloadHostTab";
 
 import { ImageUploader } from "../components/ImageUploader";
 import { SortableImageList } from "../components/SortableImageList";
@@ -210,6 +211,7 @@ export default function Admin() {
     | "seo"
     | "revenue"
     | "backup"
+    | "download_host"
   >("dashboard");
 
   // Auth Forms
@@ -999,6 +1001,15 @@ export default function Admin() {
               className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "backup" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
             >
               <Database size={18} /> پشتیبان‌گیری و مهاجرت دیتابیس
+            </button>
+          )}
+
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab("download_host")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "download_host" ? "bg-indigo-600 text-white font-black" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <Globe size={18} /> تنظیمات هاست دانلود (FTP)
             </button>
           )}
 
@@ -3300,6 +3311,10 @@ export default function Admin() {
 
           {activeTab === "backup" && isSuperAdmin && (
             <BackupTab isSuperAdmin={isSuperAdmin} />
+          )}
+
+          {activeTab === "download_host" && isSuperAdmin && (
+            <DownloadHostTab isSuperAdmin={isSuperAdmin} />
           )}
 
           {activeTab === "simulation" && isSuperAdmin && (

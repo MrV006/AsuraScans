@@ -11,7 +11,7 @@ import JSZip from "jszip";
 import fs from "fs";
 import crypto from "crypto";
 import { generateSeoHtml } from "./server/seo";
-import { uploadFileToFtp } from "./server/ftpStorage";
+import { uploadFileToFtp, testFtpConnection } from "./server/ftpStorage";
 
 async function startServer() {
   const app = express();
@@ -113,7 +113,7 @@ async function startServer() {
   };
 
   const requireAdmin = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const adminUid = req.headers['x-admin-uid'] as string;
+    const adminUid = (req.headers['x-admin-uid'] || req.query.adminUid) as string;
     if (!adminUid) {
       return res.status(401).json({ error: 'Unauthorized. Admin credentials header missing.' });
     }
@@ -129,7 +129,7 @@ async function startServer() {
   };
 
   const requireStaffOrAdmin = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
+    const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.adminUid || req.query.uid) as string;
     if (!uid) {
       return res.status(401).json({ error: 'Unauthorized. Credentials header missing.' });
     }
@@ -2019,6 +2019,16 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
 
   const upload = multer({ storage: multer.memoryStorage() });
 
+  app.post("/api/admin/test-ftp", requireAdmin, async (req, res) => {
+    try {
+      const config = req.body || {};
+      const result = await testFtpConnection(config);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: `خطا در تست اتصال: ${err.message}` });
+    }
+  });
+
   app.post("/api/admin/upload", requireStaffOrAdmin, upload.any(), async (req: any, res) => {
     try {
       const files = (req.files || []) as Express.Multer.File[];
@@ -2029,13 +2039,23 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
       const { targetDir, relPrefix } = resolveTargetUploadDir(uploadsDir, req.body, req.query);
       await fs.promises.mkdir(targetDir, { recursive: true });
 
+      let dbFtpConfig: any = null;
+      try {
+        dbFtpConfig = await dbManager.getSettings("download_host_settings");
+      } catch (e) {
+        // ignore
+      }
+
       const saveAndGetUrl = async (buffer: Buffer, fileName: string): Promise<string> => {
         const filePath = path.join(targetDir, fileName);
         await fs.promises.writeFile(filePath, buffer);
 
         const relPath = `uploads/${relPrefix}/${fileName}`;
-        if (process.env.FTP_HOST || process.env.FTP_ENABLED === "true") {
-          const ftpUrl = await uploadFileToFtp(buffer, relPath);
+
+        const isFtpEnabled = dbFtpConfig?.enabled ?? (process.env.FTP_ENABLED === "true" || Boolean(process.env.FTP_HOST));
+
+        if (isFtpEnabled) {
+          const ftpUrl = await uploadFileToFtp(buffer, relPath, dbFtpConfig);
           if (ftpUrl) return ftpUrl;
         }
         return `/${relPath}`;
