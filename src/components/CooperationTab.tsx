@@ -16,7 +16,8 @@ import {
   Check,
   X,
   FileCheck,
-  Plus
+  Plus,
+  Sparkles
 } from "lucide-react";
 import { Series, Chapter } from "../lib/types";
 

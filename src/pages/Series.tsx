@@ -5,9 +5,10 @@ import { useBookmarks, useHistory } from '../hooks/useUserActivity';
 import { useRatings } from '../hooks/useRatings';
 import { useAuth } from '../contexts/AuthContext';
 import { Layout } from '../components/Layout';
-import { Star, Clock, Heart, Play, Edit2, Trash2, Check, X, ShieldAlert, UserCheck, Plus, Settings } from 'lucide-react';
+import { Star, Clock, Heart, Play, Edit2, Trash2, Check, X, ShieldAlert, UserCheck, Plus, Settings, BookOpen, Users, MessageSquare } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Comments } from '../components/Comments';
+import WorkTeamTab from '../components/WorkTeamTab';
 import { formatDistanceToNow } from 'date-fns';
 import { SeriesDetailSkeleton } from '../components/Skeletons';
 import { apiClient } from '../lib/apiClient';
@@ -135,6 +136,9 @@ export default function Series() {
   const isGlobalAdmin = (userRoles.includes('super_admin') || userRoles.includes('admin') || isSuperAdmin) && !isSimulatingUser;
   const isApprovedContributor = series.contributors?.some((c: any) => c.userId === user?.uid && c.status === 'approved');
   const isStaffOrAdmin = isGlobalAdmin || isApprovedContributor;
+  const isStaffMember = userRoles.some((r: string) => ['translator', 'cleaner', 'editor', 'typesetter', 'proofreader', 'admin', 'super_admin'].includes(r)) || isApprovedContributor || isGlobalAdmin;
+
+  const [seriesTab, setSeriesTab] = useState<'chapters' | 'team' | 'comments'>('chapters');
 
   const now = new Date();
   const chaptersList = series.chapters || [];
@@ -559,8 +563,6 @@ export default function Series() {
                 {series.synopsis}
               </p>
             </div>
-
-            {/* Contributors Section */}
             <div className="bg-black/20 border border-[var(--color-asura-border)] rounded-2xl p-6 mb-8">
               <h3 className="text-xs font-black mb-4 text-white uppercase tracking-widest flex items-center gap-2">
                 <UserCheck size={14} className="text-[var(--color-asura-accent-light)]" />
@@ -627,81 +629,128 @@ export default function Series() {
               )}
             </div>
 
-             {/* Chapters List */}
-            <div>
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold text-white uppercase tracking-tighter flex items-center gap-2">
-                  <span className="w-1 h-5 bg-[var(--color-asura-accent)] rounded-full"></span>چپترهای منتشر شده
-                </h2>
-                <span className="text-xs font-bold text-zinc-500">{visibleChapters.length} چپتر قابل مشاهده</span>
-              </div>
-              
-              <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-xl divide-y divide-white/5 overflow-hidden max-h-[600px] overflow-y-auto overflow-x-hidden custom-scrollbar">
-                {visibleChapters.map((ch) => (
-                  <div 
-                    key={ch.id} 
-                    className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors group"
-                  >
-                    <Link 
-                      to={getReadLink(`chapter-${ch.number}`)}
-                      className="flex-1 flex items-center gap-4"
-                    >
-                      <div className="w-12 h-12 bg-black/40 border border-white/5 rounded flex items-center justify-center shrink-0 group-hover:border-[var(--color-asura-accent)]/30 transition-colors">
-                        <span className="font-black text-white text-lg">{ch.number}</span>
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold text-zinc-200 group-hover:text-[var(--color-asura-accent)] transition-colors flex items-center">
-                          {ch.title || `چپتر ${ch.number}`}
-                          {ch.isPending && (
-                            <span className="mr-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[9px] font-black px-2 py-0.5 rounded-full">
-                              در انتظار تایید
-                            </span>
-                          )}
-                        </h4>
-                        <div className="flex flex-wrap items-center gap-2 mt-1">
-                           <span className="text-[10px] text-zinc-500 italic">
-                             {ch.createdAt?.toDate ? formatDistanceToNow(ch.createdAt.toDate(), { addSuffix: true }) : 'به تازگی'}
-                           </span>
-                           {getChapterContributorsText(ch) && (
-                             <>
-                               <span className="text-zinc-700 text-[10px]">•</span>
-                               <span className="text-[10px] text-[var(--color-asura-accent-light)] font-bold">
-                                 {getChapterContributorsText(ch)}
-                               </span>
-                             </>
-                           )}
-                        </div>
-                      </div>
-                    </Link>
+            {/* Tab Navigation */}
+            <div className="flex border-b border-white/10 mb-6 gap-2 sm:gap-4 overflow-x-auto">
+              <button
+                onClick={() => setSeriesTab('chapters')}
+                className={`pb-3 text-xs sm:text-sm font-black transition-all border-b-2 flex items-center gap-2 ${seriesTab === 'chapters' ? 'border-[var(--color-asura-accent)] text-white' : 'border-transparent text-zinc-400 hover:text-white'}`}
+              >
+                <BookOpen size={16} />
+                چپترهای منتشر شده ({visibleChapters.length})
+              </button>
 
-                    {/* Chapter action controls for Admins */}
-                    {isGlobalAdmin && isAdminEditMode && (
-                      <div className="flex items-center gap-2 mr-4">
-                        {ch.isPending && (
-                          <button
-                            onClick={() => handleApproveChapter(ch.id)}
-                            className="px-2.5 py-1 bg-emerald-500 hover:bg-emerald-600 text-black text-[10px] font-black rounded-lg transition-colors flex items-center gap-1 shadow"
-                          >
-                            <Check size={12} />
-                            تایید انتشار
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleDeleteChapter(ch.id)}
-                          className="p-1.5 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white rounded-lg transition-all border border-red-500/20"
-                          title="حذف چپتر"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+              {isStaffMember && (
+                <button
+                  onClick={() => setSeriesTab('team')}
+                  className={`pb-3 text-xs sm:text-sm font-black transition-all border-b-2 flex items-center gap-2 ${seriesTab === 'team' ? 'border-[var(--color-asura-accent)] text-white' : 'border-transparent text-zinc-400 hover:text-white'}`}
+                >
+                  <Users size={16} />
+                  دست‌اندرکاران و پنل ارسال کار
+                  <span className="bg-[var(--color-asura-accent)]/20 text-[var(--color-asura-accent-light)] text-[9px] font-mono px-2 py-0.5 rounded-full">
+                    ویژه همکاران
+                  </span>
+                </button>
+              )}
+
+              <button
+                onClick={() => setSeriesTab('comments')}
+                className={`pb-3 text-xs sm:text-sm font-black transition-all border-b-2 flex items-center gap-2 ${seriesTab === 'comments' ? 'border-[var(--color-asura-accent)] text-white' : 'border-transparent text-zinc-400 hover:text-white'}`}
+              >
+                <MessageSquare size={16} />
+                نظرات کاربران
+              </button>
             </div>
 
-            {/* Comments Section */}
-            <Comments seriesId={series.id} />
+            {/* TAB CONTENT: Chapters List */}
+            {seriesTab === 'chapters' && (
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-lg font-bold text-white uppercase tracking-tighter flex items-center gap-2">
+                    <span className="w-1 h-5 bg-[var(--color-asura-accent)] rounded-full"></span>چپترهای منتشر شده
+                  </h2>
+                  <span className="text-xs font-bold text-zinc-500">{visibleChapters.length} چپتر قابل مشاهده</span>
+                </div>
+                
+                <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-xl divide-y divide-white/5 overflow-hidden max-h-[600px] overflow-y-auto overflow-x-hidden custom-scrollbar">
+                  {visibleChapters.map((ch) => (
+                    <div 
+                      key={ch.id} 
+                      className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors group"
+                    >
+                      <Link 
+                        to={getReadLink(`chapter-${ch.number}`)}
+                        className="flex-1 flex items-center gap-4"
+                      >
+                        <div className="w-12 h-12 bg-black/40 border border-white/5 rounded flex items-center justify-center shrink-0 group-hover:border-[var(--color-asura-accent)]/30 transition-colors">
+                          <span className="font-black text-white text-lg">{ch.number}</span>
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-zinc-200 group-hover:text-[var(--color-asura-accent)] transition-colors flex items-center">
+                            {ch.title || `چپتر ${ch.number}`}
+                            {ch.isPending && (
+                              <span className="mr-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[9px] font-black px-2 py-0.5 rounded-full">
+                                در انتظار تایید
+                              </span>
+                            )}
+                          </h4>
+                          <div className="flex flex-wrap items-center gap-2 mt-1">
+                             <span className="text-[10px] text-zinc-500 italic">
+                               {ch.createdAt?.toDate ? formatDistanceToNow(ch.createdAt.toDate(), { addSuffix: true }) : 'به تازگی'}
+                             </span>
+                             {getChapterContributorsText(ch) && (
+                               <>
+                                 <span className="text-zinc-700 text-[10px]">•</span>
+                                 <span className="text-[10px] text-[var(--color-asura-accent-light)] font-bold">
+                                   {getChapterContributorsText(ch)}
+                                 </span>
+                               </>
+                             )}
+                          </div>
+                        </div>
+                      </Link>
+
+                      {/* Chapter action controls for Admins */}
+                      {isGlobalAdmin && isAdminEditMode && (
+                        <div className="flex items-center gap-2 mr-4">
+                          {ch.isPending && (
+                            <button
+                              onClick={() => handleApproveChapter(ch.id)}
+                              className="px-2.5 py-1 bg-emerald-500 hover:bg-emerald-600 text-black text-[10px] font-black rounded-lg transition-colors flex items-center gap-1 shadow"
+                            >
+                              <Check size={12} />
+                              تایید انتشار
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDeleteChapter(ch.id)}
+                            className="p-1.5 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white rounded-lg transition-all border border-red-500/20"
+                            title="حذف چپتر"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* TAB CONTENT: Work Team & Submissions (Staff only) */}
+            {seriesTab === 'team' && isStaffMember && (
+              <WorkTeamTab 
+                series={series}
+                user={user}
+                profile={profile}
+                isGlobalAdmin={isGlobalAdmin}
+                onUpdateSeries={mutate}
+              />
+            )}
+
+            {/* TAB CONTENT: Comments */}
+            {seriesTab === 'comments' && (
+              <Comments seriesId={series.id} />
+            )}
 
           </motion.div>
         </div>

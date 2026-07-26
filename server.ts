@@ -815,6 +815,61 @@ async function startServer() {
     }
   });
 
+  app.put("/api/series/:seriesId/chapters/:id/private", requireAdmin, async (req, res) => {
+    try {
+      const ch = await dbManager.getChapterById(req.params.seriesId, req.params.id);
+      if (!ch) return res.status(404).json({ error: "Chapter not found" });
+
+      ch.isPending = true;
+      ch.isPrivate = true;
+      ch.status = "private";
+
+      const saved = await dbManager.saveChapter(ch);
+      io.emit("chapters:updated", { chapterId: saved.id, seriesId: saved.seriesId });
+      res.json(saved);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/series/:seriesId/chapters/:id/revision", requireAdmin, async (req, res) => {
+    try {
+      const { note } = req.body;
+      const ch = await dbManager.getChapterById(req.params.seriesId, req.params.id);
+      if (!ch) return res.status(404).json({ error: "Chapter not found" });
+
+      ch.isPending = true;
+      ch.status = "needs_revision";
+      ch.revisionNote = note || "نیاز به بازبینی و اصلاح دارد.";
+
+      const saved = await dbManager.saveChapter(ch);
+      io.emit("chapters:updated", { chapterId: saved.id, seriesId: saved.seriesId });
+
+      // Notify editor / contributors about the revision request
+      try {
+        const series = await dbManager.getSeriesById(saved.seriesId);
+        if (series && Array.isArray(series.contributors)) {
+          for (const contrib of series.contributors) {
+            const notif = await dbManager.addNotification(
+              contrib.userId,
+              "revision",
+              `نیازمند تصحیح: چپتر ${saved.number} (${series.title})`,
+              `مدیریت اصلاحاتی ثبت کرد: ${ch.revisionNote}`,
+              `/series/${saved.seriesId}`
+            );
+            io.to(`user:${contrib.userId}`).emit("notification:new", notif);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to send revision notification:", e);
+      }
+
+      res.json(saved);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/series/:seriesId/chapters/:id/view", async (req, res) => {
     try {
       const resolved = await resolveSeriesAndChapter(req.params.seriesId, req.params.id);

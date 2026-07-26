@@ -6,6 +6,9 @@ export interface Chapter {
   images: string[];
   publishAt?: any;
   isPending?: boolean;
+  status?: 'public' | 'private' | 'needs_revision' | string;
+  isPrivate?: boolean;
+  revisionNote?: string;
   submissions?: any[];
   contributors?: any;
   sortMode?: 'natural' | 'input';

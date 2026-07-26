@@ -68,8 +68,12 @@ export interface Chapter {
   images: string[];
   views: number;
   isPending?: boolean;
+  status?: string;
+  isPrivate?: boolean;
+  revisionNote?: string;
   submissions?: any[];
   contributors?: any;
+  publishAt?: any;
   createdAt: string;
   updatedAt: string;
 }
