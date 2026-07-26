@@ -219,17 +219,23 @@ class DatabaseManager {
   }
 
   private async init() {
-    const useMySQL = process.env.DB_HOST && process.env.DB_USER && process.env.DB_NAME;
+    const dbHost = process.env.DB_HOST || 'localhost';
+    const dbUser = process.env.DB_USER || 'mrvir111_MrV';
+    const dbPassword = process.env.DB_PASSWORD || 'gB3(td@~iji9H2~d';
+    const dbName = process.env.DB_NAME || 'mrvir111_mangata_db';
+    const dbPort = parseInt(process.env.DB_PORT || '3306');
+
+    const useMySQL = Boolean(dbHost && dbUser && dbName);
     
     if (useMySQL) {
       try {
-        console.log('MySQL configurations found. Handshaking with DB...');
+        console.log(`Handshaking with MySQL DB at ${dbHost}:${dbPort}/${dbName}...`);
         this.pool = mysql.createPool({
-          host: process.env.DB_HOST,
-          port: parseInt(process.env.DB_PORT || '3306'),
-          user: process.env.DB_USER,
-          password: process.env.DB_PASSWORD,
-          database: process.env.DB_NAME,
+          host: dbHost,
+          port: dbPort,
+          user: dbUser,
+          password: dbPassword,
+          database: dbName,
           waitForConnections: true,
           connectionLimit: 10,
           queueLimit: 0,
