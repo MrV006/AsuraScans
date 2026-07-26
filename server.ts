@@ -11,6 +11,7 @@ import JSZip from "jszip";
 import fs from "fs";
 import crypto from "crypto";
 import { generateSeoHtml } from "./server/seo";
+import { uploadFileToFtp } from "./server/ftpStorage";
 
 async function startServer() {
   const app = express();
@@ -2028,6 +2029,18 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
       const { targetDir, relPrefix } = resolveTargetUploadDir(uploadsDir, req.body, req.query);
       await fs.promises.mkdir(targetDir, { recursive: true });
 
+      const saveAndGetUrl = async (buffer: Buffer, fileName: string): Promise<string> => {
+        const filePath = path.join(targetDir, fileName);
+        await fs.promises.writeFile(filePath, buffer);
+
+        const relPath = `uploads/${relPrefix}/${fileName}`;
+        if (process.env.FTP_HOST || process.env.FTP_ENABLED === "true") {
+          const ftpUrl = await uploadFileToFtp(buffer, relPath);
+          if (ftpUrl) return ftpUrl;
+        }
+        return `/${relPath}`;
+      };
+
       const urls: string[] = [];
 
       for (let i = 0; i < files.length; i++) {
@@ -2040,9 +2053,8 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
 
         if (isDoc) {
           const safeName = `doc-${Date.now()}-${Math.floor(Math.random() * 1000000)}${ext || '.docx'}`;
-          const filePath = path.join(targetDir, safeName);
-          await fs.promises.writeFile(filePath, file.buffer);
-          urls.push(`/uploads/${relPrefix}/${safeName}`);
+          const url = await saveAndGetUrl(file.buffer, safeName);
+          urls.push(url);
           continue;
         }
 
@@ -2074,17 +2086,14 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
 
               const pageNum = String(idx + 1).padStart(3, '0');
               const uniqueName = `page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`;
-              const filePath = path.join(targetDir, uniqueName);
-              await fs.promises.writeFile(filePath, webpBuffer);
-
-              urls.push(`/uploads/${relPrefix}/${uniqueName}`);
+              const url = await saveAndGetUrl(webpBuffer, uniqueName);
+              urls.push(url);
             }
           } else {
             // Raw zip document without images
             const safeName = `archive-${Date.now()}-${Math.floor(Math.random() * 1000000)}.zip`;
-            const filePath = path.join(targetDir, safeName);
-            await fs.promises.writeFile(filePath, file.buffer);
-            urls.push(`/uploads/${relPrefix}/${safeName}`);
+            const url = await saveAndGetUrl(file.buffer, safeName);
+            urls.push(url);
           }
         } else {
           // Direct image upload
@@ -2094,10 +2103,8 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
 
           const pageNum = String(i + 1).padStart(3, '0');
           const uniqueName = `page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`;
-          const filePath = path.join(targetDir, uniqueName);
-          await fs.promises.writeFile(filePath, webpBuffer);
-
-          urls.push(`/uploads/${relPrefix}/${uniqueName}`);
+          const url = await saveAndGetUrl(webpBuffer, uniqueName);
+          urls.push(url);
         }
       }
 
