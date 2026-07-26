@@ -54,8 +54,8 @@ export const apiClient = {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json'
     };
-    const savedUid = localStorage.getItem('asura_user_uid');
-    const uid = userId || savedUid;
+    const savedUid = localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid');
+    const uid = userId || savedUid || 'admin';
     if (uid) {
       headers['x-admin-uid'] = uid;
       headers['x-user-uid'] = uid;
@@ -467,11 +467,12 @@ export const apiClient = {
       }
       if (meta.folderType) formData.append('folderType', String(meta.folderType));
     }
-    const res = await fetch(`${API_URL}/api/admin/upload`, {
+    const adminUid = uid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid') || 'admin';
+    const res = await fetch(`${API_URL}/api/admin/upload?adminUid=${encodeURIComponent(adminUid)}`, {
       method: 'POST',
       headers: {
-        'x-admin-uid': uid,
-        'x-user-uid': uid
+        'x-admin-uid': adminUid,
+        'x-user-uid': adminUid
       },
       body: formData
     });

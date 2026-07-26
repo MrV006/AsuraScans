@@ -94,7 +94,9 @@ export default function Admin() {
   const userRoles = currentUserData?.roles || [currentUserData?.role || 'user'];
   const isSuperAdmin = userRoles.includes('super_admin') || 
                        currentUserData?.email === "amirrezaveisi45@gmail.com" || 
-                       currentUserData?.email === "Mr.V@admin.com";
+                       currentUserData?.email === "Mr.V@admin.com" ||
+                       currentUserData?.id === 'admin' ||
+                       currentUserData?.role === 'admin';
 
   const hasFrontendPermission = (permission: string) => {
     if (isSuperAdmin) return true;

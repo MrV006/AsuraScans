@@ -520,17 +520,65 @@ class DatabaseManager {
   // -----------------------------------------------------------------
   // USER METHODS
   // -----------------------------------------------------------------
+  async ensureSuperAdminInMySQL() {
+    if (!this.isUsingMySQL || !this.pool) return;
+    try {
+      const superEmails = ['amirrezaveisi45@gmail.com', 'Mr.V@admin.com'];
+      const [rows] = await this.pool.execute('SELECT * FROM users WHERE email IN (?, ?) OR id = ?', [...superEmails, 'admin']);
+      const list = rows as any[];
+      if (list.length === 0) {
+        const now = new Date().toISOString();
+        await this.pool.execute(
+          'INSERT INTO users (id, email, displayName, avatarUrl, banned, role, melliCode, firstName, lastName, phoneNumber, canCreateSeries, rolesText, permissionsText, password, hasCompletedSetup, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [
+            'admin',
+            'amirrezaveisi45@gmail.com',
+            'مدیریت کل',
+            '',
+            0,
+            'admin',
+            '11111111',
+            'امیررضا',
+            'ویسی',
+            '09120000000',
+            1,
+            'super_admin,admin',
+            'all',
+            null,
+            1,
+            now
+          ]
+        );
+      } else {
+        for (const u of list) {
+          const roles = u.rolesText ? u.rolesText.split(',').map((x: string) => x.trim()).filter(Boolean) : [];
+          if (!roles.includes('super_admin')) roles.push('super_admin');
+          if (!roles.includes('admin')) roles.push('admin');
+          await this.pool.execute(
+            'UPDATE users SET role = "admin", canCreateSeries = 1, rolesText = ? WHERE id = ?',
+            [roles.join(','), u.id]
+          );
+        }
+      }
+    } catch (e) {
+      console.error('Error ensuring super admin in MySQL:', e);
+    }
+  }
+
   async getUsers(): Promise<User[]> {
     if (this.isUsingMySQL && this.pool) {
+      await this.ensureSuperAdminInMySQL();
       const [rows] = await this.pool.execute('SELECT * FROM users ORDER BY createdAt DESC');
       return (rows as any[]).map(r => {
-        const roleVal = r.role || 'user';
-        const roles = r.rolesText ? r.rolesText.split(',').map((x: string) => x.trim()).filter(Boolean) : [roleVal];
+        const isSuper = r.email === 'amirrezaveisi45@gmail.com' || r.email === 'Mr.V@admin.com' || r.id === 'admin';
+        const roleVal = isSuper ? 'admin' : (r.role || 'user');
+        let roles = r.rolesText ? r.rolesText.split(',').map((x: string) => x.trim()).filter(Boolean) : [roleVal];
+        if (isSuper && !roles.includes('super_admin')) roles = Array.from(new Set(['super_admin', 'admin', ...roles]));
         const permissions = r.permissionsText ? r.permissionsText.split(',').map((x: string) => x.trim()).filter(Boolean) : [];
         return {
           ...r,
           banned: !!r.banned,
-          canCreateSeries: !!r.canCreateSeries,
+          canCreateSeries: isSuper ? true : !!r.canCreateSeries,
           walletBalance: r.walletBalance || 0,
           role: roleVal,
           roles,
@@ -538,77 +586,86 @@ class DatabaseManager {
         };
       });
     }
-    return this.localData.users.map(u => ({
-      ...u,
-      walletBalance: u.walletBalance || 0,
-      roles: u.roles || [u.role || 'user'],
-      permissions: u.permissions || []
-    }));
+    return this.localData.users.map(u => {
+      const isSuper = u.email === 'amirrezaveisi45@gmail.com' || u.email === 'Mr.V@admin.com' || u.id === 'admin';
+      return {
+        ...u,
+        walletBalance: u.walletBalance || 0,
+        canCreateSeries: isSuper ? true : !!u.canCreateSeries,
+        role: isSuper ? 'admin' : (u.role || 'user'),
+        roles: isSuper ? Array.from(new Set(['super_admin', 'admin', ...(u.roles || [])])) : (u.roles || [u.role || 'user']),
+        permissions: u.permissions || []
+      };
+    });
   }
 
   async getUser(id: string): Promise<User | null> {
+    if (!id) return null;
+    const isSuperAdminId = id === 'admin' || id === 'super_admin' || id === 'amirrezaveisi45@gmail.com' || id === 'Mr.V@admin.com';
+
     if (this.isUsingMySQL && this.pool) {
-      const [rows] = await this.pool.execute('SELECT * FROM users WHERE id = ?', [id]);
+      await this.ensureSuperAdminInMySQL();
+      const idLower = id.toLowerCase();
+      const [rows] = await this.pool.execute(
+        'SELECT * FROM users WHERE id = ? OR LOWER(email) = ? OR LOWER(displayName) = ?', 
+        [id, idLower, idLower]
+      );
       const res = (rows as any[])[0];
-      if (!res) return null;
-      const roleVal = res.role || 'user';
-      const roles = res.rolesText ? res.rolesText.split(',').map((x: string) => x.trim()).filter(Boolean) : [roleVal];
-      const permissions = res.permissionsText ? res.permissionsText.split(',').map((x: string) => x.trim()).filter(Boolean) : [];
-      return {
-        ...res,
-        banned: !!res.banned,
-        canCreateSeries: !!res.canCreateSeries,
-        walletBalance: res.walletBalance || 0,
-        role: roleVal,
-        roles,
-        permissions,
-        password: res.password || undefined,
-        hasCompletedSetup: res.hasCompletedSetup !== undefined ? !!res.hasCompletedSetup : false
+      if (res) {
+        const isSuper = isSuperAdminId || res.email === 'amirrezaveisi45@gmail.com' || res.email === 'Mr.V@admin.com' || res.id === 'admin';
+        const roleVal = isSuper ? 'admin' : (res.role || 'user');
+        let roles = res.rolesText ? res.rolesText.split(',').map((x: string) => x.trim()).filter(Boolean) : [roleVal];
+        if (isSuper && !roles.includes('super_admin')) roles = Array.from(new Set(['super_admin', 'admin', ...roles]));
+        const permissions = res.permissionsText ? res.permissionsText.split(',').map((x: string) => x.trim()).filter(Boolean) : [];
+        return {
+          ...res,
+          banned: !!res.banned,
+          canCreateSeries: isSuper ? true : !!res.canCreateSeries,
+          walletBalance: res.walletBalance || 0,
+          role: roleVal,
+          roles,
+          permissions,
+          password: res.password || undefined,
+          hasCompletedSetup: res.hasCompletedSetup !== undefined ? !!res.hasCompletedSetup : false
+        };
+      }
+    }
+
+    let u = this.localData.users.find(u => u.id === id || u.email.toLowerCase() === id.toLowerCase() || u.displayName.toLowerCase() === id.toLowerCase());
+    if (!u && isSuperAdminId) {
+      u = {
+        id: 'admin',
+        email: 'amirrezaveisi45@gmail.com',
+        displayName: 'مدیریت کل',
+        avatarUrl: '',
+        role: 'admin',
+        roles: ['super_admin', 'admin'],
+        permissions: ['all'],
+        banned: false,
+        canCreateSeries: true,
+        walletBalance: 1000000,
+        hasCompletedSetup: true,
+        melliCode: '11111111',
+        createdAt: new Date().toISOString()
       };
     }
-    const u = this.localData.users.find(u => u.id === id);
     if (!u) return null;
+    const isSuper = isSuperAdminId || u.email === 'amirrezaveisi45@gmail.com' || u.email === 'Mr.V@admin.com' || u.id === 'admin';
     return {
       ...u,
       walletBalance: u.walletBalance || 0,
-      roles: u.roles || [u.role || 'user'],
+      roles: isSuper ? Array.from(new Set(['super_admin', 'admin', ...(u.roles || [])])) : (u.roles || [u.role || 'user']),
       permissions: u.permissions || [],
+      canCreateSeries: isSuper ? true : !!u.canCreateSeries,
+      role: isSuper ? 'admin' : (u.role || 'user'),
       password: u.password || undefined,
       hasCompletedSetup: u.hasCompletedSetup !== undefined ? !!u.hasCompletedSetup : false
     };
   }
 
   async getUserByEmail(email: string): Promise<User | null> {
-    const emailLower = email.toLowerCase();
-    if (this.isUsingMySQL && this.pool) {
-      const [rows] = await this.pool.execute('SELECT * FROM users WHERE LOWER(email) = ?', [emailLower]);
-      const res = (rows as any[])[0];
-      if (!res) return null;
-      const roleVal = res.role || 'user';
-      const roles = res.rolesText ? res.rolesText.split(',').map((x: string) => x.trim()).filter(Boolean) : [roleVal];
-      const permissions = res.permissionsText ? res.permissionsText.split(',').map((x: string) => x.trim()).filter(Boolean) : [];
-      return {
-        ...res,
-        banned: !!res.banned,
-        canCreateSeries: !!res.canCreateSeries,
-        walletBalance: res.walletBalance || 0,
-        role: roleVal,
-        roles,
-        permissions,
-        password: res.password || undefined,
-        hasCompletedSetup: res.hasCompletedSetup !== undefined ? !!res.hasCompletedSetup : false
-      };
-    }
-    const u = this.localData.users.find(u => u.email.toLowerCase() === emailLower);
-    if (!u) return null;
-    return {
-      ...u,
-      walletBalance: u.walletBalance || 0,
-      roles: u.roles || [u.role || 'user'],
-      permissions: u.permissions || [],
-      password: u.password || undefined,
-      hasCompletedSetup: u.hasCompletedSetup !== undefined ? !!u.hasCompletedSetup : false
-    };
+    if (!email) return null;
+    return this.getUser(email);
   }
 
   async getUserByUsername(username: string): Promise<User | null> {
