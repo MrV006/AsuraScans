@@ -219,7 +219,7 @@ class DatabaseManager {
   }
 
   private async init() {
-    const dbHost = process.env.DB_HOST || 'localhost';
+    const dbHost = process.env.DB_HOST;
     const dbUser = process.env.DB_USER || 'mrvir111_MrV';
     const dbPassword = process.env.DB_PASSWORD || 'gB3(td@~iji9H2~d';
     const dbName = process.env.DB_NAME || 'mrvir111_mangata_db';
@@ -249,13 +249,13 @@ class DatabaseManager {
         
         this.isUsingMySQL = true;
         await this.createMySQLTables();
-      } catch (err) {
-        console.error('MySQL Connection Error. Falling back to local JSON database.', err);
+      } catch (err: any) {
+        console.warn('MySQL Connection failed. Falling back to local JSON database persistence.', err?.message || err);
         this.isUsingMySQL = false;
         this.loadLocalData();
       }
     } else {
-      console.log('No MySQL URL/config found. Using local JSON database storage.');
+      console.log('No external MySQL DB_HOST configured. Operating with local JSON database.');
       this.isUsingMySQL = false;
       this.loadLocalData();
     }
