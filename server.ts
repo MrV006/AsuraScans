@@ -11,7 +11,7 @@ import JSZip from "jszip";
 import fs from "fs";
 import crypto from "crypto";
 import { generateSeoHtml } from "./server/seo";
-import { uploadFileToFtp, testFtpConnection } from "./server/ftpStorage";
+import { uploadFileToFtp, uploadBatchFilesToFtp, testFtpConnection } from "./server/ftpStorage";
 
 async function startServer() {
   const app = express();
@@ -2072,22 +2072,9 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
         // ignore
       }
 
-      const saveAndGetUrl = async (buffer: Buffer, fileName: string): Promise<string> => {
-        const filePath = path.join(targetDir, fileName);
-        await fs.promises.writeFile(filePath, buffer);
+      const isFtpEnabled = dbFtpConfig?.enabled ?? (process.env.FTP_ENABLED === "true" || Boolean(process.env.FTP_HOST));
 
-        const relPath = `uploads/${relPrefix}/${fileName}`;
-
-        const isFtpEnabled = dbFtpConfig?.enabled ?? (process.env.FTP_ENABLED === "true" || Boolean(process.env.FTP_HOST));
-
-        if (isFtpEnabled) {
-          const ftpUrl = await uploadFileToFtp(buffer, relPath, dbFtpConfig);
-          if (ftpUrl) return ftpUrl;
-        }
-        return `/${relPath}`;
-      };
-
-      const urls: string[] = [];
+      const itemsToUpload: { buffer: Buffer; fileName: string }[] = [];
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
@@ -2099,8 +2086,7 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
 
         if (isDoc) {
           const safeName = `doc-${Date.now()}-${Math.floor(Math.random() * 1000000)}${ext || '.docx'}`;
-          const url = await saveAndGetUrl(file.buffer, safeName);
-          urls.push(url);
+          itemsToUpload.push({ buffer: file.buffer, fileName: safeName });
           continue;
         }
 
@@ -2117,42 +2103,67 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
             return !entry.dir && p.match(/\.(jpe?g|png|webp|gif|bmp)$/i) && !p.includes("__MACOSX");
           });
 
-          // If zip contains images, extract WebP pages
           if (filenames.length > 0) {
             filenames.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
 
-            for (let idx = 0; idx < filenames.length; idx++) {
-              const filename = filenames[idx];
-              const entry = zipContents.files[filename];
-              const buffer = await entry.async("nodebuffer");
+            const extracted = await Promise.all(
+              filenames.map(async (fname) => {
+                const entry = zipContents.files[fname];
+                return await entry.async("nodebuffer");
+              })
+            );
 
-              const webpBuffer = await sharp(buffer)
-                .webp({ quality: 75 })
-                .toBuffer();
-
-              const pageNum = String(idx + 1).padStart(3, '0');
-              const uniqueName = `page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`;
-              const url = await saveAndGetUrl(webpBuffer, uniqueName);
-              urls.push(url);
+            const chunkSize = 6;
+            for (let idx = 0; idx < extracted.length; idx += chunkSize) {
+              const chunk = extracted.slice(idx, idx + chunkSize);
+              const processedChunk = await Promise.all(
+                chunk.map(async (rawBuf, cIdx) => {
+                  const webpBuf = await sharp(rawBuf)
+                    .webp({ quality: 75, effort: 2 })
+                    .toBuffer();
+                  const globalIdx = idx + cIdx;
+                  const pageNum = String(globalIdx + 1).padStart(3, '0');
+                  const fileName = `page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`;
+                  return { buffer: webpBuf, fileName };
+                })
+              );
+              itemsToUpload.push(...processedChunk);
             }
           } else {
-            // Raw zip document without images
             const safeName = `archive-${Date.now()}-${Math.floor(Math.random() * 1000000)}.zip`;
-            const url = await saveAndGetUrl(file.buffer, safeName);
-            urls.push(url);
+            itemsToUpload.push({ buffer: file.buffer, fileName: safeName });
           }
         } else {
-          // Direct image upload
-          const webpBuffer = await sharp(file.buffer)
-            .webp({ quality: 75 })
+          const webpBuf = await sharp(file.buffer)
+            .webp({ quality: 75, effort: 2 })
             .toBuffer();
 
           const pageNum = String(i + 1).padStart(3, '0');
-          const uniqueName = `page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`;
-          const url = await saveAndGetUrl(webpBuffer, uniqueName);
-          urls.push(url);
+          const fileName = `page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`;
+          itemsToUpload.push({ buffer: webpBuf, fileName });
         }
       }
+
+      await Promise.all(
+        itemsToUpload.map(item => 
+          fs.promises.writeFile(path.join(targetDir, item.fileName), item.buffer)
+        )
+      );
+
+      let ftpUrls: (string | null)[] = [];
+      if (isFtpEnabled) {
+        const batchPayload = itemsToUpload.map(item => ({
+          buffer: item.buffer,
+          remoteRelPath: `uploads/${relPrefix}/${item.fileName}`
+        }));
+        ftpUrls = await uploadBatchFilesToFtp(batchPayload, dbFtpConfig);
+      }
+
+      const urls: string[] = itemsToUpload.map((item, i) => {
+        const ftpUrl = ftpUrls[i];
+        if (ftpUrl) return ftpUrl;
+        return `/uploads/${relPrefix}/${item.fileName}`;
+      });
 
       res.json({ success: true, urls });
     } catch (err: any) {

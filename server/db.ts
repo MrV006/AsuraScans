@@ -520,6 +520,37 @@ class DatabaseManager {
   // -----------------------------------------------------------------
   // USER METHODS
   // -----------------------------------------------------------------
+  ensureSuperAdminInLocalData() {
+    if (!this.localData.users) {
+      this.localData.users = [];
+    }
+    const adminUser = this.localData.users.find(u => u.id === 'admin' || u.email === 'amirrezaveisi45@gmail.com' || u.email === 'Mr.V@admin.com');
+    if (!adminUser) {
+      this.localData.users.unshift({
+        id: 'admin',
+        email: 'amirrezaveisi45@gmail.com',
+        displayName: 'امیررضا ویسی (مدیریت کل)',
+        avatarUrl: '',
+        role: 'admin',
+        roles: ['super_admin', 'admin'],
+        permissions: ['all'],
+        banned: false,
+        canCreateSeries: true,
+        walletBalance: 1000000,
+        hasCompletedSetup: true,
+        melliCode: '11111111',
+        createdAt: new Date().toISOString()
+      });
+      this.saveLocalData();
+    } else {
+      adminUser.role = 'admin';
+      adminUser.canCreateSeries = true;
+      if (!adminUser.roles || !adminUser.roles.includes('super_admin')) {
+        adminUser.roles = Array.from(new Set(['super_admin', 'admin', ...(adminUser.roles || [])]));
+      }
+    }
+  }
+
   async ensureSuperAdminInMySQL() {
     if (!this.isUsingMySQL || !this.pool) return;
     try {
@@ -586,6 +617,7 @@ class DatabaseManager {
         };
       });
     }
+    this.ensureSuperAdminInLocalData();
     return this.localData.users.map(u => {
       const isSuper = u.email === 'amirrezaveisi45@gmail.com' || u.email === 'Mr.V@admin.com' || u.id === 'admin';
       return {

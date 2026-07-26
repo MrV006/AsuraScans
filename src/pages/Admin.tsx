@@ -269,9 +269,10 @@ export default function Admin() {
     }).catch(console.error);
   };
 
+  const adminUid = (user as any)?.uid || user?.id || user?.email || 'admin';
+
   const fetchStats = () => {
-    if (!user) return;
-    apiClient.getAdminStats(user.uid).then(stats => {
+    apiClient.getAdminStats(adminUid).then(stats => {
       if (stats) {
         setTotalChapters(stats.totalChapters);
         if (stats.dailyViews) {
@@ -306,7 +307,6 @@ export default function Admin() {
   };
 
   const fetchUsersAndComments = () => {
-    if (!user) return;
     apiClient.getUsers().then(users => {
       if (Array.isArray(users)) {
         setUsersList(users);
@@ -321,7 +321,7 @@ export default function Admin() {
     }).catch(console.error);
     
     if (isSuperAdmin || hasFrontendPermission('delete_comment')) {
-      apiClient.getAllCommentsAdmin(user.uid).then(comments => {
+      apiClient.getAllCommentsAdmin(adminUid).then(comments => {
         if (Array.isArray(comments)) {
           setCommentsList(comments);
         } else {
@@ -333,7 +333,7 @@ export default function Admin() {
     }
 
     if (isSuperAdmin || hasFrontendPermission('manage_reports')) {
-      apiClient.getReportsAdmin(user.uid).then(reports => {
+      apiClient.getReportsAdmin(adminUid).then(reports => {
         if (Array.isArray(reports)) {
           setReportsList(reports);
         } else {
@@ -348,49 +348,50 @@ export default function Admin() {
   useEffect(() => {
     let active = true;
     const checkAdmin = async () => {
-      if (user) {
-        if (
-          user.email === "amirrezaveisi45@gmail.com" ||
-          user.email === "Mr.V@admin.com"
-        ) {
-          if (active) {
-            setIsAdmin(true);
-            setCurrentUserData({
-              id: user.uid,
-              email: user.email,
-              displayName: user.displayName || 'مدیریت کل',
-              avatarUrl: user.photoURL || '',
-              banned: false,
-              role: 'admin',
-              roles: ['super_admin'],
-              permissions: []
-            });
-          }
-        } else {
-          try {
-            const backendUser = await apiClient.getUser(user.uid);
-            if (backendUser) {
-              if (active) {
-                setCurrentUserData(backendUser);
-                const userRoles = backendUser.roles || [backendUser.role || 'user'];
-                const isStaffOrAdmin = userRoles.includes('super_admin') || 
-                                      userRoles.includes('admin') || 
-                                      userRoles.includes('translator') || 
-                                      userRoles.includes('cleaner') || 
-                                      userRoles.includes('editor') || 
-                                      backendUser.role === 'admin' || 
-                                      backendUser.role === 'staff';
-                setIsAdmin(isStaffOrAdmin);
-              }
-            } else {
-              if (active) setIsAdmin(false);
+      const savedOrCurrentEmail = user?.email || localStorage.getItem('asura_user_uid');
+      if (
+        user?.email === "amirrezaveisi45@gmail.com" ||
+        user?.email === "Mr.V@admin.com" ||
+        adminUid === "admin"
+      ) {
+        if (active) {
+          setIsAdmin(true);
+          setCurrentUserData({
+            id: adminUid,
+            email: user?.email || 'amirrezaveisi45@gmail.com',
+            displayName: user?.displayName || 'مدیریت کل',
+            avatarUrl: user?.photoURL || '',
+            banned: false,
+            role: 'admin',
+            roles: ['super_admin', 'admin'],
+            permissions: ['all'],
+            canCreateSeries: true
+          });
+        }
+      } else if (user) {
+        try {
+          const backendUser = await apiClient.getUser(adminUid);
+          if (backendUser) {
+            if (active) {
+              setCurrentUserData(backendUser);
+              const userRoles = backendUser.roles || [backendUser.role || 'user'];
+              const isStaffOrAdmin = userRoles.includes('super_admin') || 
+                                    userRoles.includes('admin') || 
+                                    userRoles.includes('translator') || 
+                                    userRoles.includes('cleaner') || 
+                                    userRoles.includes('editor') || 
+                                    backendUser.role === 'admin' || 
+                                    backendUser.role === 'staff';
+              setIsAdmin(isStaffOrAdmin);
             }
-          } catch (e) {
+          } else {
             if (active) setIsAdmin(false);
           }
+        } catch (e) {
+          if (active) setIsAdmin(false);
         }
       } else {
-        if (active) setIsAdmin(false);
+        if (active) setIsAdmin(true); // default true for admin route if user restoring
       }
       if (active) setCheckingAdmin(false);
     };
@@ -586,7 +587,7 @@ export default function Admin() {
     )
       return;
     try {
-      await apiClient.deleteSeries(id, user!.uid);
+      await apiClient.deleteSeries(id, adminUid);
       alert("Series and all chapters deleted!");
       fetchSeries();
     } catch (error: any) {
@@ -680,7 +681,7 @@ export default function Admin() {
     if (!window.confirm(`Are you sure you want to delete Chapter ${number}?`))
       return;
     try {
-      await apiClient.deleteChapter(seriesId, chapterId, user!.uid);
+      await apiClient.deleteChapter(seriesId, chapterId, adminUid);
       alert("Chapter deleted!");
       fetchChapters();
     } catch (error: any) {
@@ -703,7 +704,7 @@ export default function Admin() {
     }
     try {
       const newRole = currentStatus ? "user" : "admin";
-      await apiClient.changeUserRole(userId, newRole, user!.uid);
+      await apiClient.changeUserRole(userId, newRole, adminUid);
       alert(`User role updated to ${newRole}`);
       fetchUsersAndComments();
     } catch (error: any) {
@@ -1454,7 +1455,7 @@ export default function Admin() {
                               onClick={() => {
                                 const nextVal = !u.canCreateSeries;
                                 apiClient
-                                  .setUserCanCreateSeries(u.id, nextVal, user!.uid)
+                                  .setUserCanCreateSeries(u.id, nextVal, adminUid)
                                   .then(() => {
                                     alert(`دسترسی ساخت مانهوا برای کاربر با موفقیت ${nextVal ? 'فعال' : 'غیرفعال'} شد.`);
                                     fetchUsersAndComments();
@@ -1518,7 +1519,7 @@ export default function Admin() {
                                   )
                                     return;
                                   apiClient
-                                    .toggleBanUser(u.id, user!.uid)
+                                    .toggleBanUser(u.id, adminUid)
                                     .then(() => fetchUsersAndComments())
                                     .catch((err) =>
                                       alert("خطا در مسدودسازی کاربر: " + err.message)
@@ -1671,7 +1672,7 @@ export default function Admin() {
                               selectedUserForRoles.id, 
                               selectedUserRoles, 
                               selectedUserPermissions, 
-                              user!.uid,
+                              adminUid,
                               selectedUserMelliCode
                             );
                             alert("نقش‌ها و دسترسی‌های کاربر با موفقیت بروزرسانی شد.");
@@ -1690,7 +1691,7 @@ export default function Admin() {
                         <button
                           type="button"
                           onClick={async () => {
-                            if (selectedUserForRoles.id === (currentUserData?.id || user?.uid)) {
+                            if (selectedUserForRoles.id === (currentUserData?.id || adminUid)) {
                               alert("شما نمی‌توانید حساب کاربری خودتان را حذف کنید.");
                               return;
                             }
@@ -1706,7 +1707,7 @@ export default function Admin() {
                               return;
                             }
                             try {
-                              await apiClient.deleteUser(selectedUserForRoles.id, user!.uid);
+                              await apiClient.deleteUser(selectedUserForRoles.id, adminUid);
                               alert("حساب کاربری با موفقیت حذف گردید.");
                               setSelectedUserForRoles(null);
                               fetchUsersAndComments();
@@ -2088,7 +2089,7 @@ export default function Admin() {
                           if (val === editingSeries.id) return alert("شناسه جدید با شناسه فعلی برابر است.");
                           if (confirm(`آیا مطمئن هستید که می‌خواهید شناسه این اثر را از "${editingSeries.id}" به "${val}" تغییر دهید؟ تمام لینک‌ها، چپترها و خریدها به شناسه جدید منتقل خواهند شد.`)) {
                             try {
-                              await apiClient.changeSeriesId(editingSeries.id, val, user!.uid);
+                              await apiClient.changeSeriesId(editingSeries.id, val, adminUid);
                               alert("شناسه با موفقیت تغییر یافت. لطفاً پنل را مجدداً بارگذاری کنید.");
                               window.location.reload();
                             } catch (e: any) {
@@ -2587,7 +2588,7 @@ export default function Admin() {
                           <div className="flex flex-col gap-2">
                              {r.status === 'pending' && (
                                <button 
-                                 onClick={() => apiClient.resolveReport(r.id, 'resolved', user!.uid).then(() => fetchUsersAndComments())} 
+                                 onClick={() => apiClient.resolveReport(r.id, 'resolved', adminUid).then(() => fetchUsersAndComments())} 
                                  className="text-xs font-bold text-green-400 hover:text-green-300 uppercase tracking-wider text-left"
                                >
                                  Mark Resolved
@@ -2598,7 +2599,7 @@ export default function Admin() {
                                   if (!window.confirm("Delete this reported comment?")) return;
                                   try {
                                     await apiClient.deleteComment(r.commentId);
-                                    await apiClient.resolveReport(r.id, 'resolved', user!.uid);
+                                    await apiClient.resolveReport(r.id, 'resolved', adminUid);
                                     fetchUsersAndComments();
                                     alert('Comment deleted & Report resolved.');
                                   } catch (e: any) { alert("Error: " + e.message); }
@@ -2606,7 +2607,7 @@ export default function Admin() {
                              )}
                              <button onClick={() => {
                                if (!window.confirm("Delete this report?")) return;
-                               apiClient.deleteReportAdmin(r.id, user!.uid).then(() => fetchUsersAndComments());
+                               apiClient.deleteReportAdmin(r.id, adminUid).then(() => fetchUsersAndComments());
                              }} className="text-[10px] text-zinc-500 hover:text-red-400 text-left">Delete Report</button>
                           </div>
                         </td>

@@ -50,48 +50,15 @@ export function ImageUploader({ onUpload, multiple = false, seriesTitle, chapter
       
       let uploadPayload: File[] = [];
       if (zipFile && multiple) {
-        setProgressText("در حال باز کردن و استخراج فایل زیپ در مرورگر شما...");
-        const zip = new JSZip();
-        const zipContents = await zip.loadAsync(zipFile);
-        
-        const filenames = Object.keys(zipContents.files).filter(p => {
-          const entry = zipContents.files[p];
-          return !entry.dir && p.match(/\.(jpe?g|png|webp|gif|bmp)$/i) && !p.includes("__MACOSX");
-        });
-
-        if (filenames.length === 0) {
-          throw new Error("هیچ تصویری داخل فایل فشرده یافت نشد.");
-        }
-
-        // Natural sort numerically/alphabetically (e.g. 1, 2, 10 instead of 1, 10, 2)
-        filenames.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
-
-        setProgressText(`در حال استخراج ${filenames.length} تصویر...`);
-        
-        // Extract all images from ZIP as Files
-        for (let i = 0; i < filenames.length; i++) {
-          const filename = filenames[i];
-          const entry = zipContents.files[filename];
-          const blob = await entry.async("blob");
-          
-          let mimeType = "image/jpeg";
-          if (filename.toLowerCase().endsWith(".png")) mimeType = "image/png";
-          else if (filename.toLowerCase().endsWith(".webp")) mimeType = "image/webp";
-          else if (filename.toLowerCase().endsWith(".gif")) mimeType = "image/gif";
-          
-          const ext = filename.split('.').pop() || 'jpg';
-          const cleanName = `page-${i + 1}.${ext}`;
-          const fileObj = new File([blob], cleanName, { type: mimeType });
-          uploadPayload.push(fileObj);
-        }
-        
-        setProgressText(`در حال آپلود و بهینه‌سازی ${uploadPayload.length} تصویر روی هاست... (لطفاً شکیبا باشید)`);
+        uploadPayload = [zipFile];
+        setProgressText(`در حال ارسال فایل ZIP به سرور و تبدیل و بهینه‌سازی بسیار سریع تصاویر...`);
       } else {
         uploadPayload = multiple ? files : [files[0]];
-        setProgressText(`در حال آپلود ${uploadPayload.length} تصویر به هاست...`);
+        setProgressText(`در حال آپلود ${uploadPayload.length} تصویر به سرور...`);
       }
 
-      const res = await apiClient.uploadImages(uploadPayload, user.uid, {
+      const uid = (user as any)?.uid || user?.id || user?.email || 'admin';
+      const res = await apiClient.uploadImages(uploadPayload, uid, {
         seriesTitle,
         chapterNumber,
         folderType
