@@ -1,3 +1,18 @@
+export interface UserProfile {
+  id: string;
+  email: string;
+  displayName: string;
+  avatarUrl?: string;
+  role?: string;
+  roles?: string[];
+  permissions?: string[];
+  melliCode?: string;
+  workStatus?: 'available' | 'busy' | 'leave' | string;
+  statusMessage?: string;
+  lastActiveAt?: string;
+  isOnline?: boolean;
+}
+
 export interface Chapter {
   id: string;
   seriesId: string;

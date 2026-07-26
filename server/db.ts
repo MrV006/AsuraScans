@@ -107,6 +107,9 @@ export interface User {
   walletBalance?: number;
   password?: string;
   hasCompletedSetup?: boolean;
+  workStatus?: string;
+  statusMessage?: string;
+  lastActiveAt?: string;
   createdAt: string;
 }
 

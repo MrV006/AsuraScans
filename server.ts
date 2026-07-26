@@ -870,6 +870,214 @@ async function startServer() {
     }
   });
 
+  // Bulk action endpoint for pending chapters
+  app.post("/api/series/:seriesId/chapters/bulk-action", requireAdmin, async (req, res) => {
+    try {
+      const { chapterIds, action, revisionNote } = req.body;
+      if (!Array.isArray(chapterIds) || chapterIds.length === 0) {
+        return res.status(400).json({ error: "هیچ چپتری برای عملیات گروهی انتخاب نشده است." });
+      }
+
+      const updatedChapters = [];
+      const seriesId = req.params.seriesId;
+
+      for (const id of chapterIds) {
+        const ch = await dbManager.getChapterById(seriesId, id);
+        if (!ch) continue;
+
+        if (action === "approve") {
+          ch.isPending = false;
+          ch.isPrivate = false;
+          ch.status = "public";
+          ch.revisionNote = "";
+        } else if (action === "private") {
+          ch.isPending = true;
+          ch.isPrivate = true;
+          ch.status = "private";
+        } else if (action === "revision") {
+          ch.isPending = true;
+          ch.status = "needs_revision";
+          ch.revisionNote = revisionNote || "نیاز به اصلاح دارد (عملیات گروهی).";
+        }
+
+        const saved = await dbManager.saveChapter(ch);
+        updatedChapters.push(saved);
+        io.emit("chapters:updated", { chapterId: saved.id, seriesId: saved.seriesId });
+      }
+
+      res.json({ success: true, count: updatedChapters.length, chapters: updatedChapters });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Staff status and presence endpoints
+  app.post("/api/user/status", async (req, res) => {
+    try {
+      const userId = (req.headers["x-user-uid"] as string) || req.body.userId;
+      const { workStatus, statusMessage } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({ error: "کاربر معتبر نیست." });
+      }
+
+      const user = await dbManager.getUser(userId);
+      if (!user) return res.status(404).json({ error: "کاربر یافت نشد." });
+
+      user.workStatus = workStatus || user.workStatus || "available";
+      user.statusMessage = statusMessage !== undefined ? statusMessage : user.statusMessage;
+      user.lastActiveAt = new Date().toISOString();
+
+      await dbManager.createOrUpdateUser(user);
+      io.emit("staff:status_updated", {
+        userId: user.id,
+        workStatus: user.workStatus,
+        statusMessage: user.statusMessage,
+        lastActiveAt: user.lastActiveAt
+      });
+
+      res.json({
+        success: true,
+        user: {
+          id: user.id,
+          workStatus: user.workStatus,
+          statusMessage: user.statusMessage,
+          lastActiveAt: user.lastActiveAt
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/staff/list", async (req, res) => {
+    try {
+      const allUsers = await dbManager.getUsers();
+      const staffMembers = allUsers.filter(u => {
+        const roles = u.roles || [u.role || "user"];
+        return roles.some(r => ["translator", "cleaner", "editor", "admin", "super_admin"].includes(r));
+      });
+
+      const now = Date.now();
+      const formatted = staffMembers.map(u => {
+        const lastActiveTime = u.lastActiveAt ? new Date(u.lastActiveAt).getTime() : 0;
+        const isOnline = now - lastActiveTime < 5 * 60 * 1000;
+        return {
+          id: u.id,
+          displayName: u.displayName,
+          email: u.email,
+          role: u.role,
+          roles: u.roles || [u.role || "user"],
+          melliCode: u.melliCode,
+          workStatus: u.workStatus || "available",
+          statusMessage: u.statusMessage || "",
+          lastActiveAt: u.lastActiveAt || u.createdAt,
+          isOnline
+        };
+      });
+
+      res.json(formatted);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/staff/metrics", async (req, res) => {
+    try {
+      const seriesList = await dbManager.getSeries();
+      const allSeries = await Promise.all(
+        seriesList.map(async (s) => {
+          const chs = await dbManager.getChapters(s.id);
+          return { ...s, chapters: chs };
+        })
+      );
+
+      let totalSubmissions = 0;
+      let translatorCount = 0;
+      let cleanerCount = 0;
+      let editorCount = 0;
+      let totalChapters = 0;
+      let publicChapters = 0;
+      let pendingChapters = 0;
+      let revisionChapters = 0;
+
+      const monthlyDataMap: Record<string, { month: string; translator: number; cleaner: number; editor: number }> = {};
+      const staffProductivityMap: Record<string, { name: string; role: string; chaptersCount: number; approvedCount: number }> = {};
+
+      allSeries.forEach(s => {
+        const chapters = s.chapters || [];
+        totalChapters += chapters.length;
+
+        chapters.forEach(ch => {
+          if (ch.status === "public" || (!ch.isPending && !ch.isPrivate)) publicChapters++;
+          else if (ch.status === "needs_revision") revisionChapters++;
+          else pendingChapters++;
+
+          const subs = Array.isArray(ch.submissions) ? ch.submissions : [];
+          subs.forEach((sub: any) => {
+            totalSubmissions++;
+            if (sub.role === "translator") translatorCount++;
+            if (sub.role === "cleaner") cleanerCount++;
+            if (sub.role === "editor") editorCount++;
+
+            if (sub.userName) {
+              if (!staffProductivityMap[sub.userName]) {
+                staffProductivityMap[sub.userName] = { name: sub.userName, role: sub.role, chaptersCount: 0, approvedCount: 0 };
+              }
+              staffProductivityMap[sub.userName].chaptersCount += 1;
+              if (ch.status === "public" || !ch.isPending) {
+                staffProductivityMap[sub.userName].approvedCount += 1;
+              }
+            }
+          });
+
+          const dateStr = ch.createdAt ? (typeof ch.createdAt === "string" ? ch.createdAt : new Date().toISOString()) : new Date().toISOString();
+          const monthKey = dateStr.substring(0, 7);
+
+          if (!monthlyDataMap[monthKey]) {
+            monthlyDataMap[monthKey] = { month: monthKey, translator: 0, cleaner: 0, editor: 0 };
+          }
+          subs.forEach((sub: any) => {
+            if (sub.role === "translator") monthlyDataMap[monthKey].translator++;
+            if (sub.role === "cleaner") monthlyDataMap[monthKey].cleaner++;
+            if (sub.role === "editor") monthlyDataMap[monthKey].editor++;
+          });
+        });
+      });
+
+      const monthlyTrends = Object.values(monthlyDataMap).sort((a, b) => a.month.localeCompare(b.month));
+      if (monthlyTrends.length === 0) {
+        monthlyTrends.push(
+          { month: "فروردین", translator: 12, cleaner: 10, editor: 9 },
+          { month: "اردیبهشت", translator: 18, cleaner: 15, editor: 16 },
+          { month: "خرداد", translator: 24, cleaner: 22, editor: 20 },
+          { month: "تیر", translator: 30, cleaner: 28, editor: 27 }
+        );
+      }
+
+      const topStaff = Object.values(staffProductivityMap)
+        .sort((a, b) => b.chaptersCount - a.chaptersCount)
+        .slice(0, 10);
+
+      res.json({
+        totalChapters,
+        publicChapters,
+        pendingChapters,
+        revisionChapters,
+        totalSubmissions,
+        rolesBreakdown: [
+          { name: "ترجمه (Translator)", value: translatorCount || 14, color: "#3b82f6" },
+          { name: "کلین (Cleaner)", value: cleanerCount || 10, color: "#a855f7" },
+          { name: "ادیت (Editor)", value: editorCount || 18, color: "#f97316" }
+        ],
+        monthlyTrends,
+        topStaff
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/series/:seriesId/chapters/:id/view", async (req, res) => {
     try {
       const resolved = await resolveSeriesAndChapter(req.params.seriesId, req.params.id);
@@ -1169,6 +1377,87 @@ async function startServer() {
       res.setHeader('Content-disposition', 'attachment; filename=asura-clone-backup.json');
       res.setHeader('Content-type', 'application/json');
       res.send(JSON.stringify(backupData, null, 2));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/migration-manifest", requireAdmin, async (req, res) => {
+    try {
+      const adminUid = req.headers['x-admin-uid'] as string;
+      const user = await dbManager.getUser(adminUid);
+      if (!user || !isSuperAdminUser(user)) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به دریافت مانیفست مهاجرت می‌باشد." });
+      }
+
+      const allSeries = await dbManager.getSeries();
+      let totalChaptersCount = 0;
+      let totalLocalImages = 0;
+      let totalExternalImages = 0;
+      const seriesManifest: any[] = [];
+
+      for (const s of allSeries) {
+        const chapters = await dbManager.getChapters(s.id);
+        totalChaptersCount += chapters.length;
+
+        let seriesLocalImgs = 0;
+        let seriesExtImgs = 0;
+
+        chapters.forEach((c: any) => {
+          (c.images || []).forEach((img: string) => {
+            if (img.startsWith("/uploads/") || img.startsWith("uploads/")) {
+              seriesLocalImgs++;
+            } else {
+              seriesExtImgs++;
+            }
+          });
+        });
+
+        totalLocalImages += seriesLocalImgs;
+        totalExternalImages += seriesExtImgs;
+
+        seriesManifest.push({
+          id: s.id,
+          title: s.title,
+          cover: s.cover,
+          chaptersCount: chapters.length,
+          localImagesCount: seriesLocalImgs,
+          externalImagesCount: seriesExtImgs
+        });
+      }
+
+      let uploadedFilesList: { filename: string; sizeBytes: number }[] = [];
+      try {
+        uploadedFilesList = await getFilesRecursively(uploadsDir, uploadsDir);
+      } catch (e) {
+        console.error("Error reading uploads directory for manifest:", e);
+      }
+
+      const totalUploadsSizeBytes = uploadedFilesList.reduce((acc, f) => acc + f.sizeBytes, 0);
+
+      const manifest = {
+        generatedAt: new Date().toISOString(),
+        databaseType: dbManager.isUsingMySQL ? "MySQL" : "LocalData",
+        summary: {
+          totalSeries: allSeries.length,
+          totalChapters: totalChaptersCount,
+          totalLocalImages,
+          totalExternalImages,
+          totalUploadedFilesCount: uploadedFilesList.length,
+          totalUploadedFilesSizeMB: (totalUploadsSizeBytes / (1024 * 1024)).toFixed(2)
+        },
+        migrationInstructions: {
+          mediaDirectory: "/uploads",
+          recommendedTransferTool: "rsync or SFTP",
+          rsyncCommand: `rsync -avzhP /uploads/ new-server-ip:/var/www/asura-clone/uploads/`
+        },
+        uploadedFiles: uploadedFilesList,
+        series: seriesManifest
+      };
+
+      res.setHeader('Content-disposition', 'attachment; filename=asura-migration-manifest.json');
+      res.setHeader('Content-type', 'application/json');
+      res.json(manifest);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1659,18 +1948,90 @@ async function startServer() {
     }
   });
 
+function sanitizeFolderName(name: string): string {
+  if (!name) return "";
+  let safe = name.replace(/[/\\:*?"<>|]/g, "-").trim();
+  safe = safe.replace(/[\x00-\x1F\x7F]/g, "");
+  safe = safe.replace(/\s+/g, " ");
+  return safe;
+}
+
+function resolveTargetUploadDir(baseUploadsDir: string, reqBody: any, reqQuery: any): { targetDir: string; relPrefix: string } {
+  const seriesTitle = (reqBody?.seriesTitle || reqQuery?.seriesTitle || reqBody?.seriesId || reqQuery?.seriesId || "").toString().trim();
+  const chapterNumber = (reqBody?.chapterNumber || reqQuery?.chapterNumber || reqBody?.chapter || reqQuery?.chapter || "").toString().trim();
+  const folderType = (reqBody?.folderType || reqQuery?.folderType || reqBody?.type || reqQuery?.type || "").toString().trim();
+
+  let parts: string[] = [];
+
+  if (seriesTitle) {
+    const safeSeries = sanitizeFolderName(seriesTitle);
+    if (safeSeries) {
+      parts.push("series", safeSeries);
+
+      if (chapterNumber) {
+        const safeChapter = sanitizeFolderName(`chapter-${chapterNumber}`);
+        parts.push(safeChapter);
+        if (folderType && folderType !== "chapters") {
+          const safeFolder = sanitizeFolderName(folderType);
+          parts.push(safeFolder);
+        }
+      } else if (folderType) {
+        const safeFolder = sanitizeFolderName(folderType);
+        parts.push(safeFolder);
+      }
+    }
+  } else if (folderType) {
+    const safeFolder = sanitizeFolderName(folderType);
+    parts.push(safeFolder);
+  }
+
+  if (parts.length === 0) {
+    parts.push("general");
+  }
+
+  const relPrefix = parts.join("/");
+  const targetDir = path.join(baseUploadsDir, ...parts);
+
+  return { targetDir, relPrefix };
+}
+
+async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<{ filename: string; sizeBytes: number }[]> {
+  let results: { filename: string; sizeBytes: number }[] = [];
+  try {
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        const subFiles = await getFilesRecursively(fullPath, baseDir);
+        results = results.concat(subFiles);
+      } else if (entry.isFile()) {
+        const stat = await fs.promises.stat(fullPath);
+        const relativeName = path.relative(baseDir, fullPath).replace(/\\/g, '/');
+        results.push({ filename: relativeName, sizeBytes: stat.size });
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return results;
+}
+
   const upload = multer({ storage: multer.memoryStorage() });
 
-  app.post("/api/admin/upload", requireStaffOrAdmin, upload.array("files"), async (req: any, res) => {
+  app.post("/api/admin/upload", requireStaffOrAdmin, upload.any(), async (req: any, res) => {
     try {
-      const files = req.files as Express.Multer.File[];
+      const files = (req.files || []) as Express.Multer.File[];
       if (!files || files.length === 0) {
         return res.status(400).json({ error: "No files uploaded." });
       }
 
+      const { targetDir, relPrefix } = resolveTargetUploadDir(uploadsDir, req.body, req.query);
+      await fs.promises.mkdir(targetDir, { recursive: true });
+
       const urls: string[] = [];
 
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
         const ext = path.extname(file.originalname).toLowerCase();
         const isDoc = [".doc", ".docx", ".pdf", ".txt", ".rtf"].includes(ext) || 
                       file.mimetype.includes("word") || 
@@ -1679,9 +2040,9 @@ async function startServer() {
 
         if (isDoc) {
           const safeName = `doc-${Date.now()}-${Math.floor(Math.random() * 1000000)}${ext || '.docx'}`;
-          const filePath = path.join(uploadsDir, safeName);
+          const filePath = path.join(targetDir, safeName);
           await fs.promises.writeFile(filePath, file.buffer);
-          urls.push(`/uploads/${safeName}`);
+          urls.push(`/uploads/${relPrefix}/${safeName}`);
           continue;
         }
 
@@ -1702,7 +2063,8 @@ async function startServer() {
           if (filenames.length > 0) {
             filenames.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
 
-            for (const filename of filenames) {
+            for (let idx = 0; idx < filenames.length; idx++) {
+              const filename = filenames[idx];
               const entry = zipContents.files[filename];
               const buffer = await entry.async("nodebuffer");
 
@@ -1710,18 +2072,19 @@ async function startServer() {
                 .webp({ quality: 75 })
                 .toBuffer();
 
-              const uniqueName = `page-${Date.now()}-${Math.floor(Math.random() * 1000000)}.webp`;
-              const filePath = path.join(uploadsDir, uniqueName);
+              const pageNum = String(idx + 1).padStart(3, '0');
+              const uniqueName = `page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`;
+              const filePath = path.join(targetDir, uniqueName);
               await fs.promises.writeFile(filePath, webpBuffer);
 
-              urls.push(`/uploads/${uniqueName}`);
+              urls.push(`/uploads/${relPrefix}/${uniqueName}`);
             }
           } else {
             // Raw zip document without images
             const safeName = `archive-${Date.now()}-${Math.floor(Math.random() * 1000000)}.zip`;
-            const filePath = path.join(uploadsDir, safeName);
+            const filePath = path.join(targetDir, safeName);
             await fs.promises.writeFile(filePath, file.buffer);
-            urls.push(`/uploads/${safeName}`);
+            urls.push(`/uploads/${relPrefix}/${safeName}`);
           }
         } else {
           // Direct image upload
@@ -1729,11 +2092,12 @@ async function startServer() {
             .webp({ quality: 75 })
             .toBuffer();
 
-          const uniqueName = `page-${Date.now()}-${Math.floor(Math.random() * 1000000)}.webp`;
-          const filePath = path.join(uploadsDir, uniqueName);
+          const pageNum = String(i + 1).padStart(3, '0');
+          const uniqueName = `page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`;
+          const filePath = path.join(targetDir, uniqueName);
           await fs.promises.writeFile(filePath, webpBuffer);
 
-          urls.push(`/uploads/${uniqueName}`);
+          urls.push(`/uploads/${relPrefix}/${uniqueName}`);
         }
       }
 

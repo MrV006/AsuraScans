@@ -2107,6 +2107,8 @@ export default function Admin() {
                       className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white"
                     />
                     <ImageUploader
+                      seriesTitle={seriesForm.title}
+                      folderType="cover"
                       onUpload={(urls) =>
                         setSeriesForm({ ...seriesForm, cover: urls[0] })
                       }
@@ -2420,6 +2422,8 @@ export default function Admin() {
                     />
                     <ImageUploader
                       multiple
+                      seriesTitle={seriesList.find((s: any) => s.id === selectedSeriesForChapters)?.title || ""}
+                      chapterNumber={chapterForm.number}
                       onUpload={(urls) =>
                         setChapterForm({
                           ...chapterForm,

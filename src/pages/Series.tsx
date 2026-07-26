@@ -796,6 +796,8 @@ export default function Series() {
                     <span className="block text-[10px] text-zinc-500 mb-1">آپلود مستقیم کاور:</span>
                     <ImageUploader 
                       multiple={false}
+                      seriesTitle={series.title}
+                      folderType="cover"
                       onUpload={(urls) => {
                         if (urls && urls.length > 0) {
                           setEditForm(prev => ({ ...prev, cover: urls[0] }));
@@ -816,6 +818,8 @@ export default function Series() {
                     <span className="block text-[10px] text-zinc-500 mb-1">آپلود مستقیم بنر:</span>
                     <ImageUploader 
                       multiple={false}
+                      seriesTitle={series.title}
+                      folderType="banner"
                       onUpload={(urls) => {
                         if (urls && urls.length > 0) {
                           setEditForm(prev => ({ ...prev, banner: urls[0] }));

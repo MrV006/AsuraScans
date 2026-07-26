@@ -14,10 +14,16 @@ import {
   FileUp, 
   Sparkles, 
   RefreshCw,
-  FileArchive
+  FileArchive,
+  CheckSquare,
+  Square,
+  BarChart2,
+  UserCheck
 } from "lucide-react";
 import { Series, Chapter } from "../lib/types";
 import { apiClient } from "../lib/apiClient";
+import StaffStatusWidget from "./StaffStatusWidget";
+import StaffProductivityMetrics from "./StaffProductivityMetrics";
 
 interface WorkTeamTabProps {
   series: Series;
@@ -62,6 +68,12 @@ export default function WorkTeamTab({
   const [revisionNoteInput, setRevisionNoteInput] = useState("");
   const [submittingRevision, setSubmittingRevision] = useState(false);
 
+  // Bulk action state
+  const [selectedChapterIds, setSelectedChapterIds] = useState<string[]>([]);
+  const [isBulkRevisionModalOpen, setIsBulkRevisionModalOpen] = useState(false);
+  const [bulkRevisionNote, setBulkRevisionNote] = useState("");
+  const [processingBulk, setProcessingBulk] = useState(false);
+
   const approvedContributors = (series.contributors || []).filter((c: any) => c.status === "approved");
   const chaptersList = series.chapters || [];
 
@@ -78,6 +90,13 @@ export default function WorkTeamTab({
     for (let i = 0; i < files.length; i++) {
       formData.append("files", files[i]);
     }
+    if (series?.title) {
+      formData.append("seriesTitle", series.title);
+    }
+    if (selectedChapterNumber) {
+      formData.append("chapterNumber", selectedChapterNumber);
+    }
+    formData.append("folderType", "submissions");
 
     try {
       const res = await apiClient.post("/api/admin/upload", formData, {
@@ -231,6 +250,49 @@ export default function WorkTeamTab({
   };
 
   const pendingChapters = chaptersList.filter((ch: Chapter) => ch.isPending || ch.status === "needs_revision");
+
+  // Bulk selection handlers
+  const handleToggleSelectChapter = (id: string) => {
+    setSelectedChapterIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllPending = () => {
+    if (selectedChapterIds.length === pendingChapters.length) {
+      setSelectedChapterIds([]);
+    } else {
+      setSelectedChapterIds(pendingChapters.map((c: Chapter) => c.id));
+    }
+  };
+
+  const handleExecuteBulkAction = async (action: 'approve' | 'private' | 'revision', customNote?: string) => {
+    if (selectedChapterIds.length === 0) return;
+    if (action === 'approve' && !confirm(`آیا از تایید نهایی و انتشار عمومی ${selectedChapterIds.length} چپتر انتخاب‌شده اطمینان دارید؟`)) {
+      return;
+    }
+
+    setProcessingBulk(true);
+    try {
+      await apiClient.post(`/api/series/${series.id}/chapters/bulk-action`, {
+        chapterIds: selectedChapterIds,
+        action,
+        revisionNote: customNote || bulkRevisionNote
+      }, {
+        headers: { 'x-admin-uid': user?.uid, 'x-user-uid': user?.uid }
+      });
+
+      alert(`عملیات گروهی با موفقیت روی ${selectedChapterIds.length} چپتر اعمال شد.`);
+      setSelectedChapterIds([]);
+      setIsBulkRevisionModalOpen(false);
+      setBulkRevisionNote("");
+      onUpdateSeries();
+    } catch (e: any) {
+      alert("خطا در اجرای عملیات دسته جمعی.");
+    } finally {
+      setProcessingBulk(false);
+    }
+  };
 
   return (
     <div className="space-y-8 text-right" dir="rtl">
@@ -478,23 +540,82 @@ export default function WorkTeamTab({
         </form>
       </div>
 
-      {/* ADMIN REVIEW TAB (ویژه مدیریت کل و بررسی چپترها) */}
+      {/* STAFF ONLINE / AVAILABILITY STATUS WIDGET */}
+      <StaffStatusWidget user={user} profile={profile} />
+
+      {/* ADMIN REVIEW TAB (ویژه مدیریت کل و بررسی چپترها + سیستم عملیات دسته جمعی) */}
       {(isGlobalAdmin || userRoles.includes("super_admin") || userRoles.includes("admin")) && (
         <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 shadow-xl space-y-6">
-          <div className="border-b border-white/5 pb-4 flex items-center justify-between">
+          <div className="border-b border-white/5 pb-4 flex flex-wrap items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-black text-white flex items-center gap-2">
                 <CheckCircle className="text-emerald-400" size={18} />
                 صف تایید و بررسی چپترها (مدیریت کل)
               </h3>
               <p className="text-xs text-zinc-400 mt-1">
-                چپترهایی که توسط ادیتور ارسال شده‌اند و نیازمند انتشار عمومی یا بازبینی مجدد هستند.
+                چپترهایی که توسط ادیتور ارسال شده‌اند و نیازمند انتشار عمومی، پرایوت ماندن یا بازبینی مجدد هستند.
               </p>
             </div>
-            <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-black px-3 py-1 rounded-full">
-              {pendingChapters.length} چپتر در انتظار
-            </span>
+
+            <div className="flex items-center gap-2">
+              {pendingChapters.length > 0 && (
+                <button
+                  onClick={handleSelectAllPending}
+                  className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-zinc-300 text-xs font-bold rounded-xl border border-white/10 flex items-center gap-1.5 transition-all"
+                >
+                  {selectedChapterIds.length === pendingChapters.length ? <CheckSquare size={14} className="text-[var(--color-asura-accent-light)]" /> : <Square size={14} />}
+                  {selectedChapterIds.length === pendingChapters.length ? "لغو انتخاب همه" : `انتخاب همه (${pendingChapters.length})`}
+                </button>
+              )}
+              <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-black px-3 py-1 rounded-full">
+                {pendingChapters.length} چپتر در انتظار
+              </span>
+            </div>
           </div>
+
+          {/* BULK ACTION BAR (ظاهر می‌شود هنگامی که حداقل یک چپتر انتخاب شده باشد) */}
+          {selectedChapterIds.length > 0 && (
+            <div className="p-4 bg-gradient-to-r from-[var(--color-asura-accent)]/20 via-black to-zinc-900 border border-[var(--color-asura-accent)]/40 rounded-2xl flex flex-wrap items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2">
+              <div className="flex items-center gap-2">
+                <CheckSquare size={18} className="text-[var(--color-asura-accent-light)]" />
+                <span className="text-xs font-black text-white">
+                  {selectedChapterIds.length} چپتر انتخاب گردیده است
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => handleExecuteBulkAction('approve')}
+                  disabled={processingBulk}
+                  className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-black text-xs font-black rounded-xl transition-all shadow-md flex items-center gap-1.5"
+                >
+                  <Check size={14} />
+                  تایید و انتشار دسته جمعی ({selectedChapterIds.length})
+                </button>
+
+                <button
+                  onClick={() => handleExecuteBulkAction('private')}
+                  disabled={processingBulk}
+                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold rounded-xl transition-all border border-white/10 flex items-center gap-1.5"
+                >
+                  <EyeOff size={14} />
+                  پرایوت دسته جمعی ({selectedChapterIds.length})
+                </button>
+
+                <button
+                  onClick={() => {
+                    setIsBulkRevisionModalOpen(true);
+                    setBulkRevisionNote("");
+                  }}
+                  disabled={processingBulk}
+                  className="px-4 py-2 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white text-xs font-bold rounded-xl transition-all border border-red-500/20 flex items-center gap-1.5"
+                >
+                  <MessageSquare size={14} />
+                  ارسال دسته جمعی جهت تصحیح ({selectedChapterIds.length})
+                </button>
+              </div>
+            </div>
+          )}
 
           {pendingChapters.length === 0 ? (
             <div className="text-center py-8 text-zinc-500 text-xs font-bold">
@@ -502,97 +623,160 @@ export default function WorkTeamTab({
             </div>
           ) : (
             <div className="space-y-4">
-              {pendingChapters.map((ch: Chapter) => (
-                <div key={ch.id} className="bg-black/40 border border-white/10 rounded-2xl p-5 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-3">
-                    <div>
-                      <span className="text-sm font-black text-white">
-                        چپتر {ch.number} {ch.title ? `- ${ch.title}` : ""}
-                      </span>
-                      {ch.status === "needs_revision" ? (
-                        <span className="mr-3 bg-red-500/10 text-red-400 border border-red-500/20 text-[10px] font-black px-2.5 py-0.5 rounded-full">
-                          نیازمند تصحیح
-                        </span>
-                      ) : (
-                        <span className="mr-3 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-black px-2.5 py-0.5 rounded-full">
-                          در انتظار تایید انتشار
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-[10px] text-zinc-500 font-mono">
-                      تعداد تصاویر: {ch.images ? ch.images.length : 0}
-                    </span>
-                  </div>
+              {pendingChapters.map((ch: Chapter) => {
+                const isSelected = selectedChapterIds.includes(ch.id);
 
-                  {/* Submission logs/files */}
-                  {Array.isArray(ch.submissions) && ch.submissions.length > 0 && (
-                    <div className="space-y-2">
-                      <span className="text-[11px] font-black text-zinc-400 block">سابقه فایل‌های دریافتی:</span>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {ch.submissions.map((sub: any, idx: number) => (
-                          <div key={sub.id || idx} className="p-2.5 bg-white/5 rounded-xl text-xs border border-white/5 flex items-center justify-between">
-                            <div>
-                              <span className="font-bold text-zinc-200 block">
-                                {sub.role === "translator" ? "فایل ترجمه" : sub.role === "cleaner" ? "فایل کلین" : "فایل ادیت"} (توسط {sub.userName})
-                              </span>
-                              {sub.note && <span className="text-[10px] text-zinc-400 block mt-0.5">{sub.note}</span>}
-                            </div>
-                            {sub.fileUrl && (
-                              <a 
-                                href={sub.fileUrl} 
-                                target="_blank" 
-                                rel="noreferrer"
-                                className="px-2.5 py-1 bg-[var(--color-asura-accent)]/20 hover:bg-[var(--color-asura-accent)] text-[var(--color-asura-accent-light)] hover:text-white rounded-lg text-[10px] font-bold transition-all shrink-0"
-                              >
-                                دریافت فایل
-                              </a>
-                            )}
-                          </div>
-                        ))}
+                return (
+                  <div 
+                    key={ch.id} 
+                    className={`bg-black/40 border rounded-2xl p-5 space-y-4 transition-all ${
+                      isSelected ? "border-[var(--color-asura-accent)] ring-1 ring-[var(--color-asura-accent)]/50" : "border-white/10"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 pb-3">
+                      <div className="flex items-center gap-3">
+                        {/* Checkbox for Bulk Actions */}
+                        <button
+                          onClick={() => handleToggleSelectChapter(ch.id)}
+                          className={`p-1 rounded-lg transition-colors ${
+                            isSelected ? "text-[var(--color-asura-accent-light)]" : "text-zinc-500 hover:text-white"
+                          }`}
+                          title="انتخاب جهت عملیات دسته جمعی"
+                        >
+                          {isSelected ? <CheckSquare size={18} /> : <Square size={18} />}
+                        </button>
+
+                        <div>
+                          <span className="text-sm font-black text-white">
+                            چپتر {ch.number} {ch.title ? `- ${ch.title}` : ""}
+                          </span>
+                          {ch.status === "needs_revision" ? (
+                            <span className="mr-3 bg-red-500/10 text-red-400 border border-red-500/20 text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                              نیازمند تصحیح
+                            </span>
+                          ) : (
+                            <span className="mr-3 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                              در انتظار تایید انتشار
+                            </span>
+                          )}
+                        </div>
                       </div>
+
+                      <span className="text-[10px] text-zinc-500 font-mono">
+                        تعداد تصاویر: {ch.images ? ch.images.length : 0}
+                      </span>
                     </div>
-                  )}
 
-                  {/* Revision note if any */}
-                  {ch.revisionNote && (
-                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400 font-bold">
-                      علت ارجاع جهت تصحیح: {ch.revisionNote}
+                    {/* Submission logs/files */}
+                    {Array.isArray(ch.submissions) && ch.submissions.length > 0 && (
+                      <div className="space-y-2">
+                        <span className="text-[11px] font-black text-zinc-400 block">سابقه فایل‌های دریافتی:</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {ch.submissions.map((sub: any, idx: number) => (
+                            <div key={sub.id || idx} className="p-2.5 bg-white/5 rounded-xl text-xs border border-white/5 flex items-center justify-between">
+                              <div>
+                                <span className="font-bold text-zinc-200 block">
+                                  {sub.role === "translator" ? "فایل ترجمه" : sub.role === "cleaner" ? "فایل کلین" : "فایل ادیت"} (توسط {sub.userName})
+                                </span>
+                                {sub.note && <span className="text-[10px] text-zinc-400 block mt-0.5">{sub.note}</span>}
+                              </div>
+                              {sub.fileUrl && (
+                                <a 
+                                  href={sub.fileUrl} 
+                                  target="_blank" 
+                                  rel="noreferrer"
+                                  className="px-2.5 py-1 bg-[var(--color-asura-accent)]/20 hover:bg-[var(--color-asura-accent)] text-[var(--color-asura-accent-light)] hover:text-white rounded-lg text-[10px] font-bold transition-all shrink-0"
+                                >
+                                  دریافت فایل
+                                </a>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Revision note if any */}
+                    {ch.revisionNote && (
+                      <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400 font-bold">
+                        علت ارجاع جهت تصحیح: {ch.revisionNote}
+                      </div>
+                    )}
+
+                    {/* Action Controls for Admin */}
+                    <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-white/5">
+                      <button
+                        onClick={() => handleApprove(ch.id, ch.number)}
+                        className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-black text-xs font-black rounded-xl transition-all shadow-md flex items-center gap-1.5"
+                      >
+                        <Check size={14} />
+                        تایید و انتشار عمومی روی سایت
+                      </button>
+
+                      <button
+                        onClick={() => handlePrivate(ch.id, ch.number)}
+                        className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold rounded-xl transition-all border border-white/10 flex items-center gap-1.5"
+                      >
+                        <EyeOff size={14} />
+                        پرایوت بماند
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setRevisionChapterId(ch.id);
+                          setRevisionNoteInput("");
+                        }}
+                        className="px-4 py-2 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white text-xs font-bold rounded-xl transition-all border border-red-500/20 flex items-center gap-1.5"
+                      >
+                        <MessageSquare size={14} />
+                        نیازمند تصحیح
+                      </button>
                     </div>
-                  )}
-
-                  {/* Action Controls for Admin */}
-                  <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-white/5">
-                    <button
-                      onClick={() => handleApprove(ch.id, ch.number)}
-                      className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-black text-xs font-black rounded-xl transition-all shadow-md flex items-center gap-1.5"
-                    >
-                      <Check size={14} />
-                      تایید و انتشار عمومی روی سایت
-                    </button>
-
-                    <button
-                      onClick={() => handlePrivate(ch.id, ch.number)}
-                      className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold rounded-xl transition-all border border-white/10 flex items-center gap-1.5"
-                    >
-                      <EyeOff size={14} />
-                      پرایوت بماند
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setRevisionChapterId(ch.id);
-                        setRevisionNoteInput("");
-                      }}
-                      className="px-4 py-2 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white text-xs font-bold rounded-xl transition-all border border-red-500/20 flex items-center gap-1.5"
-                    >
-                      <MessageSquare size={14} />
-                      نیازمند تصحیح
-                    </button>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* STAFF PRODUCTIVITY METRICS (RECHARTS VISUALIZATION) */}
+      <StaffProductivityMetrics user={user} />
+
+      {/* BULK REVISION MODAL */}
+      {isBulkRevisionModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] max-w-lg w-full rounded-2xl p-6 text-right space-y-4">
+            <h3 className="text-base font-black text-white flex items-center gap-2">
+              <AlertCircle className="text-red-400" size={18} />
+              ارجاع دسته جمعی جهت تصحیح ({selectedChapterIds.length} چپتر)
+            </h3>
+            <p className="text-xs text-zinc-400">
+              پیام ایراد به صورت همزمان برای ادیتورها و دست‌اندرکاران تمامی چپترهای انتخاب‌شده صادر و نوتیفیکیشن همزمان ارسال می‌شود.
+            </p>
+            <textarea
+              rows={4}
+              placeholder="پیام یا توضیحات مشترک جهت تصحیح چپترهای انتخاب‌شده..."
+              value={bulkRevisionNote}
+              onChange={(e) => setBulkRevisionNote(e.target.value)}
+              className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-red-500"
+            />
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setIsBulkRevisionModalOpen(false)}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold rounded-xl"
+              >
+                انصراف
+              </button>
+              <button
+                onClick={() => handleExecuteBulkAction('revision')}
+                disabled={processingBulk}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-black rounded-xl shadow-lg"
+              >
+                ارسال دسته جمعی تصحیح
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

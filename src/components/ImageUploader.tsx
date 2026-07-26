@@ -7,9 +7,12 @@ import JSZip from 'jszip';
 interface Props {
   onUpload: (urls: string[]) => void;
   multiple?: boolean;
+  seriesTitle?: string;
+  chapterNumber?: string | number;
+  folderType?: string;
 }
 
-export function ImageUploader({ onUpload, multiple = false }: Props) {
+export function ImageUploader({ onUpload, multiple = false, seriesTitle, chapterNumber, folderType }: Props) {
   const { user } = useAuth();
   const [uploading, setUploading] = useState(false);
   const [progressText, setProgressText] = useState<string | null>(null);
@@ -88,7 +91,11 @@ export function ImageUploader({ onUpload, multiple = false }: Props) {
         setProgressText(`در حال آپلود ${uploadPayload.length} تصویر به هاست...`);
       }
 
-      const res = await apiClient.uploadImages(uploadPayload, user.uid);
+      const res = await apiClient.uploadImages(uploadPayload, user.uid, {
+        seriesTitle,
+        chapterNumber,
+        folderType
+      });
       
       if (res.error) {
         throw new Error(res.error);

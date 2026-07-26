@@ -76,6 +76,11 @@ export default function CooperationTab({
     for (let i = 0; i < files.length; i++) {
       formData.append("files", files[i]);
     }
+    const selectedSeriesObj = seriesList.find((s: any) => s.id === selectedSeriesId);
+    if (selectedSeriesObj?.title) {
+      formData.append("seriesTitle", selectedSeriesObj.title);
+    }
+    formData.append("folderType", "cooperation");
 
     try {
       const res = await apiClient.post("/api/admin/upload", formData, {

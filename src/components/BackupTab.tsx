@@ -30,6 +30,36 @@ export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
     purchasedChaptersCount: number;
     walletTransactionsCount: number;
   } | null>(null);
+  const [downloadingManifest, setDownloadingManifest] = useState(false);
+
+  const handleDownloadManifest = async () => {
+    setDownloadingManifest(true);
+    try {
+      const adminUid = localStorage.getItem("userUid") || "";
+      const res = await fetch("/api/admin/migration-manifest", {
+        headers: {
+          "x-admin-uid": adminUid
+        }
+      });
+      if (!res.ok) {
+        throw new Error("خطا در دریافت مانیفست مهاجرت");
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `asura-migration-manifest-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      console.error(e);
+      alert(e.message || "خطا در دانلود مانیفست مهاجرت");
+    } finally {
+      setDownloadingManifest(false);
+    }
+  };
   const [verifyingImages, setVerifyingImages] = useState(false);
   const [verificationResult, setVerificationResult] = useState<{
     totalChapters: number;
@@ -463,23 +493,42 @@ export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
                 این سیستم با پایش دیتابیس مشخص می‌کند که چند مگابایت یا گیگابایت تصاویر محلی و چند تصویر خارجی (لینک مستقیم خارج از سرور) روی سایت وجود دارد.
               </p>
             </div>
-            <button
-              onClick={verifyChapterAssets}
-              disabled={verifyingImages}
-              className="py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-2"
-            >
-              {verifyingImages ? (
-                <>
-                  <RefreshCw className="animate-spin" size={14} />
-                  در حال اسکن کردن چپترها...
-                </>
-              ) : (
-                <>
-                  <RefreshCw size={14} />
-                  شروع اسکن و بررسی سلامت تصاویر
-                </>
-              )}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={handleDownloadManifest}
+                disabled={downloadingManifest}
+                className="py-2 px-4 bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-800 text-zinc-950 font-extrabold rounded-xl text-xs transition flex items-center gap-2"
+              >
+                {downloadingManifest ? (
+                  <>
+                    <RefreshCw className="animate-spin" size={14} />
+                    در حال ساخت مانیفست...
+                  </>
+                ) : (
+                  <>
+                    <Download size={14} />
+                    دانلود مانیفست ساختاریافته مهاجرت (.json)
+                  </>
+                )}
+              </button>
+              <button
+                onClick={verifyChapterAssets}
+                disabled={verifyingImages}
+                className="py-2 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-2"
+              >
+                {verifyingImages ? (
+                  <>
+                    <RefreshCw className="animate-spin" size={14} />
+                    در حال اسکن کردن چپترها...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw size={14} />
+                    شروع اسکن و بررسی سلامت تصاویر
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
           {verificationResult && (

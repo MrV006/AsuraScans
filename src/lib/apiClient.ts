@@ -455,11 +455,18 @@ export const apiClient = {
     return res.json();
   },
 
-  async uploadImages(files: File[], uid: string) {
+  async uploadImages(files: File[], uid: string, meta?: { seriesTitle?: string; chapterNumber?: string | number; folderType?: string }) {
     const formData = new FormData();
     files.forEach(file => {
-      formData.append('files[]', file);
+      formData.append('files', file);
     });
+    if (meta) {
+      if (meta.seriesTitle) formData.append('seriesTitle', String(meta.seriesTitle));
+      if (meta.chapterNumber !== undefined && meta.chapterNumber !== null && meta.chapterNumber !== '') {
+        formData.append('chapterNumber', String(meta.chapterNumber));
+      }
+      if (meta.folderType) formData.append('folderType', String(meta.folderType));
+    }
     const res = await fetch(`${API_URL}/api/admin/upload`, {
       method: 'POST',
       headers: {
