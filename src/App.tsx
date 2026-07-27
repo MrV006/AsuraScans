@@ -6,6 +6,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
+import ErrorBoundary from './components/ErrorBoundary';
 import Home from './pages/Home';
 import Series from './pages/Series';
 import Reader from './pages/Reader';
@@ -21,26 +22,28 @@ import { ScrollToTop } from './components/ScrollToTop';
 
 export default function App() {
   return (
-    <SettingsProvider>
-      <AuthProvider>
-        <BrowserRouter>
-          <ScrollToTop />
-          <AppInterceptors />
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/series/:id" element={<Series />} />
-            <Route path="/reader/:seriesId/:chapterId" element={<Reader />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/search" element={<Search />} />
-            <Route path="/admin" element={<Admin />} />
-            <Route path="/leaderboard" element={<Leaderboard />} />
-            <Route path="/terms" element={<Terms />} />
-            <Route path="/privacy" element={<Privacy />} />
-          </Routes>
-          <CompleteProfileModal />
-        </BrowserRouter>
-      </AuthProvider>
-    </SettingsProvider>
+    <ErrorBoundary>
+      <SettingsProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <ScrollToTop />
+            <AppInterceptors />
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/series/:id" element={<Series />} />
+              <Route path="/reader/:seriesId/:chapterId" element={<Reader />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/search" element={<Search />} />
+              <Route path="/admin" element={<Admin />} />
+              <Route path="/leaderboard" element={<Leaderboard />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/privacy" element={<Privacy />} />
+            </Routes>
+            <CompleteProfileModal />
+          </BrowserRouter>
+        </AuthProvider>
+      </SettingsProvider>
+    </ErrorBoundary>
   );
 }
 

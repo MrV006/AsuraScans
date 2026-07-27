@@ -1163,8 +1163,14 @@ class DatabaseManager {
   }
 
   async getSeriesById(id: string): Promise<Series | null> {
+    if (!id) return null;
+    let cleanId = id;
+    try {
+      cleanId = decodeURIComponent(id);
+    } catch (e) {}
+
     if (this.isUsingMySQL && this.pool) {
-      const [rows] = await this.pool.execute('SELECT * FROM series WHERE id = ? OR slug = ?', [id, id]);
+      const [rows] = await this.pool.execute('SELECT * FROM series WHERE id = ? OR slug = ? OR id = ? OR slug = ?', [cleanId, cleanId, id, id]);
       const r = (rows as any[])[0];
       if (!r) return null;
       let parsedContributors: any[] = [];
@@ -1175,15 +1181,15 @@ class DatabaseManager {
       }
       return {
         ...r,
-        alternativeTitles: r.alternativeTitles ? r.alternativeTitles.split(',') : [],
-        genres: r.genres ? r.genres.split(',') : [],
-        tags: r.tags ? r.tags.split(',') : [],
+        alternativeTitles: typeof r.alternativeTitles === 'string' ? r.alternativeTitles.split(',').filter(Boolean) : (Array.isArray(r.alternativeTitles) ? r.alternativeTitles : []),
+        genres: typeof r.genres === 'string' ? r.genres.split(',').filter(Boolean) : (Array.isArray(r.genres) ? r.genres : []),
+        tags: typeof r.tags === 'string' ? r.tags.split(',').filter(Boolean) : (Array.isArray(r.tags) ? r.tags : []),
         contributors: parsedContributors,
         isHero: !!r.isHero,
         slug: r.slug || ''
       };
     }
-    const found = this.localData.series.find(s => s.id === id || (s as any).slug === id);
+    const found = this.localData.series.find(s => s.id === cleanId || s.id === id || (s as any).slug === cleanId || (s as any).slug === id);
     if (!found) return null;
     return {
       ...found,
@@ -1353,8 +1359,20 @@ class DatabaseManager {
   // CHAPTER METHODS
   // -----------------------------------------------------------------
   async getChapters(seriesId: string): Promise<Chapter[]> {
+    if (!seriesId) return [];
+    let cleanSeriesId = seriesId;
+    try {
+      cleanSeriesId = decodeURIComponent(seriesId);
+    } catch (e) {}
+
+    const series = await this.getSeriesById(cleanSeriesId);
+    const actualId = series ? series.id : cleanSeriesId;
+
     if (this.isUsingMySQL && this.pool) {
-      const [rows] = await this.pool.execute('SELECT * FROM chapters WHERE seriesId = ? ORDER BY number DESC', [seriesId]);
+      const [rows] = await this.pool.execute(
+        'SELECT * FROM chapters WHERE seriesId = ? OR seriesId = ? OR seriesId = ? ORDER BY number DESC',
+        [actualId, cleanSeriesId, seriesId]
+      );
       return (rows as any[]).map(r => {
         let parsedSubmissions: any[] = [];
         if (r.submissions) {
@@ -1370,15 +1388,15 @@ class DatabaseManager {
         }
         return {
           ...r,
-          images: r.images ? r.images.split(',') : [],
+          images: r.images ? (typeof r.images === 'string' ? r.images.split(',') : r.images) : [],
           isPending: r.isPending === 1 || r.isPending === true,
           submissions: parsedSubmissions,
           contributors: parsedContributors
         };
       });
     }
-    return this.localData.chapters
-      .filter(c => c.seriesId === seriesId)
+    return (this.localData.chapters || [])
+      .filter(c => c.seriesId === actualId || c.seriesId === cleanSeriesId || c.seriesId === seriesId)
       .map(c => ({
         ...c,
         isPending: !!c.isPending,
@@ -1389,8 +1407,20 @@ class DatabaseManager {
   }
 
   async getChapterById(seriesId: string, id: string): Promise<Chapter | null> {
+    if (!seriesId || !id) return null;
+    let cleanSeriesId = seriesId;
+    let cleanChapterId = id;
+    try { cleanSeriesId = decodeURIComponent(seriesId); } catch (e) {}
+    try { cleanChapterId = decodeURIComponent(id); } catch (e) {}
+
+    const series = await this.getSeriesById(cleanSeriesId);
+    const actualSeriesId = series ? series.id : cleanSeriesId;
+
     if (this.isUsingMySQL && this.pool) {
-      const [rows] = await this.pool.execute('SELECT * FROM chapters WHERE seriesId = ? AND id = ?', [seriesId, id]);
+      const [rows] = await this.pool.execute(
+        'SELECT * FROM chapters WHERE (seriesId = ? OR seriesId = ? OR seriesId = ?) AND (id = ? OR id = ?)',
+        [actualSeriesId, cleanSeriesId, seriesId, cleanChapterId, id]
+      );
       const r = (rows as any[])[0];
       if (!r) return null;
       let parsedSubmissions: any[] = [];
@@ -1407,13 +1437,16 @@ class DatabaseManager {
       }
       return {
         ...r,
-        images: r.images ? r.images.split(',') : [],
+        images: r.images ? (typeof r.images === 'string' ? r.images.split(',') : r.images) : [],
         isPending: r.isPending === 1 || r.isPending === true,
         submissions: parsedSubmissions,
         contributors: parsedContributors
       };
     }
-    const found = this.localData.chapters.find(c => c.seriesId === seriesId && c.id === id);
+    const found = (this.localData.chapters || []).find(c => 
+      (c.seriesId === actualSeriesId || c.seriesId === cleanSeriesId || c.seriesId === seriesId) && 
+      (c.id === cleanChapterId || c.id === id)
+    );
     if (!found) return null;
     return {
       ...found,
