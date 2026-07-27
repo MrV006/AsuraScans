@@ -63,7 +63,7 @@ export function useBookmarks() {
     return () => {
       socket.off("bookmarks:updated", handleUpdate);
     };
-  }, [user]);
+  }, [user?.uid]);
 
   const addBookmark = async (seriesId: string) => {
     if (!user) return false;
@@ -145,7 +145,7 @@ export function useHistory() {
     return () => {
       socket.off("history:updated", handleUpdate);
     };
-  }, [user]);
+  }, [user?.uid]);
 
   const updateHistory = async (seriesId: string, chapterId: string, chapterNumber: number) => {
     if (!user) return false;

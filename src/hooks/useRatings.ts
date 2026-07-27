@@ -59,7 +59,7 @@ export function useRatings(seriesId?: string) {
     return () => {
       socket.off("ratings:updated", handleUpdate);
     };
-  }, [seriesId, user]);
+  }, [seriesId, user?.uid]);
 
   const averageRating = ratings.length > 0 
     ? ratings.reduce((acc, curr) => acc + curr.rating, 0) / ratings.length 

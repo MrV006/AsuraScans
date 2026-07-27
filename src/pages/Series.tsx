@@ -32,6 +32,7 @@ export default function Series() {
   const [isAdminEditMode, setIsAdminEditMode] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [seriesTab, setSeriesTab] = useState<'chapters' | 'team' | 'comments'>('chapters');
   
   // Contributor Request Fields
   const [joinRole, setJoinRole] = useState('translator');
@@ -137,8 +138,6 @@ export default function Series() {
   const isApprovedContributor = series.contributors?.some((c: any) => c.userId === user?.uid && c.status === 'approved');
   const isStaffOrAdmin = isGlobalAdmin || isApprovedContributor;
   const isStaffMember = userRoles.some((r: string) => ['translator', 'cleaner', 'editor', 'typesetter', 'proofreader', 'admin', 'super_admin'].includes(r)) || isApprovedContributor || isGlobalAdmin;
-
-  const [seriesTab, setSeriesTab] = useState<'chapters' | 'team' | 'comments'>('chapters');
 
   const now = new Date();
   const chaptersList = series.chapters || [];
@@ -695,7 +694,16 @@ export default function Series() {
                           </h4>
                           <div className="flex flex-wrap items-center gap-2 mt-1">
                              <span className="text-[10px] text-zinc-500 italic">
-                               {ch.createdAt?.toDate ? formatDistanceToNow(ch.createdAt.toDate(), { addSuffix: true }) : 'به تازگی'}
+                               {(() => {
+                                 if (!ch.createdAt) return 'به تازگی';
+                                 try {
+                                   const d = typeof ch.createdAt === 'string' || typeof ch.createdAt === 'number' || ch.createdAt instanceof Date ? new Date(ch.createdAt) : (ch.createdAt.toDate ? ch.createdAt.toDate() : new Date(ch.createdAt));
+                                   if (isNaN(d.getTime())) return 'به تازگی';
+                                   return formatDistanceToNow(d, { addSuffix: true });
+                                 } catch (e) {
+                                   return 'به تازگی';
+                                 }
+                               })()}
                              </span>
                              {getChapterContributorsText(ch) && (
                                <>
