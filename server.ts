@@ -638,15 +638,55 @@ async function startServer() {
 
   app.post("/api/series/:id/approve-contributor", requireAdmin, async (req, res) => {
     try {
-      const { userId, action } = req.body; // action: 'approve' | 'reject'
+      const { userId, action, role } = req.body; // action: 'approve' | 'reject' | 'remove' | 'update_role'
       const series = await dbManager.getSeriesById(req.params.id);
       if (!series) return res.status(404).json({ error: "Series not found" });
 
       let contributors = series.contributors || [];
       if (action === 'approve') {
-        contributors = contributors.map(c => c.userId === userId ? { ...c, status: 'approved' } : c);
+        contributors = contributors.map(c => c.userId === userId ? { ...c, status: 'approved', role: role || c.role } : c);
+      } else if (action === 'update_role') {
+        contributors = contributors.map(c => c.userId === userId ? { ...c, role: role || c.role } : c);
       } else {
+        // 'reject' or 'remove'
         contributors = contributors.filter(c => c.userId !== userId);
+      }
+
+      series.contributors = contributors;
+      const updated = await dbManager.saveSeries(series);
+      io.emit("series:updated", { seriesId: updated.id });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/series/:id/add-contributor", requireAdmin, async (req, res) => {
+    try {
+      const { userId, displayName, email, role, melliCode } = req.body;
+      const series = await dbManager.getSeriesById(req.params.id);
+      if (!series) return res.status(404).json({ error: "Series not found" });
+
+      let contributors = series.contributors || [];
+      const existingIdx = contributors.findIndex(c => c.userId === userId);
+      if (existingIdx >= 0) {
+        contributors[existingIdx] = {
+          ...contributors[existingIdx],
+          displayName: displayName || contributors[existingIdx].displayName,
+          email: email || contributors[existingIdx].email,
+          role: role || contributors[existingIdx].role,
+          status: 'approved',
+          melliCode: melliCode || contributors[existingIdx].melliCode || ''
+        };
+      } else {
+        contributors.push({
+          userId: userId || `contrib_${Date.now()}`,
+          email: email || '',
+          displayName: displayName || 'همکار',
+          role: role || 'translator',
+          status: 'approved',
+          melliCode: melliCode || ''
+        });
       }
 
       series.contributors = contributors;

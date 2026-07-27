@@ -1,7 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Star, BookOpen, ArrowLeft, Clock, Sparkles } from 'lucide-react';
-import { motion } from 'motion/react';
 import { Series } from '../lib/types';
 
 interface SeriesCardProps {
@@ -13,6 +12,7 @@ interface SeriesCardProps {
 
 export function SeriesCard({ series, className = '', widthClass = '' }: SeriesCardProps) {
   const navigate = useNavigate();
+  const [isTouched, setIsTouched] = useState(false);
 
   const handleCardClick = (e: React.MouseEvent) => {
     // Navigate to series details page
@@ -23,27 +23,42 @@ export function SeriesCard({ series, className = '', widthClass = '' }: SeriesCa
     e.stopPropagation(); // Stop event bubbling so it navigates to reader instead of series page
   };
 
-  const totalChaps = series.totalChapters || series.chaptersCount || (series.chapters ? series.chapters.length : 0);
+  const handlePosterTouchStart = (e: React.TouchEvent) => {
+    // Enable overlay on touch device
+    setIsTouched(true);
+  };
+
+  const handlePosterTouchEnd = (e: React.TouchEvent) => {
+    // Keeps touched active for 3 seconds or toggles
+  };
+
+  const totalChaps = series.totalChapters !== undefined ? series.totalChapters : (series.chaptersCount !== undefined ? series.chaptersCount : (series.chapters ? series.chapters.length : 0));
   const latestChapter = series.chapters && series.chapters.length > 0 ? series.chapters[0] : null;
+
+  const displayRating = (typeof series.rating === 'number' && !isNaN(series.rating) && series.rating > 0)
+    ? Number(series.rating).toFixed(1)
+    : (series.rating && Number(series.rating) > 0 ? Number(series.rating).toFixed(1) : '0.0');
 
   return (
     <div
       onClick={handleCardClick}
-      className={`bg-zinc-900/80 border border-white/5 rounded-2xl overflow-hidden group flex flex-col hover:border-[var(--color-asura-accent)]/50 transition-all duration-300 hover:-translate-y-1.5 shadow-xl relative cursor-pointer ${widthClass} ${className}`}
+      onTouchStart={handlePosterTouchStart}
+      className={`bg-zinc-900/80 border border-white/5 rounded-2xl overflow-hidden group flex flex-col hover:border-[var(--color-asura-accent)]/50 transition-all duration-300 hover:-translate-y-1.5 shadow-xl relative cursor-pointer select-none ${widthClass} ${className}`}
+      style={{ WebkitUserSelect: 'none', userSelect: 'none' }}
     >
       {/* Poster Container */}
-      <div className="relative aspect-[3/4] overflow-hidden bg-zinc-950">
+      <div className="relative aspect-[3/4] overflow-hidden bg-zinc-950 select-none">
         <img
           src={series.cover}
           alt={series.title}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 pointer-events-none select-none"
           referrerPolicy="no-referrer"
           loading="lazy"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent"></div>
+        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent pointer-events-none"></div>
 
         {/* Top Badges */}
-        <div className="absolute top-2.5 left-2.5 right-2.5 flex justify-between items-center z-10">
+        <div className="absolute top-2.5 left-2.5 right-2.5 flex justify-between items-center z-10 pointer-events-none">
           {/* Total Chapters Badge */}
           <div className="bg-black/75 backdrop-blur-md border border-white/10 text-amber-300 text-[10px] font-black px-2 py-0.5 rounded-lg flex items-center gap-1 shadow-md">
             <BookOpen size={11} className="text-amber-400" />
@@ -53,12 +68,17 @@ export function SeriesCard({ series, className = '', widthClass = '' }: SeriesCa
           {/* Rating Badge */}
           <div className="bg-black/75 backdrop-blur-md border border-white/10 text-white text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 shadow-md">
             <Star size={10} className="text-yellow-400 fill-yellow-400" />
-            <span className="font-sans">{series.rating || '5.0'}</span>
+            <span className="font-sans">{displayRating}</span>
           </div>
         </div>
 
-        {/* HOVER OVERLAY (Synopsis & Details with smooth animation) */}
-        <div className="absolute inset-0 z-20 p-3.5 bg-gradient-to-b from-zinc-950/95 via-zinc-950/90 to-black/95 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all duration-300 ease-out flex flex-col justify-between translate-y-2 group-hover:translate-y-0 text-right" dir="rtl">
+        {/* HOVER & TOUCH OVERLAY (Synopsis & Details) */}
+        <div 
+          className={`absolute inset-0 z-20 p-3.5 bg-gradient-to-b from-zinc-950/95 via-zinc-950/90 to-black/95 backdrop-blur-md transition-all duration-300 ease-out flex flex-col justify-between text-right select-none ${
+            isTouched ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-2 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto'
+          }`} 
+          dir="rtl"
+        >
           <div>
             {/* Header / Type */}
             <div className="flex items-center justify-between mb-2">
@@ -67,7 +87,7 @@ export function SeriesCard({ series, className = '', widthClass = '' }: SeriesCa
               </span>
               <span className="text-[10px] text-zinc-400 font-bold flex items-center gap-1">
                 <Star size={10} className="text-amber-400 fill-amber-400" />
-                {series.rating}
+                {displayRating}
               </span>
             </div>
 
@@ -110,7 +130,7 @@ export function SeriesCard({ series, className = '', widthClass = '' }: SeriesCa
       </div>
 
       {/* Footer Info (Visible when not hovering) */}
-      <div className="p-3.5 flex-grow flex flex-col justify-between bg-[var(--color-asura-card)]">
+      <div className="p-3.5 flex-grow flex flex-col justify-between bg-[var(--color-asura-card)] select-none">
         <h3 className="text-xs font-black text-white line-clamp-1 group-hover:text-[var(--color-asura-accent-light)] transition-colors mb-2.5">
           {series.title}
         </h3>

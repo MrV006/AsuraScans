@@ -949,10 +949,22 @@ class DatabaseManager {
             'SELECT COUNT(*) as cnt FROM chapters WHERE (seriesId = ? OR seriesId = ?) AND (isPending = 0 OR isPending IS NULL)',
             [s.id, s.slug || s.id]
           );
+          const [ratingRows] = await this.pool.execute(
+            'SELECT AVG(score) as avgRating FROM ratings WHERE seriesId = ? OR seriesId = ?',
+            [s.id, s.slug || s.id]
+          );
           const chap = (chapRows as any[])[0];
           const cnt = (countRows as any[])[0]?.cnt || 0;
+          const avgR = (ratingRows as any[])[0]?.avgRating;
+
           s.totalChapters = Number(cnt);
           s.chaptersCount = Number(cnt);
+          if (avgR !== null && avgR !== undefined && !isNaN(Number(avgR)) && Number(avgR) > 0) {
+            s.rating = Number(Number(avgR).toFixed(1));
+          } else {
+            s.rating = Number(s.rating || 0);
+          }
+
           s.chapters = chap ? [{
             ...chap,
             images: chap.images ? (typeof chap.images === 'string' ? chap.images.split(',') : chap.images) : [],
@@ -964,6 +976,7 @@ class DatabaseManager {
           s.chapters = s.chapters || [];
           s.totalChapters = s.totalChapters || s.chapters.length || 0;
           s.chaptersCount = s.totalChapters;
+          s.rating = Number(s.rating || 0);
         }
       }
       return list;
@@ -974,6 +987,11 @@ class DatabaseManager {
         .filter(c => (c.seriesId === s.id || (s.slug && c.seriesId === s.slug)) && (!c.isPending || String(c.isPending) === '0' || String(c.isPending) === 'false'))
         .sort((a, b) => Number(b.number) - Number(a.number));
       
+      const seriesRatings = (this.localData.ratings || []).filter(r => r.seriesId === s.id || (s.slug && r.seriesId === s.slug));
+      const avgRating = seriesRatings.length > 0 
+        ? Number((seriesRatings.reduce((acc, curr) => acc + curr.score, 0) / seriesRatings.length).toFixed(1))
+        : Number(s.rating || 0);
+
       const latest = seriesChapters.slice(0, 1).map(c => ({
         ...c,
         isPending: !!c.isPending,
@@ -983,6 +1001,7 @@ class DatabaseManager {
 
       return {
         ...s,
+        rating: avgRating,
         totalChapters: seriesChapters.length,
         chaptersCount: seriesChapters.length,
         chapters: latest.length > 0 ? latest : (s.chapters || [])

@@ -510,6 +510,14 @@ export const apiClient = {
     return res.json();
   },
 
+  async getStaffList() {
+    const res = await fetch(`${API_URL}/api/staff/list`, {
+      headers: this.getHeaders()
+    });
+    if (!res.ok) return [];
+    return res.json();
+  },
+
   async requestContributor(seriesId: string, data: { userId: string; email: string; displayName: string; role: string; melliCode: string }) {
     const res = await fetch(`${API_URL}/api/series/${seriesId}/request-contributor`, {
       method: 'POST',
@@ -519,11 +527,20 @@ export const apiClient = {
     return res.json();
   },
 
-  async approveContributor(seriesId: string, userId: string, action: 'approve' | 'reject', adminUid: string) {
+  async approveContributor(seriesId: string, userId: string, action: 'approve' | 'reject' | 'remove' | 'update_role', adminUid: string, role?: string) {
     const res = await fetch(`${API_URL}/api/series/${seriesId}/approve-contributor`, {
       method: 'POST',
       headers: this.getHeaders(adminUid),
-      body: JSON.stringify({ userId, action })
+      body: JSON.stringify({ userId, action, role })
+    });
+    return res.json();
+  },
+
+  async addContributor(seriesId: string, data: { userId: string; email?: string; displayName: string; role: string; melliCode?: string }, adminUid: string) {
+    const res = await fetch(`${API_URL}/api/series/${seriesId}/add-contributor`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify(data)
     });
     return res.json();
   },

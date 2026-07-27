@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSeriesOverview } from '../hooks/useSeries';
 import { useBookmarks, useHistory } from '../hooks/useUserActivity';
 import { useRatings } from '../hooks/useRatings';
 import { useAuth } from '../contexts/AuthContext';
 import { Layout } from '../components/Layout';
-import { Star, Clock, Heart, Play, Edit2, Trash2, Check, X, ShieldAlert, UserCheck, Plus, Settings, BookOpen, Users, MessageSquare } from 'lucide-react';
+import { Star, Clock, Heart, Play, Edit2, Trash2, Check, X, ShieldAlert, UserCheck, Plus, Settings, BookOpen, Users, MessageSquare, UserPlus } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Comments } from '../components/Comments';
 import WorkTeamTab from '../components/WorkTeamTab';
@@ -289,14 +289,64 @@ export default function Series() {
     }
   };
 
-  const handleApproveContributor = async (contributorUserId: string, action: 'approve' | 'reject') => {
-    if (!user) return;
+  // Direct Contributor Addition state for admins
+  const [showAddContribModal, setShowAddContribModal] = useState(false);
+  const [addContribName, setAddContribName] = useState("");
+  const [addContribEmail, setAddContribEmail] = useState("");
+  const [addContribRole, setAddContribRole] = useState("translator");
+  const [addContribMelli, setAddContribMelli] = useState("");
+  const [addContribUserId, setAddContribUserId] = useState("");
+  const [staffList, setStaffList] = useState<any[]>([]);
+
+  const handleOpenAddContribModal = async () => {
+    setShowAddContribModal(true);
     try {
-      await apiClient.approveContributor(series.id, contributorUserId, action, user.uid);
-      alert(`درخواست کاربر با موفقیت ${action === 'approve' ? 'تایید' : 'رد'} شد.`);
+      const list = await apiClient.getStaffList();
+      setStaffList(list || []);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleAddContribSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    if (!addContribName.trim() && !addContribUserId) return alert("لطفا نام همکار یا کاربر را مشخص کنید.");
+
+    try {
+      await apiClient.addContributor(
+        series.id,
+        {
+          userId: addContribUserId || `contrib_${Date.now()}`,
+          displayName: addContribName || 'همکار',
+          email: addContribEmail,
+          role: addContribRole,
+          melliCode: addContribMelli
+        },
+        user.uid
+      );
+      alert("همکار جدید با موفقیت به تیم افزوده شد.");
+      setShowAddContribModal(false);
+      setAddContribName("");
+      setAddContribEmail("");
+      setAddContribMelli("");
+      setAddContribUserId("");
       mutate();
     } catch (err: any) {
-      alert("خطا در مدیریت درخواست دست‌اندرکار: " + err.message);
+      alert("خطا در افزودن همکار: " + err.message);
+    }
+  };
+
+  const handleApproveContributor = async (contributorUserId: string, action: 'approve' | 'reject' | 'remove' | 'update_role', newRole?: string) => {
+    if (!user) return;
+    try {
+      await apiClient.approveContributor(series.id, contributorUserId, action, user.uid, newRole);
+      if (action === 'approve') alert("درخواست کاربر با موفقیت تایید شد.");
+      else if (action === 'remove' || action === 'reject') alert("همکار با موفقیت از پروژه حذف گردید.");
+      else if (action === 'update_role') alert("نقش همکار با موفقیت بروزرسانی شد.");
+      mutate();
+    } catch (err: any) {
+      alert("خطا در مدیریت دست‌اندرکار: " + err.message);
     }
   };
 
@@ -563,27 +613,68 @@ export default function Series() {
               </p>
             </div>
             <div className="bg-black/20 border border-[var(--color-asura-border)] rounded-2xl p-6 mb-8">
-              <h3 className="text-xs font-black mb-4 text-white uppercase tracking-widest flex items-center gap-2">
-                <UserCheck size={14} className="text-[var(--color-asura-accent-light)]" />
-                تیم دست‌اندرکاران (مترجمان و ادیتورها)
-              </h3>
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h3 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2">
+                  <UserCheck size={14} className="text-[var(--color-asura-accent-light)]" />
+                  تیم دست‌اندرکاران (مترجمان و ادیتورها)
+                </h3>
+                {isGlobalAdmin && (
+                  <button
+                    onClick={handleOpenAddContribModal}
+                    className="px-3 py-1.5 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white text-xs font-black rounded-xl transition-all flex items-center gap-1.5 shadow-md"
+                  >
+                    <UserPlus size={14} />
+                    افزودن همکار به تیم
+                  </button>
+                )}
+              </div>
 
               {approvedContributors.length === 0 ? (
                 <p className="text-xs text-zinc-500">هنوز دست‌اندرکاری برای این مانهوا ثبت نشده است.</p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   {approvedContributors.map((c: any) => (
-                    <div key={c.userId} className="p-3 bg-white/5 border border-white/5 rounded-xl flex items-center justify-between">
-                      <div className="text-right">
-                        <span className="block text-xs font-black text-white">{c.displayName}</span>
-                        <span className="block text-[9px] text-zinc-500 uppercase font-bold tracking-wider mt-0.5">
-                          {c.role === 'translator' ? 'مترجم' : c.role === 'editor' ? 'ادیتور' : c.role === 'typesetter' ? 'تایپیست/کلینر' : c.role === 'proofreader' ? 'ویراستار' : c.role}
+                    <div key={c.userId} className="p-3 bg-white/5 border border-white/5 rounded-xl flex items-center justify-between gap-2">
+                      <div className="text-right flex-1 min-w-0">
+                        <span className="block text-xs font-black text-white truncate">{c.displayName}</span>
+                        <span className="block text-[10px] text-amber-400 font-bold mt-0.5">
+                          {c.role === 'translator' ? 'مترجم' : c.role === 'editor' ? 'ادیتور' : c.role === 'cleaner' ? 'کلینر' : c.role === 'typesetter' ? 'تایپیست' : c.role === 'proofreader' ? 'ویراستار' : c.role}
                         </span>
+                        {c.email && <span className="block text-[9px] text-zinc-500 font-mono dir-ltr text-right truncate">{c.email}</span>}
                       </div>
-                      <div className="bg-[var(--color-asura-accent)]/10 px-2.5 py-1 rounded-lg text-left">
-                        <span className="block text-[8px] text-[var(--color-asura-accent-light)] font-bold">کد کاربری</span>
-                        <span className="block text-[10px] font-mono text-zinc-300 font-bold">{c.melliCode}</span>
-                      </div>
+
+                      {isGlobalAdmin ? (
+                        <div className="flex items-center gap-1">
+                          <select
+                            value={c.role}
+                            onChange={(e) => handleApproveContributor(c.userId, 'update_role', e.target.value)}
+                            className="bg-black/80 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
+                          >
+                            <option value="translator">مترجم</option>
+                            <option value="cleaner">کلینر</option>
+                            <option value="editor">ادیتور</option>
+                            <option value="typesetter">تایپیست</option>
+                            <option value="proofreader">ویراستار</option>
+                          </select>
+
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`آیا از حذف ${c.displayName} از تیم دست‌اندرکاران این اثر اطمینان دارید؟`)) {
+                                handleApproveContributor(c.userId, 'remove');
+                              }
+                            }}
+                            title="حذف از پروژه"
+                            className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/20 transition-colors"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="bg-[var(--color-asura-accent)]/10 px-2.5 py-1 rounded-lg text-left">
+                          <span className="block text-[8px] text-[var(--color-asura-accent-light)] font-bold">کد کاربری</span>
+                          <span className="block text-[10px] font-mono text-zinc-300 font-bold">{c.melliCode || 'عضو تیم'}</span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1077,6 +1168,110 @@ export default function Series() {
                 انصراف
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADD CONTRIBUTOR MODAL (ADMIN) */}
+      {showAddContribModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] max-w-md w-full rounded-2xl p-6 text-right space-y-4">
+            <h3 className="text-base font-black text-white flex items-center gap-2">
+              <UserPlus className="text-[var(--color-asura-accent-light)]" size={18} />
+              افزودن همکار به تیم
+            </h3>
+            <form onSubmit={handleAddContribSubmit} className="space-y-3">
+              {staffList.length > 0 && (
+                <div>
+                  <label className="block text-xs font-bold text-zinc-300 mb-1">انتخاب از اعضای کادر سایت:</label>
+                  <select
+                    value={addContribUserId}
+                    onChange={(e) => {
+                      const selected = staffList.find(s => s.id === e.target.value);
+                      setAddContribUserId(e.target.value);
+                      if (selected) {
+                        setAddContribName(selected.displayName || '');
+                        setAddContribEmail(selected.email || '');
+                        setAddContribMelli(selected.melliCode || '');
+                      }
+                    }}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
+                  >
+                    <option value="">-- انتخاب از لیست کاربران کادر --</option>
+                    {staffList.map((st: any) => (
+                      <option key={st.id} value={st.id}>
+                        {st.displayName} ({st.role || 'عضو کادر'}) - {st.email}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1">نام همکار *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="مثلا: علی محمدی (مترجم)"
+                  value={addContribName}
+                  onChange={(e) => setAddContribName(e.target.value)}
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1">نقش همکار *</label>
+                <select
+                  value={addContribRole}
+                  onChange={(e) => setAddContribRole(e.target.value)}
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
+                >
+                  <option value="translator">مترجم</option>
+                  <option value="cleaner">کلینر</option>
+                  <option value="editor">ادیتور</option>
+                  <option value="typesetter">تایپیست</option>
+                  <option value="proofreader">ویراستار</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1">ایمیل (اختیاری)</label>
+                <input
+                  type="email"
+                  placeholder="translator@example.com"
+                  value={addContribEmail}
+                  onChange={(e) => setAddContribEmail(e.target.value)}
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)] dir-ltr text-right"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1">کد کاربری / ملی (اختیاری)</label>
+                <input
+                  type="text"
+                  placeholder="0012345678"
+                  value={addContribMelli}
+                  onChange={(e) => setAddContribMelli(e.target.value)}
+                  className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)] dir-ltr text-right"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddContribModal(false)}
+                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold rounded-xl"
+                >
+                  انصراف
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white text-xs font-black rounded-xl shadow-lg"
+                >
+                  افزودن به تیم
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
