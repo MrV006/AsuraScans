@@ -17,6 +17,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { apiClient } from "../lib/apiClient";
 import { Series } from "../lib/types";
 import { SeriesCardSkeleton, HeroSkeleton } from "../components/Skeletons";
+import { SeriesCard } from "../components/SeriesCard";
 
 export default function Home() {
   // State for homepage lists (initial loads up to 8 items to detect if there are more than 7)
@@ -276,60 +277,7 @@ export default function Home() {
           {/* Grid List */}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
             {expandedItems.map((series, idx) => (
-              <motion.div 
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: Math.min(idx * 0.05, 0.4) }}
-                key={`${series.id}-expanded-${idx}`}
-                className="bg-white/5 border border-white/5 rounded-2xl overflow-hidden group flex flex-col hover:border-[var(--color-asura-accent)]/40 transition-all duration-300 hover:-translate-y-1 shadow-lg relative cursor-pointer"
-              >
-                {/* Entire card overlay link */}
-                <Link to={`/series/${series.id}`} className="absolute inset-0 z-10" />
-
-                {/* Poster Container */}
-                <div className="relative aspect-[3/4] overflow-hidden bg-zinc-900">
-                  <img 
-                    src={series.cover} 
-                    alt={series.title}
-                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-70"></div>
-                  
-                  {/* Stats Badge */}
-                  <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded-lg flex items-center gap-1.5 z-20">
-                    <Star size={10} className="text-yellow-500 fill-yellow-500" />
-                    <span className="font-sans">{series.rating}</span>
-                  </div>
-                </div>
-
-                {/* Info */}
-                <div className="p-4 flex-grow flex flex-col bg-[var(--color-asura-card)]">
-                  <h3 className="text-xs font-black text-white line-clamp-1 group-hover:text-[var(--color-asura-accent)] transition-colors mb-3 z-20">
-                    {series.title}
-                  </h3>
-
-                  {/* Top Chapter display (single latest chapter) */}
-                  <div className="mt-auto pt-3 border-t border-[var(--color-asura-border)]/50 relative z-20">
-                    {series.chapters && series.chapters.length > 0 ? (
-                      <Link 
-                        to={`/reader/${series.id}/${series.chapters[0].id}`}
-                        className="flex justify-between items-center group/ch hover:text-[var(--color-asura-accent)] transition-colors"
-                      >
-                        <span className="text-[10px] font-black text-zinc-300 group-hover/ch:text-[var(--color-asura-accent)] transition-colors flex items-center gap-1 bg-white/5 px-2 py-1 rounded-lg">
-                          <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                          چپتر {series.chapters[0].number}
-                        </span>
-                        <span className="text-[9px] text-zinc-500">
-                          {formatChapterDate(series.chapters[0].createdAt)}
-                        </span>
-                      </Link>
-                    ) : (
-                      <div className="text-[10px] text-zinc-500 italic text-center w-full">چپتری آپلود نشده است</div>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
+              <SeriesCard key={`${series.id}-expanded-${idx}`} series={series} />
             ))}
           </div>
 
@@ -507,54 +455,11 @@ export default function Home() {
                   ))
                 ) : (
                   latestList.slice(0, 7).map((series, idx) => (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.04 }}
+                    <SeriesCard 
                       key={series.id} 
-                      className="bg-white/5 border border-white/5 rounded-2xl overflow-hidden group flex flex-col hover:border-[var(--color-asura-accent)]/30 transition-all duration-300 hover:-translate-y-1 shadow-md w-[150px] sm:w-[175px] md:w-[190px] shrink-0 snap-start relative cursor-pointer"
-                    >
-                      {/* Entire card overlay link */}
-                      <Link to={`/series/${series.id}`} className="absolute inset-0 z-10" />
-
-                      <div className="relative aspect-[3/4] overflow-hidden bg-zinc-900">
-                        <img 
-                          src={series.cover} 
-                          alt={series.title}
-                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-60"></div>
-                        <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 z-20">
-                          <Star size={10} className="text-yellow-500 fill-yellow-500" />
-                          <span className="font-sans">{series.rating}</span>
-                        </div>
-                      </div>
-
-                      <div className="p-3 flex-grow flex flex-col bg-[var(--color-asura-card)]">
-                        <h3 className="text-xs font-black text-white line-clamp-1 group-hover:text-[var(--color-asura-accent)] transition-colors mb-2.5 z-20">
-                          {series.title}
-                        </h3>
-                        <div className="mt-auto pt-2 border-t border-[var(--color-asura-border)]/50 relative z-20">
-                          {series.chapters && series.chapters.length > 0 ? (
-                            <Link 
-                              to={`/reader/${series.id}/${series.chapters[0].id}`}
-                              className="flex justify-between items-center group/ch hover:text-[var(--color-asura-accent)] transition-colors w-full"
-                            >
-                              <span className="text-[10px] font-black text-zinc-300 group-hover/ch:text-[var(--color-asura-accent)] transition-colors flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                                چپتر {series.chapters[0].number}
-                              </span>
-                              <span className="text-[9px] text-zinc-500">
-                                {formatChapterDate(series.chapters[0].createdAt)}
-                              </span>
-                            </Link>
-                          ) : (
-                            <span className="text-[10px] text-zinc-500 italic">بدون چپتر</span>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
+                      series={series} 
+                      widthClass="w-[150px] sm:w-[175px] md:w-[190px] shrink-0 snap-start" 
+                    />
                   ))
                 )}
 
@@ -605,54 +510,11 @@ export default function Home() {
                   ))
                 ) : (
                   viewsList.slice(0, 7).map((series, idx) => (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.04 }}
+                    <SeriesCard 
                       key={series.id} 
-                      className="bg-white/5 border border-white/5 rounded-2xl overflow-hidden group flex flex-col hover:border-[var(--color-asura-accent)]/30 transition-all duration-300 hover:-translate-y-1 shadow-md w-[150px] sm:w-[175px] md:w-[190px] shrink-0 snap-start relative cursor-pointer"
-                    >
-                      {/* Entire card overlay link */}
-                      <Link to={`/series/${series.id}`} className="absolute inset-0 z-10" />
-
-                      <div className="relative aspect-[3/4] overflow-hidden bg-zinc-900">
-                        <img 
-                          src={series.cover} 
-                          alt={series.title}
-                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-60"></div>
-                        <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 z-20">
-                          <Eye size={10} className="text-blue-400" />
-                          <span className="font-sans text-[10px]">{series.views || 0}</span>
-                        </div>
-                      </div>
-
-                      <div className="p-3 flex-grow flex flex-col bg-[var(--color-asura-card)]">
-                        <h3 className="text-xs font-black text-white line-clamp-1 group-hover:text-[var(--color-asura-accent)] transition-colors mb-2.5 z-20">
-                          {series.title}
-                        </h3>
-                        <div className="mt-auto pt-2 border-t border-[var(--color-asura-border)]/50 relative z-20">
-                          {series.chapters && series.chapters.length > 0 ? (
-                            <Link 
-                              to={`/reader/${series.id}/${series.chapters[0].id}`}
-                              className="flex justify-between items-center group/ch hover:text-[var(--color-asura-accent)] transition-colors w-full"
-                            >
-                              <span className="text-[10px] font-black text-zinc-300 group-hover/ch:text-[var(--color-asura-accent)] transition-colors flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                                چپتر {series.chapters[0].number}
-                              </span>
-                              <span className="text-[9px] text-zinc-500">
-                                {formatChapterDate(series.chapters[0].createdAt)}
-                              </span>
-                            </Link>
-                          ) : (
-                            <span className="text-[10px] text-zinc-500 italic">بدون چپتر</span>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
+                      series={series} 
+                      widthClass="w-[150px] sm:w-[175px] md:w-[190px] shrink-0 snap-start" 
+                    />
                   ))
                 )}
 
@@ -703,54 +565,11 @@ export default function Home() {
                   ))
                 ) : (
                   popularList.slice(0, 7).map((series, idx) => (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.04 }}
+                    <SeriesCard 
                       key={series.id} 
-                      className="bg-white/5 border border-white/5 rounded-2xl overflow-hidden group flex flex-col hover:border-[var(--color-asura-accent)]/30 transition-all duration-300 hover:-translate-y-1 shadow-md w-[150px] sm:w-[175px] md:w-[190px] shrink-0 snap-start relative cursor-pointer"
-                    >
-                      {/* Entire card overlay link */}
-                      <Link to={`/series/${series.id}`} className="absolute inset-0 z-10" />
-
-                      <div className="relative aspect-[3/4] overflow-hidden bg-zinc-900">
-                        <img 
-                          src={series.cover} 
-                          alt={series.title}
-                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-60"></div>
-                        <div className="absolute top-2 right-2 bg-gradient-to-r from-red-500 to-amber-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-md flex items-center gap-1 z-20">
-                          <Flame size={10} className="text-white fill-white animate-pulse" />
-                          <span>ویژه</span>
-                        </div>
-                      </div>
-
-                      <div className="p-3 flex-grow flex flex-col bg-[var(--color-asura-card)]">
-                        <h3 className="text-xs font-black text-white line-clamp-1 group-hover:text-[var(--color-asura-accent)] transition-colors mb-2.5 z-20">
-                          {series.title}
-                        </h3>
-                        <div className="mt-auto pt-2 border-t border-[var(--color-asura-border)]/50 relative z-20">
-                          {series.chapters && series.chapters.length > 0 ? (
-                            <Link 
-                              to={`/reader/${series.id}/${series.chapters[0].id}`}
-                              className="flex justify-between items-center group/ch hover:text-[var(--color-asura-accent)] transition-colors w-full"
-                            >
-                              <span className="text-[10px] font-black text-zinc-300 group-hover/ch:text-[var(--color-asura-accent)] transition-colors flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                                چپتر {series.chapters[0].number}
-                              </span>
-                              <span className="text-[9px] text-zinc-500">
-                                {formatChapterDate(series.chapters[0].createdAt)}
-                              </span>
-                            </Link>
-                          ) : (
-                            <span className="text-[10px] text-zinc-500 italic">بدون چپتر</span>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
+                      series={series} 
+                      widthClass="w-[150px] sm:w-[175px] md:w-[190px] shrink-0 snap-start" 
+                    />
                   ))
                 )}
 
@@ -801,54 +620,11 @@ export default function Home() {
                   ))
                 ) : (
                   oldestList.slice(0, 7).map((series, idx) => (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.04 }}
+                    <SeriesCard 
                       key={series.id} 
-                      className="bg-white/5 border border-white/5 rounded-2xl overflow-hidden group flex flex-col hover:border-[var(--color-asura-accent)]/30 transition-all duration-300 hover:-translate-y-1 shadow-md w-[150px] sm:w-[175px] md:w-[190px] shrink-0 snap-start relative cursor-pointer"
-                    >
-                      {/* Entire card overlay link */}
-                      <Link to={`/series/${series.id}`} className="absolute inset-0 z-10" />
-
-                      <div className="relative aspect-[3/4] overflow-hidden bg-zinc-900">
-                        <img 
-                          src={series.cover} 
-                          alt={series.title}
-                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-60"></div>
-                        <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 z-20">
-                          <Clock size={10} className="text-zinc-400" />
-                          <span className="font-sans text-[10px]">{new Date(series.createdAt).getFullYear()}</span>
-                        </div>
-                      </div>
-
-                      <div className="p-3 flex-grow flex flex-col bg-[var(--color-asura-card)]">
-                        <h3 className="text-xs font-black text-white line-clamp-1 group-hover:text-[var(--color-asura-accent)] transition-colors mb-2.5 z-20">
-                          {series.title}
-                        </h3>
-                        <div className="mt-auto pt-2 border-t border-[var(--color-asura-border)]/50 relative z-20">
-                          {series.chapters && series.chapters.length > 0 ? (
-                            <Link 
-                              to={`/reader/${series.id}/${series.chapters[0].id}`}
-                              className="flex justify-between items-center group/ch hover:text-[var(--color-asura-accent)] transition-colors w-full"
-                            >
-                              <span className="text-[10px] font-black text-zinc-300 group-hover/ch:text-[var(--color-asura-accent)] transition-colors flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                                چپتر {series.chapters[0].number}
-                              </span>
-                              <span className="text-[9px] text-zinc-500">
-                                {formatChapterDate(series.chapters[0].createdAt)}
-                              </span>
-                            </Link>
-                          ) : (
-                            <span className="text-[10px] text-zinc-500 italic">بدون چپتر</span>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
+                      series={series} 
+                      widthClass="w-[150px] sm:w-[175px] md:w-[190px] shrink-0 snap-start" 
+                    />
                   ))
                 )}
 

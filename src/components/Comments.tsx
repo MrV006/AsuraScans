@@ -46,6 +46,8 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
   const [newComment, setNewComment] = useState('');
   const [replyText, setReplyText] = useState('');
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [isMainSpoiler, setIsMainSpoiler] = useState(false);
+  const [isReplySpoiler, setIsReplySpoiler] = useState(false);
   const { user, profile, setShowSetupModal } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -101,8 +103,11 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
     e.preventDefault();
     if (!user) return;
     const isReply = !!parentId;
-    const content = isReply ? replyText.trim() : newComment.trim();
-    if (!content) return;
+    let rawContent = isReply ? replyText.trim() : newComment.trim();
+    if (!rawContent) return;
+
+    const shouldSpoiler = isReply ? isReplySpoiler : isMainSpoiler;
+    const finalContent = shouldSpoiler ? `[spoiler]${rawContent}[/spoiler]` : rawContent;
 
     try {
       const randomId = 'comment_' + Math.random().toString(36).substr(2, 9);
@@ -111,14 +116,16 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
         userId: user.uid,
         userName: profile?.displayName || 'User',
         userAvatar: profile?.avatarUrl || '',
-        content: content,
+        content: finalContent,
         parentId: parentId
       });
       if (isReply) {
         setReplyText('');
         setReplyingTo(null);
+        setIsReplySpoiler(false);
       } else {
         setNewComment('');
+        setIsMainSpoiler(false);
       }
     } catch (error) {
       console.error("Error adding comment:", error);
@@ -191,25 +198,10 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
     const value = isReply ? replyText : newComment;
     const onChange = (val: string) => isReply ? setReplyText(val) : setNewComment(val);
     const textareaId = isReply ? `reply-textarea-${parentId || 'new'}` : 'comment-textarea-main';
-
-    const insertSpoilerForForm = () => {
-      const el = document.getElementById(textareaId) as HTMLTextAreaElement;
-      if (el) {
-        const start = el.selectionStart;
-        const end = el.selectionEnd;
-        const selected = value.substring(start, end);
-        const replacement = `[spoiler]${selected}[/spoiler]`;
-        const newValue = value.substring(0, start) + replacement + value.substring(end);
-        onChange(newValue);
-        
-        setTimeout(() => {
-          el.focus();
-          const newCursorPos = start + 9 + selected.length;
-          el.setSelectionRange(newCursorPos, newCursorPos);
-        }, 10);
-      } else {
-        onChange(value + "[spoiler][/spoiler]");
-      }
+    const isSpoilerActive = isReply ? isReplySpoiler : isMainSpoiler;
+    const toggleSpoiler = () => {
+      if (isReply) setIsReplySpoiler(!isReplySpoiler);
+      else setIsMainSpoiler(!isMainSpoiler);
     };
 
     return (
@@ -229,33 +221,39 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
               onChange={(e) => onChange(e.target.value)}
               autoFocus={autoFocus}
               placeholder={isReply ? "پاسخ خود را بنویسید..." : "دیدگاه خود را بنویسید..."}
-              className="w-full bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-xl p-4 text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50 transition-colors resize-none h-24 text-right"
+              className={`w-full bg-[var(--color-asura-card)] border rounded-xl p-4 text-white focus:outline-none transition-colors resize-none h-24 text-right ${isSpoilerActive ? 'border-amber-500/60 ring-1 ring-amber-500/30' : 'border-[var(--color-asura-border)] focus:border-[var(--color-asura-accent)]/50'}`}
               dir="rtl"
             />
-            <div className="flex flex-wrap justify-between mt-2 gap-2">
+            <div className="flex flex-wrap justify-between mt-2 gap-2 items-center" dir="rtl">
               <button 
                 type="button" 
-                onClick={insertSpoilerForForm}
-                className="px-3 py-1 bg-white/5 hover:bg-white/10 text-zinc-400 text-xs font-bold uppercase rounded-lg border border-white/10 transition-colors text-right"
+                onClick={toggleSpoiler}
+                className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all flex items-center gap-1.5 ${
+                  isSpoilerActive 
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-md' 
+                    : 'bg-white/5 hover:bg-white/10 text-zinc-400 border-white/10'
+                }`}
               >
-                + Spoiler Tag
+                <AlertTriangle size={13} className={isSpoilerActive ? 'text-amber-400' : 'text-zinc-500'} />
+                <span>{isSpoilerActive ? 'حاوی اسپویلر (فعال)' : 'علامت‌گذاری به عنوان اسپویلر'}</span>
               </button>
+
               <div className="flex gap-2">
                 {isReply && (
                   <button
                     type="button"
-                    onClick={() => { setReplyingTo(null); setReplyText(''); }}
-                    className="px-6 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg font-bold text-sm uppercase transition-colors"
+                    onClick={() => { setReplyingTo(null); setReplyText(''); setIsReplySpoiler(false); }}
+                    className="px-5 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl font-bold text-xs uppercase transition-colors"
                   >
-                    Cancel
+                    انصراف
                   </button>
                 )}
                 <button
                   type="submit"
                   disabled={!value.trim()}
-                  className="px-6 py-2 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-bold text-sm uppercase transition-colors shadow-lg"
+                  className="px-6 py-2 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs uppercase transition-colors shadow-lg"
                 >
-                  {isReply ? 'Reply' : 'Post Comment'}
+                  {isReply ? 'ارسال پاسخ' : 'ارسال دیدگاه'}
                 </button>
               </div>
             </div>

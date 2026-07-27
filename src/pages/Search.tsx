@@ -4,6 +4,7 @@ import { Layout } from '../components/Layout';
 import { Search as SearchIcon, X, Star, Layers, Sparkles, Check, BookOpen, Filter, ArrowUpDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { SeriesCardSkeleton } from '../components/Skeletons';
+import { SeriesCard } from '../components/SeriesCard';
 import { apiClient } from '../lib/apiClient';
 import { Series } from '../lib/types';
 
@@ -340,55 +341,7 @@ export default function Search() {
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {displayedResults.map(s => (
-                <Link 
-                  to={`/series/${s.id}`} 
-                  key={s.id} 
-                  className="bg-white/5 border border-white/5 rounded-2xl overflow-hidden group flex flex-col hover:border-[var(--color-asura-accent)]/50 transition-all duration-300 relative h-full hover:translate-y-[-4px] shadow-lg hover:shadow-black/40"
-                >
-                  <div className="relative aspect-[2/3] overflow-hidden bg-zinc-800 shrink-0">
-                    <img 
-                      src={s.cover} 
-                      alt={s.title} 
-                      loading="lazy" 
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-90"></div>
-                    <div className="absolute inset-0 bg-[var(--color-asura-accent)]/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                    
-                    <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-md text-white text-[10px] font-bold px-1.5 py-0.5 rounded-lg flex items-center gap-1">
-                      <Star size={10} className="text-yellow-500 fill-yellow-500" />
-                      {s.rating || '5.0'}
-                    </div>
-
-                    <div className="absolute bottom-2 right-2 left-2 flex flex-wrap gap-1">
-                      {(Array.isArray(s.genres) ? s.genres : (typeof s.genres === 'string' ? s.genres.split(',') : [])).slice(0, 2).map(g => (
-                        <span key={g} className="bg-[var(--color-asura-accent)] text-[8px] font-bold px-1.5 py-0.5 rounded uppercase tracking-widest text-white">
-                          {g}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  
-                  <div className="p-4 flex-grow flex flex-col justify-between bg-[var(--color-asura-card)]">
-                    <div>
-                      <h3 className="text-xs font-black text-white line-clamp-2 group-hover:text-[var(--color-asura-accent-light)] transition-colors text-right">
-                        {s.title}
-                      </h3>
-                      <p className="text-[10px] text-zinc-500 mt-1 truncate text-right">
-                        {s.author || 'ناشناس'}
-                      </p>
-                    </div>
-                    
-                    <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-white/5 text-[10px]">
-                      <span className="text-zinc-500 font-bold">
-                        {s.type === 'Manhwa' ? 'مانهوا' : s.type === 'Manga' ? 'مانگا' : s.type === 'Manhua' ? 'مانها' : s.type}
-                      </span>
-                      <span className={`font-black ${s.status === 'Ongoing' ? 'text-green-400' : 'text-zinc-400'}`}>
-                        {s.status === 'Ongoing' ? 'درحال انتشار' : s.status === 'Completed' ? 'پایان یافته' : s.status}
-                      </span>
-                    </div>
-                  </div>
-                </Link>
+                <SeriesCard key={s.id} series={s} />
               ))}
             </div>
             

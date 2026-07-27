@@ -49,6 +49,8 @@ export interface Series {
   rating: number;
   views?: number;
   type: string;
+  totalChapters?: number;
+  chaptersCount?: number;
   chapters?: Chapter[];
   contributors?: any[];
   seoTitle?: string;

@@ -930,16 +930,25 @@ class DatabaseManager {
             'SELECT * FROM chapters WHERE (seriesId = ? OR seriesId = ?) AND (isPending = 0 OR isPending IS NULL) ORDER BY number DESC LIMIT 1',
             [s.id, s.slug || s.id]
           );
+          const [countRows] = await this.pool.execute(
+            'SELECT COUNT(*) as cnt FROM chapters WHERE (seriesId = ? OR seriesId = ?) AND (isPending = 0 OR isPending IS NULL)',
+            [s.id, s.slug || s.id]
+          );
           const chap = (chapRows as any[])[0];
+          const cnt = (countRows as any[])[0]?.cnt || 0;
+          s.totalChapters = Number(cnt);
+          s.chaptersCount = Number(cnt);
           s.chapters = chap ? [{
             ...chap,
             images: chap.images ? (typeof chap.images === 'string' ? chap.images.split(',') : chap.images) : [],
             isPending: false,
             submissions: [],
             contributors: {}
-          }] : (s.chapters || []);
+          }] : [];
         } catch (e) {
           s.chapters = s.chapters || [];
+          s.totalChapters = s.totalChapters || s.chapters.length || 0;
+          s.chaptersCount = s.totalChapters;
         }
       }
       return list;
@@ -959,6 +968,8 @@ class DatabaseManager {
 
       return {
         ...s,
+        totalChapters: seriesChapters.length,
+        chaptersCount: seriesChapters.length,
         chapters: latest.length > 0 ? latest : (s.chapters || [])
       };
     });

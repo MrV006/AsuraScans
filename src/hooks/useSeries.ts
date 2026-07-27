@@ -16,15 +16,20 @@ export function useSeriesList() {
       const fullList = await Promise.all(data.map(async (s: any) => {
         try {
           const chapters = await apiClient.getChapters(s.id);
+          const validChs = Array.isArray(chapters) ? chapters : [];
           return {
             ...s,
-            chapters: Array.isArray(chapters) ? chapters.slice(0, 2) : []
+            totalChapters: validChs.length > 0 ? validChs.length : (s.totalChapters || 0),
+            chaptersCount: validChs.length > 0 ? validChs.length : (s.chaptersCount || 0),
+            chapters: validChs
           };
         } catch (chapterErr) {
           console.error(`Error fetching chapters for series ${s.id}:`, chapterErr);
           return {
             ...s,
-            chapters: []
+            totalChapters: s.totalChapters || 0,
+            chaptersCount: s.chaptersCount || 0,
+            chapters: s.chapters || []
           };
         }
       }));
