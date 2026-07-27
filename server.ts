@@ -2191,6 +2191,10 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
   });
 
 
+  const isStaticAssetUrl = (urlPath: string) => {
+    return /\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|webp|map)$/i.test(urlPath);
+  };
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -2198,30 +2202,43 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
       appType: "spa",
     });
     app.use(vite.middlewares);
-    app.get('*', async (req, res, next) => {
-      if (req.originalUrl.startsWith('/api') || req.originalUrl.includes('.')) {
-        return next();
+    app.get('*', async (req, res) => {
+      if (req.originalUrl.startsWith('/api')) {
+        return res.status(404).json({ error: "API route not found" });
+      }
+      if (isStaticAssetUrl(req.path)) {
+        return res.status(404).send("Asset not found");
       }
       try {
         const template = await fs.promises.readFile(path.join(process.cwd(), 'index.html'), 'utf-8');
         const transformed = await vite.transformIndexHtml(req.originalUrl, template);
         const html = await generateSeoHtml(req.path, transformed, req.get('host') || 'localhost', req.protocol);
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+        res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(html);
       } catch (e) {
-        next(e);
+        console.error("SEO html error, falling back to index.html:", e);
+        try {
+          const template = await fs.promises.readFile(path.join(process.cwd(), 'index.html'), 'utf-8');
+          const transformed = await vite.transformIndexHtml(req.originalUrl, template);
+          res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(transformed);
+        } catch (err2) {
+          res.sendFile(path.join(process.cwd(), 'index.html'));
+        }
       }
     });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', async (req, res, next) => {
-      if (req.originalUrl.startsWith('/api') || req.originalUrl.includes('.')) {
-        return next();
+    app.get('*', async (req, res) => {
+      if (req.originalUrl.startsWith('/api')) {
+        return res.status(404).json({ error: "API route not found" });
+      }
+      if (isStaticAssetUrl(req.path)) {
+        return res.status(404).send("Asset not found");
       }
       try {
         const template = await fs.promises.readFile(path.join(distPath, 'index.html'), 'utf-8');
         const html = await generateSeoHtml(req.path, template, req.get('host') || 'localhost', req.protocol);
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(html);
+        res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(html);
       } catch (e) {
         res.sendFile(path.join(distPath, 'index.html'));
       }

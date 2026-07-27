@@ -472,6 +472,7 @@ export default function Profile() {
                       type="text" 
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
+                      dir="auto"
                       className="w-full bg-black/40 border border-[var(--color-asura-border)] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50"
                     />
                   </div>
@@ -507,6 +508,7 @@ export default function Profile() {
                         value={firstName}
                         onChange={(e) => setFirstName(e.target.value)}
                         placeholder="نام شما (اختیاری)"
+                        dir="auto"
                         className="w-full bg-black/40 border border-[var(--color-asura-border)] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50"
                       />
                     </div>
@@ -517,6 +519,7 @@ export default function Profile() {
                         value={lastName}
                         onChange={(e) => setLastName(e.target.value)}
                         placeholder="نام خانوادگی (اختیاری)"
+                        dir="auto"
                         className="w-full bg-black/40 border border-[var(--color-asura-border)] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50"
                       />
                     </div>

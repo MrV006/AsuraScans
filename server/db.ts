@@ -241,10 +241,17 @@ class DatabaseManager {
           queueLimit: 0,
           charset: 'utf8mb4'
         });
+
+        this.pool.on('connection', (connection: any) => {
+          connection.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+          connection.query("SET CHARACTER SET utf8mb4");
+        });
         
         // Test connection
         const conn = await this.pool.getConnection();
-        console.log('MySQL Database Connected Successfully!');
+        await conn.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+        await conn.query("SET CHARACTER SET utf8mb4");
+        console.log('MySQL Database Connected Successfully with full utf8mb4 support!');
         conn.release();
         
         this.isUsingMySQL = true;
@@ -321,6 +328,14 @@ class DatabaseManager {
   private async createMySQLTables() {
     if (!this.pool) return;
     try {
+      try {
+        await this.pool.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+        await this.pool.query("SET CHARACTER SET utf8mb4");
+        await this.pool.execute("ALTER DATABASE CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
+      } catch (e) {
+        // Ignore if database alter is restricted
+      }
+
       const queries = [
         `CREATE TABLE IF NOT EXISTS users (
           id VARCHAR(100) PRIMARY KEY,
@@ -339,7 +354,7 @@ class DatabaseManager {
           password VARCHAR(255),
           hasCompletedSetup TINYINT(1) DEFAULT 0,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`,
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         `CREATE TABLE IF NOT EXISTS series (
           id VARCHAR(100) PRIMARY KEY,
           title VARCHAR(255) NOT NULL,
@@ -363,7 +378,7 @@ class DatabaseManager {
           slug VARCHAR(255) DEFAULT NULL,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )`,
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         `CREATE TABLE IF NOT EXISTS chapters (
           id VARCHAR(100) PRIMARY KEY,
           seriesId VARCHAR(100) NOT NULL,
@@ -376,7 +391,7 @@ class DatabaseManager {
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           FOREIGN KEY (seriesId) REFERENCES series(id) ON DELETE CASCADE
-        )`,
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         `CREATE TABLE IF NOT EXISTS comments (
           id VARCHAR(100) PRIMARY KEY,
           chapterId VARCHAR(100) NOT NULL,
@@ -387,14 +402,14 @@ class DatabaseManager {
           likes TEXT, -- JSON arrays of user IDs
           dislikes TEXT, -- JSON arrays of user IDs
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`,
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         `CREATE TABLE IF NOT EXISTS bookmarks (
           userId VARCHAR(100) NOT NULL,
           seriesId VARCHAR(100) NOT NULL,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (userId, seriesId),
           FOREIGN KEY (seriesId) REFERENCES series(id) ON DELETE CASCADE
-        )`,
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         `CREATE TABLE IF NOT EXISTS history (
           userId VARCHAR(100) NOT NULL,
           seriesId VARCHAR(100) NOT NULL,
@@ -402,7 +417,7 @@ class DatabaseManager {
           chapterNumber DOUBLE NOT NULL,
           updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           PRIMARY KEY (userId, seriesId)
-        )`,
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         `CREATE TABLE IF NOT EXISTS ratings (
           userId VARCHAR(100) NOT NULL,
           seriesId VARCHAR(100) NOT NULL,
@@ -410,11 +425,11 @@ class DatabaseManager {
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (userId, seriesId),
           FOREIGN KEY (seriesId) REFERENCES series(id) ON DELETE CASCADE
-        )`,
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         `CREATE TABLE IF NOT EXISTS settings (
           id VARCHAR(50) PRIMARY KEY,
           val TEXT NOT NULL
-        )`,
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         `CREATE TABLE IF NOT EXISTS reports (
           id VARCHAR(100) PRIMARY KEY,
           userId VARCHAR(100) NOT NULL,
@@ -423,7 +438,7 @@ class DatabaseManager {
           content TEXT NOT NULL,
           status VARCHAR(20) DEFAULT 'pending',
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`,
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         `CREATE TABLE IF NOT EXISTS notifications (
           id VARCHAR(100) PRIMARY KEY,
           userId VARCHAR(100) NOT NULL,
@@ -433,7 +448,7 @@ class DatabaseManager {
           link VARCHAR(255),
           isRead TINYINT(1) DEFAULT 0,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`,
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         `CREATE TABLE IF NOT EXISTS wallet_transactions (
           id VARCHAR(100) PRIMARY KEY,
           userId VARCHAR(100) NOT NULL,
@@ -444,7 +459,7 @@ class DatabaseManager {
           creatorId VARCHAR(100) NOT NULL,
           creatorName VARCHAR(100) NOT NULL,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`,
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         `CREATE TABLE IF NOT EXISTS purchased_chapters (
           id VARCHAR(100) PRIMARY KEY,
           userId VARCHAR(100) NOT NULL,
@@ -452,7 +467,7 @@ class DatabaseManager {
           chapterId VARCHAR(100) NOT NULL,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           UNIQUE KEY uniq_user_chap (userId, seriesId, chapterId)
-        )`
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
       ];
 
       for (const q of queries) {

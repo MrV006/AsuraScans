@@ -221,8 +221,8 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
               onChange={(e) => onChange(e.target.value)}
               autoFocus={autoFocus}
               placeholder={isReply ? "پاسخ خود را بنویسید..." : "دیدگاه خود را بنویسید..."}
-              className={`w-full bg-[var(--color-asura-card)] border rounded-xl p-4 text-white focus:outline-none transition-colors resize-none h-24 text-right ${isSpoilerActive ? 'border-amber-500/60 ring-1 ring-amber-500/30' : 'border-[var(--color-asura-border)] focus:border-[var(--color-asura-accent)]/50'}`}
-              dir="rtl"
+              className={`w-full bg-[var(--color-asura-card)] border rounded-xl p-4 text-white focus:outline-none transition-colors resize-none h-24 ${isSpoilerActive ? 'border-amber-500/60 ring-1 ring-amber-500/30' : 'border-[var(--color-asura-border)] focus:border-[var(--color-asura-accent)]/50'}`}
+              dir="auto"
             />
             <div className="flex flex-wrap justify-between mt-2 gap-2 items-center" dir="rtl">
               <button 
@@ -324,7 +324,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
                     </button>
                   )}
                 </div>
-                <p className="text-zinc-300 text-sm whitespace-pre-wrap leading-relaxed mb-4">
+                <p className="text-zinc-300 text-sm whitespace-pre-wrap leading-relaxed mb-4" dir="auto">
                   {renderContentWithSpoiler(comment.content)}
                 </p>
                 

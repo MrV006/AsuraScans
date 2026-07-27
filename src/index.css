@@ -47,3 +47,14 @@
   border: none !important;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* Bi-directional Text Support for Persian/English auto directionality */
+input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
+textarea,
+[dir="auto"],
+.auto-dir {
+  dir: auto;
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
