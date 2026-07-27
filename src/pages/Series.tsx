@@ -55,6 +55,15 @@ export default function Series() {
     type: ''
   });
 
+  // Direct Contributor Addition state for admins
+  const [showAddContribModal, setShowAddContribModal] = useState(false);
+  const [addContribName, setAddContribName] = useState("");
+  const [addContribEmail, setAddContribEmail] = useState("");
+  const [addContribRole, setAddContribRole] = useState("translator");
+  const [addContribMelli, setAddContribMelli] = useState("");
+  const [addContribUserId, setAddContribUserId] = useState("");
+  const [staffList, setStaffList] = useState<any[]>([]);
+
   useEffect(() => {
     if (series?.title) {
       document.title = `${series.title} - ${settings?.siteName || 'Mangata'}`;
@@ -288,15 +297,6 @@ export default function Series() {
       alert("خطا در ثبت درخواست: " + err.message);
     }
   };
-
-  // Direct Contributor Addition state for admins
-  const [showAddContribModal, setShowAddContribModal] = useState(false);
-  const [addContribName, setAddContribName] = useState("");
-  const [addContribEmail, setAddContribEmail] = useState("");
-  const [addContribRole, setAddContribRole] = useState("translator");
-  const [addContribMelli, setAddContribMelli] = useState("");
-  const [addContribUserId, setAddContribUserId] = useState("");
-  const [staffList, setStaffList] = useState<any[]>([]);
 
   const handleOpenAddContribModal = async () => {
     setShowAddContribModal(true);
