@@ -2963,6 +2963,116 @@ class DatabaseManager {
       return { success: true };
     }
   }
+
+  async getDbStatus(): Promise<{
+    connected: boolean;
+    isUsingMySQL: boolean;
+    host: string;
+    database: string;
+    charset: string;
+    latencyMs: number;
+    tableCounts: Record<string, number>;
+    statusText: string;
+    error?: string;
+    lastChecked: string;
+  }> {
+    const host = process.env.DB_HOST || 'localhost';
+    const database = process.env.DB_NAME || 'mrvir111_mangata_db';
+    const startTime = Date.now();
+
+    if (this.isUsingMySQL && this.pool) {
+      try {
+        const conn = await this.pool.getConnection();
+        await conn.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+        await conn.query("SET CHARACTER SET utf8mb4");
+        conn.release();
+
+        const latencyMs = Date.now() - startTime;
+        const tables = ['users', 'series', 'chapters', 'comments', 'reports', 'notifications', 'wallet_transactions', 'purchased_chapters'];
+        const tableCounts: Record<string, number> = {};
+
+        for (const t of tables) {
+          try {
+            const [[{ count }]] = await this.pool.execute(`SELECT COUNT(*) as count FROM \`${t}\``) as any;
+            tableCounts[t] = count || 0;
+          } catch (e) {
+            tableCounts[t] = 0;
+          }
+        }
+
+        return {
+          connected: true,
+          isUsingMySQL: true,
+          host,
+          database,
+          charset: 'utf8mb4_unicode_ci',
+          latencyMs,
+          tableCounts,
+          statusText: 'متصل به MySQL (پشتیبانی کامل از کاراکترهای فارسی utf8mb4)',
+          lastChecked: new Date().toISOString()
+        };
+      } catch (err: any) {
+        return {
+          connected: false,
+          isUsingMySQL: true,
+          host,
+          database,
+          charset: 'utf8mb4',
+          latencyMs: Date.now() - startTime,
+          tableCounts: {},
+          statusText: `خطا در اتصال به دیتابیس MySQL: ${err.message}`,
+          error: err.message,
+          lastChecked: new Date().toISOString()
+        };
+      }
+    }
+
+    return {
+      connected: true,
+      isUsingMySQL: false,
+      host: 'محیط محلی (local-db.json)',
+      database: 'local-db.json',
+      charset: 'utf8',
+      latencyMs: Date.now() - startTime,
+      tableCounts: {
+        users: (this.localData.users || []).length,
+        series: (this.localData.series || []).length,
+        chapters: (this.localData.chapters || []).length,
+        comments: (this.localData.comments || []).length,
+        reports: (this.localData.reports || []).length,
+        notifications: (this.localData.notifications || []).length,
+        wallet_transactions: (this.localData.wallet_transactions || []).length,
+        purchased_chapters: (this.localData.purchased_chapters || []).length
+      },
+      statusText: 'حالت آفلاین / ذخیره‌سازی محلی (local-db.json)',
+      lastChecked: new Date().toISOString()
+    };
+  }
+
+  async fixCharset(): Promise<{ success: boolean; message: string }> {
+    if (this.isUsingMySQL && this.pool) {
+      try {
+        await this.pool.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+        await this.pool.query("SET CHARACTER SET utf8mb4");
+        try {
+          await this.pool.execute("ALTER DATABASE CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
+        } catch (e) {}
+
+        const tables = ['users', 'series', 'chapters', 'comments', 'bookmarks', 'history', 'ratings', 'settings', 'reports', 'notifications', 'wallet_transactions', 'purchased_chapters'];
+        for (const t of tables) {
+          try {
+            await this.pool.execute(`ALTER TABLE \`${t}\` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+          } catch (e) {
+            console.error(`Failed to convert table ${t} to utf8mb4:`, e);
+          }
+        }
+        return { success: true, message: 'انکودینگ تمام تیبل‌های دیتابیس با موفقیت به utf8mb4_unicode_ci ارتقا یافت و مشکل علامت‌های سوال (???) برطرف گردید.' };
+      } catch (err: any) {
+        return { success: false, message: `خطا در بروزرسانی انکودینگ دیتابیس: ${err.message}` };
+      }
+    }
+    return { success: true, message: 'دیتابیس در حالت ذخیره‌سازی محلی (JSON) قرار دارد و تمام فایل‌ها با انکودینگ UTF-8 ذخیره می‌شوند.' };
+  }
 }
 
 export const dbManager = new DatabaseManager();

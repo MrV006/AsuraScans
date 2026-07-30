@@ -60,6 +60,12 @@ async function startServer() {
   app.use(express.json());
   app.use("/uploads", express.static(uploadsDir));
 
+  // Explicitly set UTF-8 encoding headers on all API responses
+  app.use("/api", (req, res, next) => {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    next();
+  });
+
   const isSuperAdminUser = (user: any): boolean => {
     if (!user) return false;
     const userRoles = user.roles || [user.role || 'user'];
@@ -899,9 +905,61 @@ async function startServer() {
             );
             io.to(`user:${bm.userId}`).emit("notification:new", notif);
           }
+
+          // Trigger notifications for team members / contributors
+          if (Array.isArray(series.contributors)) {
+            for (const contrib of series.contributors) {
+              const notif = await dbManager.addNotification(
+                contrib.userId,
+                "approval",
+                `چپتر تایید و منتشر شد: چپتر ${saved.number} (${series.title})`,
+                `چپتر ${saved.number} مانهوای ${series.title} توسط مدیریت تایید و با موفقیت روی وبسایت منتشر گردید.`,
+                `/series/${saved.seriesId}/chapters/${saved.id}`
+              );
+              io.to(`user:${contrib.userId}`).emit("notification:new", notif);
+            }
+          }
         }
       } catch (notifErr) {
         console.error("Failed to generate real-time notifications:", notifErr);
+      }
+
+      res.json(saved);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/series/:seriesId/chapters/:id/reject", requireAdmin, async (req, res) => {
+    try {
+      const { note } = req.body;
+      const ch = await dbManager.getChapterById(req.params.seriesId, req.params.id);
+      if (!ch) return res.status(404).json({ error: "Chapter not found" });
+
+      ch.isPending = true;
+      ch.status = "rejected";
+      (ch as any).rejectionNote = note || "ارسال این چپتر توسط مدیریت رد شد.";
+
+      const saved = await dbManager.saveChapter(ch);
+      io.emit("chapters:updated", { chapterId: saved.id, seriesId: saved.seriesId });
+
+      // Notify editor / contributors about the rejection
+      try {
+        const series = await dbManager.getSeriesById(saved.seriesId);
+        if (series && Array.isArray(series.contributors)) {
+          for (const contrib of series.contributors) {
+            const notif = await dbManager.addNotification(
+              contrib.userId,
+              "rejection",
+              `چپتر رد شد: چپتر ${saved.number} (${series.title})`,
+              `علت رد توسط مدیریت: ${(ch as any).rejectionNote}`,
+              `/admin`
+            );
+            io.to(`user:${contrib.userId}`).emit("notification:new", notif);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to send rejection notification:", e);
       }
 
       res.json(saved);
@@ -2116,6 +2174,24 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
 }
 
   const upload = multer({ storage: multer.memoryStorage() });
+
+  app.get("/api/admin/db-status", requireAdmin, async (req, res) => {
+    try {
+      const status = await dbManager.getDbStatus();
+      res.json(status);
+    } catch (err: any) {
+      res.status(500).json({ connected: false, error: err.message });
+    }
+  });
+
+  app.post("/api/admin/fix-charset", requireAdmin, async (req, res) => {
+    try {
+      const result = await dbManager.fixCharset();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
 
   app.post("/api/admin/organize-files", requireAdmin, async (req, res) => {
     try {

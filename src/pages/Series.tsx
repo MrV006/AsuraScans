@@ -612,112 +612,6 @@ export default function Series() {
                 {series.synopsis}
               </p>
             </div>
-            <div className="bg-black/20 border border-[var(--color-asura-border)] rounded-2xl p-6 mb-8">
-              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                <h3 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2">
-                  <UserCheck size={14} className="text-[var(--color-asura-accent-light)]" />
-                  تیم دست‌اندرکاران (مترجمان و ادیتورها)
-                </h3>
-                {isGlobalAdmin && (
-                  <button
-                    onClick={handleOpenAddContribModal}
-                    className="px-3 py-1.5 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white text-xs font-black rounded-xl transition-all flex items-center gap-1.5 shadow-md"
-                  >
-                    <UserPlus size={14} />
-                    افزودن همکار به تیم
-                  </button>
-                )}
-              </div>
-
-              {approvedContributors.length === 0 ? (
-                <p className="text-xs text-zinc-500">هنوز دست‌اندرکاری برای این مانهوا ثبت نشده است.</p>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {approvedContributors.map((c: any) => (
-                    <div key={c.userId} className="p-3 bg-white/5 border border-white/5 rounded-xl flex items-center justify-between gap-2">
-                      <div className="text-right flex-1 min-w-0">
-                        <span className="block text-xs font-black text-white truncate">{c.displayName}</span>
-                        <span className="block text-[10px] text-amber-400 font-bold mt-0.5">
-                          {c.role === 'translator' ? 'مترجم' : c.role === 'editor' ? 'ادیتور' : c.role === 'cleaner' ? 'کلینر' : c.role === 'typesetter' ? 'تایپیست' : c.role === 'proofreader' ? 'ویراستار' : c.role}
-                        </span>
-                        {c.email && <span className="block text-[9px] text-zinc-500 font-mono dir-ltr text-right truncate">{c.email}</span>}
-                      </div>
-
-                      {isGlobalAdmin ? (
-                        <div className="flex items-center gap-1">
-                          <select
-                            value={c.role}
-                            onChange={(e) => handleApproveContributor(c.userId, 'update_role', e.target.value)}
-                            className="bg-black/80 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
-                          >
-                            <option value="translator">مترجم</option>
-                            <option value="cleaner">کلینر</option>
-                            <option value="editor">ادیتور</option>
-                            <option value="typesetter">تایپیست</option>
-                            <option value="proofreader">ویراستار</option>
-                          </select>
-
-                          <button
-                            onClick={() => {
-                              if (window.confirm(`آیا از حذف ${c.displayName} از تیم دست‌اندرکاران این اثر اطمینان دارید؟`)) {
-                                handleApproveContributor(c.userId, 'remove');
-                              }
-                            }}
-                            title="حذف از پروژه"
-                            className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg border border-red-500/20 transition-colors"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="bg-[var(--color-asura-accent)]/10 px-2.5 py-1 rounded-lg text-left">
-                          <span className="block text-[8px] text-[var(--color-asura-accent-light)] font-bold">کد کاربری</span>
-                          <span className="block text-[10px] font-mono text-zinc-300 font-bold">{c.melliCode || 'عضو تیم'}</span>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Pending contributors for Global Admin approval */}
-              {isGlobalAdmin && pendingContributors.length > 0 && (
-                <div className="mt-6 pt-6 border-t border-white/5">
-                  <h4 className="text-xs font-black text-yellow-500 mb-3 flex items-center gap-1.5">
-                    <ShieldAlert size={13} />
-                    درخواست‌های عضویت در انتظار تایید ({pendingContributors.length})
-                  </h4>
-                  <div className="space-y-2">
-                    {pendingContributors.map((c: any) => (
-                      <div key={c.userId} className="p-3 bg-yellow-500/5 border border-yellow-500/10 rounded-xl flex items-center justify-between gap-4 flex-wrap">
-                        <div className="text-right">
-                          <span className="block text-xs font-black text-white">{c.displayName} ({c.email})</span>
-                          <span className="block text-[10px] text-zinc-400 mt-0.5">
-                            نقش درخواستی: <strong className="text-yellow-400">{c.role === 'translator' ? 'مترجم' : c.role === 'editor' ? 'ادیتور' : c.role === 'typesetter' ? 'تایپیست/کلینر' : c.role === 'proofreader' ? 'ویراستار' : c.role}</strong> | کد کاربری: <strong className="text-yellow-400 font-mono">{c.melliCode}</strong>
-                          </span>
-                        </div>
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={() => handleApproveContributor(c.userId, 'approve')}
-                            className="px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-black rounded-lg text-[10px] font-black transition-colors flex items-center gap-1"
-                          >
-                            <Check size={12} />
-                            تایید
-                          </button>
-                          <button 
-                            onClick={() => handleApproveContributor(c.userId, 'reject')}
-                            className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[10px] font-black transition-colors flex items-center gap-1"
-                          >
-                            <X size={12} />
-                            رد درخواست
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
 
             {/* Tab Navigation */}
             <div className="flex border-b border-white/10 mb-6 gap-2 sm:gap-4 overflow-x-auto">
@@ -728,19 +622,6 @@ export default function Series() {
                 <BookOpen size={16} />
                 چپترهای منتشر شده ({visibleChapters.length})
               </button>
-
-              {isStaffMember && (
-                <button
-                  onClick={() => setSeriesTab('team')}
-                  className={`pb-3 text-xs sm:text-sm font-black transition-all border-b-2 flex items-center gap-2 ${seriesTab === 'team' ? 'border-[var(--color-asura-accent)] text-white' : 'border-transparent text-zinc-400 hover:text-white'}`}
-                >
-                  <Users size={16} />
-                  دست‌اندرکاران و پنل ارسال کار
-                  <span className="bg-[var(--color-asura-accent)]/20 text-[var(--color-asura-accent-light)] text-[9px] font-mono px-2 py-0.5 rounded-full">
-                    ویژه همکاران
-                  </span>
-                </button>
-              )}
 
               <button
                 onClick={() => setSeriesTab('comments')}

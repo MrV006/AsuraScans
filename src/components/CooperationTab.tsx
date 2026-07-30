@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { apiClient } from "../lib/apiClient";
 import { 
   Users as UsersIcon, 
@@ -15,9 +15,19 @@ import {
   Image as ImageIcon,
   Check,
   X,
-  FileCheck,
   Plus,
-  Sparkles
+  Sparkles,
+  Search,
+  Lock,
+  Download,
+  Filter,
+  Shield,
+  Trash2,
+  Edit,
+  DollarSign,
+  UserPlus,
+  RefreshCw,
+  FileCheck
 } from "lucide-react";
 import { Series, Chapter } from "../lib/types";
 
@@ -27,6 +37,7 @@ interface CooperationTabProps {
   profile: any;
   isSuperAdmin: boolean;
   onUpdateSeries: (updatedSeries: Series) => void;
+  defaultSubTab?: "all_series" | "my_projects" | "admin_requests" | "admin_approval";
 }
 
 export default function CooperationTab({ 
@@ -34,25 +45,40 @@ export default function CooperationTab({
   user, 
   profile, 
   isSuperAdmin,
-  onUpdateSeries 
+  onUpdateSeries,
+  defaultSubTab
 }: CooperationTabProps) {
-  const [activeSubTab, setActiveSubTab] = useState<"all_series" | "my_projects" | "admin_requests">("all_series");
-  const [requestingSeriesId, setRequestingSeriesId] = useState<string | null>(null);
-  
-  // Request Collaboration form state
-  const [reqRole, setReqRole] = useState<"translator" | "cleaner" | "editor">("translator");
-  const [reqMelliCode, setReqMelliCode] = useState("");
+  const isGlobalAdmin = isSuperAdmin || profile?.role === "admin";
+
+  const [activeSubTab, setActiveSubTab] = useState<"all_series" | "my_projects" | "admin_requests" | "admin_approval">(
+    defaultSubTab || (isGlobalAdmin ? "admin_requests" : "all_series")
+  );
+
+  // Search and filter for Catalog (Search Page format)
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedGenre, setSelectedGenre] = useState<string>("all");
+  const [selectedType, setSelectedType] = useState<string>("all");
+  const [selectedStatus, setSelectedStatus] = useState<string>("all");
+
+  // Selected series for catalog popup/drawer
+  const [activeCatalogSeries, setActiveCatalogSeries] = useState<Series | null>(null);
+
+  // Request Collaboration form state inside catalog modal
+  const [reqRole, setReqRole] = useState<"translator" | "cleaner" | "editor" | "typesetter" | "proofreader">("translator");
+  const [reqMelliCode, setReqMelliCode] = useState(profile?.melliCode || "");
+  const [reqNotes, setReqNotes] = useState("");
   const [reqError, setReqError] = useState("");
   const [reqSuccess, setReqSuccess] = useState("");
   const [submittingReq, setSubmittingReq] = useState(false);
 
-  // Chapters of selected series for active work
+  // Active series in "My Projects" or "Admin Management"
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
   const [chaptersList, setChaptersList] = useState<Chapter[]>([]);
   const [loadingChapters, setLoadingChapters] = useState(false);
   const [expandedChapterId, setExpandedChapterId] = useState<string | null>(null);
 
-  // Submit work form state
+  // Submit Chapter Work state
+  const [submitChapterNumber, setSubmitChapterNumber] = useState("");
   const [submitFileUrl, setSubmitFileUrl] = useState("");
   const [submitNote, setSubmitNote] = useState("");
   const [submitImages, setSubmitImages] = useState("");
@@ -64,12 +90,123 @@ export default function CooperationTab({
   const [uploadingFile, setUploadingFile] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
 
-  const handleDirectFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, role: string) => {
+  // Admin action processing state
+  const [processingActionId, setProcessingActionId] = useState<string | null>(null);
+  const [rejectionNoteMap, setRejectionNoteMap] = useState<Record<string, string>>({});
+
+  // Fast chapter creation in My Works
+  const [showCreateChapter, setShowCreateChapter] = useState(false);
+  const [newChapterNumber, setNewChapterNumber] = useState("");
+  const [newChapterTitle, setNewChapterTitle] = useState("");
+  const [creatingChapter, setCreatingChapter] = useState(false);
+
+  // Admin Add Staff Modal inside series
+  const [showAddStaffModal, setShowAddStaffModal] = useState(false);
+  const [addStaffDisplayName, setAddStaffDisplayName] = useState("");
+  const [addStaffEmail, setAddStaffEmail] = useState("");
+  const [addStaffRole, setAddStaffRole] = useState("translator");
+  const [addStaffUserId, setAddStaffUserId] = useState("");
+  const [addStaffMelli, setAddStaffMelli] = useState("");
+
+  // Chapter Contributor Attribution Editing Modal (Admin)
+  const [editingChapterContribId, setEditingChapterContribId] = useState<string | null>(null);
+  const [chapterContribMap, setChapterContribMap] = useState<Record<string, string>>({
+    translator: "",
+    cleaner: "",
+    editor: ""
+  });
+
+  useEffect(() => {
+    if (defaultSubTab) {
+      setActiveSubTab(defaultSubTab);
+    }
+  }, [defaultSubTab]);
+
+  // Extract all unique genres for filter dropdown
+  const allGenresList = useMemo(() => {
+    const set = new Set<string>();
+    seriesList.forEach((s: any) => {
+      const gList = Array.isArray(s.genres) 
+        ? s.genres 
+        : typeof s.genres === "string" 
+        ? s.genres.split(",") 
+        : [];
+      gList.forEach((g: string) => set.add(g.trim()));
+    });
+    return Array.from(set).filter(Boolean);
+  }, [seriesList]);
+
+  // Filter series list for the catalog search view
+  const filteredCatalogSeries = useMemo(() => {
+    return seriesList.filter((s: any) => {
+      const matchSearch = searchQuery.trim() === "" || 
+        s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (s.author && s.author.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        (s.artist && s.artist.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      const sGenres = Array.isArray(s.genres) 
+        ? s.genres 
+        : typeof s.genres === "string" 
+        ? s.genres.split(",").map(g => g.trim()) 
+        : [];
+      const matchGenre = selectedGenre === "all" || sGenres.includes(selectedGenre);
+      const matchType = selectedType === "all" || s.type === selectedType;
+      const matchStatus = selectedStatus === "all" || s.status === selectedStatus;
+
+      return matchSearch && matchGenre && matchType && matchStatus;
+    });
+  }, [seriesList, searchQuery, selectedGenre, selectedType, selectedStatus]);
+
+  // Filter series where user is an approved team member
+  const myApprovedSeries = useMemo(() => {
+    if (isGlobalAdmin) return seriesList;
+    return seriesList.filter((s: any) => 
+      Array.isArray(s.contributors) && s.contributors.some((c: any) => c.userId === user?.uid && c.status === "approved")
+    );
+  }, [seriesList, user, isGlobalAdmin]);
+
+  // Gather all pending contributor requests across all series for Admin
+  const pendingRequestsList = useMemo(() => {
+    const list: any[] = [];
+    seriesList.forEach((s: any) => {
+      if (Array.isArray(s.contributors)) {
+        s.contributors.forEach((c: any) => {
+          if (c.status === "pending") {
+            list.push({
+              ...c,
+              seriesId: s.id,
+              seriesTitle: s.title,
+              seriesCover: s.cover
+            });
+          }
+        });
+      }
+    });
+    return list;
+  }, [seriesList]);
+
+  // Load chapters when selecting a series in My Projects or Admin
+  const loadChaptersForSeries = async (seriesId: string) => {
+    setLoadingChapters(true);
+    setSelectedSeriesId(seriesId);
+    setExpandedChapterId(null);
+    try {
+      const res = await apiClient.get(`/api/series/${seriesId}/chapters`);
+      setChaptersList(res.data || []);
+    } catch (e) {
+      console.error("Failed to load chapters:", e);
+    } finally {
+      setLoadingChapters(false);
+    }
+  };
+
+  // Direct File Upload handler
+  const handleDirectFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, targetRole: string) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     setUploadingFile(true);
-    setUploadStatus("در حال بارگذاری و پردازش فایل...");
+    setUploadStatus("در حال بارگذاری و پردازش فایل روی هاست...");
     setSubmitError("");
 
     const formData = new FormData();
@@ -91,466 +228,691 @@ export default function CooperationTab({
       });
 
       if (res && res.urls && res.urls.length > 0) {
-        if (role === "translator" || role === "cleaner") {
+        if (targetRole === "translator" || targetRole === "cleaner") {
           setSubmitFileUrl(res.urls[0]);
-          setUploadStatus(`فایل با موفقیت بارگذاری شد: ${res.urls[0]}`);
-        } else if (role === "editor") {
+          setUploadStatus(`فایل با موفقیت آپلود شد: ${res.urls[0]}`);
+        } else if (targetRole === "editor") {
           const newUrls = res.urls;
           const currentArr = submitImages.trim() ? submitImages.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : [];
           const combined = [...currentArr, ...newUrls];
           setSubmitImages(combined.join("\n"));
-          setUploadStatus(`${newUrls.length} تصویر با موفقیت بارگذاری و استخراج گردید.`);
+          setUploadStatus(`${newUrls.length} تصویر با موفقیت بارگذاری شد.`);
         } else {
           setSubmitFileUrl(res.urls[0]);
-          setUploadStatus("فایل بارگذاری شد.");
+          setUploadStatus("فایل آپلود شد.");
         }
       } else {
-        setSubmitError("پاسخ نامعتبر از سرور دریافت شد.");
+        setSubmitError("پاسخی از سرور دریافت نشد.");
       }
     } catch (err: any) {
-      setSubmitError(err.response?.data?.error || err.message || "خطا در بارگذاری فایل");
+      setSubmitError(err.response?.data?.error || err.message || "خطا در آپلود فایل");
     } finally {
       setUploadingFile(false);
     }
   };
 
-  // Admin approval processing state
-  const [processingActionId, setProcessingActionId] = useState<string | null>(null);
-
-  // New chapter fast creation inside cooperation
-  const [showCreateChapter, setShowCreateChapter] = useState(false);
-  const [newChapterNumber, setNewChapterNumber] = useState("");
-  const [newChapterTitle, setNewChapterTitle] = useState("");
-  const [creatingChapter, setCreatingChapter] = useState(false);
-
-  // Handle active sub-tab for admin vs normal contributor
-  useEffect(() => {
-    const isGlobalAdmin = isSuperAdmin || profile?.role === "admin";
-    if (isGlobalAdmin) {
-      setActiveSubTab("admin_requests");
-    } else {
-      setActiveSubTab("all_series");
-    }
-  }, [profile, isSuperAdmin]);
-
-  // Load chapters for active work
-  const loadChaptersForSeries = async (seriesId: string) => {
-    setLoadingChapters(true);
-    setSelectedSeriesId(seriesId);
-    setExpandedChapterId(null);
-    try {
-      const res = await apiClient.get(`/api/series/${seriesId}/chapters`);
-      setChaptersList(res.data || []);
-    } catch (e) {
-      console.error("Failed to load chapters:", e);
-    } finally {
-      setLoadingChapters(false);
-    }
-  };
-
-  const handleRequestCollaboration = async (seriesId: string) => {
-    const code = profile?.melliCode || '';
-    if (!code) {
-      setReqError("شناسه اختصاصی کاربری شما یافت نشد. لطفا ابتدا آن را در پروفایل دریافت کنید.");
+  // Submit Request Collaboration handler
+  const handleSendRequest = async (series: Series) => {
+    if (!user) {
+      setReqError("لطفاً ابتدا وارد حساب کاربری خود شوید.");
       return;
     }
-
     setSubmittingReq(true);
     setReqError("");
     setReqSuccess("");
 
     try {
-      const res = await apiClient.post(`/api/series/${seriesId}/request-contributor`, {
-        userId: user?.uid,
-        email: user?.email,
-        displayName: profile?.displayName || user?.email,
+      const res = await apiClient.requestContributor(series.id, {
+        userId: user.uid,
+        email: user.email || "",
+        displayName: profile?.displayName || user.displayName || user.email || "همکار",
         role: reqRole,
-        melliCode: code
+        melliCode: reqMelliCode || profile?.melliCode || ""
       });
-      onUpdateSeries(res.data);
-      setReqSuccess("درخواست همکاری شما با موفقیت ثبت شد و در انتظار تایید مدیریت است.");
-      setTimeout(() => {
-        setRequestingSeriesId(null);
-        setReqMelliCode("");
-        setReqSuccess("");
-      }, 3000);
-    } catch (err: any) {
-      setReqError(err.response?.data?.error || "ثبت درخواست با خطا مواجه شد.");
+
+      if (res.series) {
+        onUpdateSeries(res.series);
+        if (activeCatalogSeries?.id === series.id) {
+          setActiveCatalogSeries(res.series);
+        }
+        setReqSuccess("درخواست همکاری شما با موفقیت برای مدیریت ارسال شد. پس از بررسی، پیام تایید ارسال خواهد شد.");
+      } else {
+        setReqError(res.error || "خطا در ثبت درخواست");
+      }
+    } catch (e: any) {
+      setReqError(e.message || "خطا در ارتباط با سرور");
     } finally {
       setSubmittingReq(false);
     }
   };
 
-  const handleApproveContributor = async (seriesId: string, userId: string, action: "approve" | "reject") => {
-    setProcessingActionId(`${seriesId}-${userId}`);
+  // Handle Admin approval/rejection of collaboration requests
+  const handleAdminProcessRequest = async (seriesId: string, applicantUserId: string, action: "approve" | "reject", role?: string) => {
+    setProcessingActionId(`${seriesId}-${applicantUserId}`);
     try {
-      const res = await apiClient.post(`/api/series/${seriesId}/approve-contributor`, {
-        userId,
-        action
-      });
-      onUpdateSeries(res.data);
-    } catch (e) {
-      console.error("Failed to process contributor:", e);
+      const res = await apiClient.approveContributor(seriesId, applicantUserId, action, user?.uid, role);
+      if (res.series) {
+        onUpdateSeries(res.series);
+      }
+    } catch (e: any) {
+      alert(`خطا: ${e.message}`);
     } finally {
       setProcessingActionId(null);
     }
   };
 
-  const handleCreatePendingChapter = async () => {
-    if (!newChapterNumber.trim() || isNaN(parseFloat(newChapterNumber))) {
-      alert("لطفا شماره معتبری برای چپتر وارد کنید.");
-      return;
-    }
-    if (!selectedSeriesId) return;
-
-    setCreatingChapter(true);
-    try {
-      const chapterId = `ch-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-      const payload = {
-        id: chapterId,
-        seriesId: selectedSeriesId,
-        number: parseFloat(newChapterNumber),
-        title: newChapterTitle.trim(),
-        images: [],
-        publishAt: null
-      };
-
-      const res = await apiClient.post(`/api/series/${selectedSeriesId}/chapters`, payload, {
-        headers: {
-          'x-admin-uid': user?.uid,
-          'x-user-uid': user?.uid
-        }
-      });
-      
-      setChaptersList(prev => [res.data, ...prev]);
-      setShowCreateChapter(false);
-      setNewChapterNumber("");
-      setNewChapterTitle("");
-      setExpandedChapterId(res.data.id);
-    } catch (e: any) {
-      alert(e.response?.data?.error || "خطا در ایجاد چپتر");
-    } finally {
-      setCreatingChapter(false);
-    }
-  };
-
-  const handleSubmitChapterWork = async (chapter: Chapter) => {
-    if (!submitFileUrl.trim() && !submitImages.trim()) {
-      setSubmitError("لطفا لینک کار یا تصاویر نهایی را وارد کنید.");
-      return;
-    }
-
+  // Handle Chapter Work Submission
+  const handleSubmitChapterWork = async (ch: Chapter, userRole: string) => {
+    if (!user) return;
     setSubmittingWork(true);
     setSubmitError("");
     setSubmitSuccess("");
 
-    // Determine role of active user in this series
-    const activeSeries = seriesList.find(s => s.id === chapter.seriesId);
-    const userRoleObj = activeSeries?.contributors?.find((c: any) => c.userId === user?.uid && c.status === "approved");
-    const role = userRoleObj?.role || "translator";
-
-    let finalImages: string[] = [];
-    if (submitImages.trim()) {
-      finalImages = submitImages.split(/[\n,]+/).map(img => img.trim()).filter(img => img.length > 0);
-    }
-
     try {
-      const res = await apiClient.post(`/api/series/${chapter.seriesId}/chapters/${chapter.id}/submit`, {
-        userId: user?.uid,
-        userName: profile?.displayName || user?.email,
-        role,
-        fileUrl: submitFileUrl.trim(),
-        note: submitNote.trim(),
-        images: finalImages
+      let finalImagesArr: string[] = [];
+      if (userRole === "editor" && submitImages.trim()) {
+        finalImagesArr = submitImages.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+      }
+
+      const res = await apiClient.post(`/api/series/${selectedSeriesId}/chapters/${ch.id}/submit`, {
+        userId: user.uid,
+        userName: profile?.displayName || user.displayName || user.email || "همکار",
+        role: userRole,
+        fileUrl: submitFileUrl,
+        note: submitNote,
+        images: finalImagesArr
       });
 
-      // Update chapters local list
-      setChaptersList(prev => prev.map(ch => ch.id === chapter.id ? res.data : ch));
-      setSubmitSuccess("کار شما با موفقیت ارسال شد و در سابقه این چپتر ثبت گردید.");
-      setSubmitFileUrl("");
-      setSubmitNote("");
-      setSubmitImages("");
-      setTimeout(() => setSubmitSuccess(""), 3000);
-    } catch (err: any) {
-      setSubmitError(err.response?.data?.error || "ارسال کار با خطا مواجه شد.");
+      if (res && res.id) {
+        setSubmitSuccess("فایل با موفقیت ارسال شد و به اطلاع همکاران و مدیریت رسید.");
+        setSubmitFileUrl("");
+        setSubmitNote("");
+        setSubmitImages("");
+        setUploadStatus("");
+        if (selectedSeriesId) {
+          loadChaptersForSeries(selectedSeriesId);
+        }
+      }
+    } catch (e: any) {
+      setSubmitError(e.message || "خطا در ثبت کار چپتر");
     } finally {
       setSubmittingWork(false);
     }
   };
 
-  const handleApproveChapter = async (chapter: Chapter) => {
-    if (!confirm(`آیا از انتشار عمومی و تایید نهایی چپتر ${chapter.number} اطمینان دارید؟`)) return;
-
+  // Create new chapter fast
+  const handleCreateFastChapter = async () => {
+    if (!selectedSeriesId || !newChapterNumber.trim()) return;
+    setCreatingChapter(true);
     try {
-      const res = await apiClient.put(`/api/series/${chapter.seriesId}/chapters/${chapter.id}/approve`, {}, {
-        headers: {
-          'x-admin-uid': user?.uid,
-          'x-user-uid': user?.uid
-        }
-      });
-      // update chapter status
-      setChaptersList(prev => prev.map(ch => ch.id === chapter.id ? { ...ch, isPending: false } : ch));
-      alert("چپتر تایید و با موفقیت روی سایت منتشر گردید.");
-    } catch (e) {
-      console.error(e);
-      alert("خطا در تایید چپتر");
-    }
-  };
+      const res = await apiClient.post(`/api/series/${selectedSeriesId}/chapters`, {
+        number: newChapterNumber.trim(),
+        title: newChapterTitle.trim() || `چپتر ${newChapterNumber.trim()}`,
+        images: [],
+        isPending: true,
+        sortMode: "natural"
+      }, user?.uid);
 
-  // Roles translations
-  const getRoleLabel = (role: string) => {
-    switch(role) {
-      case 'translator': return 'مترجم';
-      case 'cleaner': return 'کلینر';
-      case 'editor': return 'ادیتور';
-      case 'typesetter': return 'تایپستر';
-      default: return role;
-    }
-  };
-
-  const isGlobalAdmin = isSuperAdmin || profile?.role === "admin";
-
-  // Filter series where user is approved contributor
-  const myProjects = seriesList.filter(s => 
-    s.contributors?.some((c: any) => c.userId === user?.uid && c.status === "approved")
-  );
-
-  // Gather all pending contributor requests for admin
-  const pendingRequests: { series: Series; req: any }[] = [];
-  seriesList.forEach(s => {
-    s.contributors?.forEach((c: any) => {
-      if (c.status === "pending") {
-        pendingRequests.push({ series: s, req: c });
+      if (res) {
+        setNewChapterNumber("");
+        setNewChapterTitle("");
+        setShowCreateChapter(false);
+        loadChaptersForSeries(selectedSeriesId);
       }
-    });
-  });
+    } catch (e: any) {
+      alert(`خطا در ایجاد چپتر: ${e.message}`);
+    } finally {
+      setCreatingChapter(false);
+    }
+  };
+
+  // Admin Chapter Approval
+  const handleApproveChapter = async (ch: Chapter) => {
+    if (!selectedSeriesId) return;
+    setProcessingActionId(ch.id);
+    try {
+      await apiClient.put(`/api/series/${selectedSeriesId}/chapters/${ch.id}/approve`, {}, user?.uid);
+      alert(`چپتر ${ch.number} با موفقیت تایید و روی وب‌سایت منتشر شد! نوتیفیکیشن برای نشان‌گذاران و همکاران ارسال گردید.`);
+      loadChaptersForSeries(selectedSeriesId);
+    } catch (e: any) {
+      alert(`خطا در تایید چپتر: ${e.message}`);
+    } finally {
+      setProcessingActionId(null);
+    }
+  };
+
+  // Admin Chapter Rejection
+  const handleRejectChapter = async (ch: Chapter) => {
+    if (!selectedSeriesId) return;
+    const note = rejectionNoteMap[ch.id] || "نیازمند اصلاح توسط کادر پروژه";
+    setProcessingActionId(ch.id);
+    try {
+      await apiClient.rejectChapter(selectedSeriesId, ch.id, note, user?.uid);
+      alert(`چپتر ${ch.number} رد شد و به اطلاع کادر رسانده شد.`);
+      loadChaptersForSeries(selectedSeriesId);
+    } catch (e: any) {
+      alert(`خطا در رد چپتر: ${e.message}`);
+    } finally {
+      setProcessingActionId(null);
+    }
+  };
+
+  // Admin Chapter Revision Request
+  const handleRequestRevision = async (ch: Chapter) => {
+    if (!selectedSeriesId) return;
+    const note = rejectionNoteMap[ch.id] || "نیاز به بازنگری و اصلاح فایل‌های ارسالی دارد.";
+    setProcessingActionId(ch.id);
+    try {
+      await apiClient.requestChapterRevision(selectedSeriesId, ch.id, note, user?.uid);
+      alert(`درخواست بازنگری برای چپتر ${ch.number} ثبت گردید.`);
+      loadChaptersForSeries(selectedSeriesId);
+    } catch (e: any) {
+      alert(`خطا در ثبت درخواست بازنگری: ${e.message}`);
+    } finally {
+      setProcessingActionId(null);
+    }
+  };
+
+  // Admin Add Staff Member directly
+  const handleAddStaffDirectly = async (seriesId: string) => {
+    if (!addStaffDisplayName.trim()) {
+      alert("لطفاً نام همکار را وارد کنید.");
+      return;
+    }
+    try {
+      const res = await apiClient.addContributor(seriesId, {
+        userId: addStaffUserId.trim() || `user_${Date.now()}`,
+        email: addStaffEmail.trim(),
+        displayName: addStaffDisplayName.trim(),
+        role: addStaffRole,
+        melliCode: addStaffMelli.trim()
+      }, user?.uid);
+
+      if (res.series) {
+        onUpdateSeries(res.series);
+        if (activeCatalogSeries?.id === seriesId) {
+          setActiveCatalogSeries(res.series);
+        }
+        setShowAddStaffModal(false);
+        setAddStaffDisplayName("");
+        setAddStaffEmail("");
+        setAddStaffUserId("");
+        setAddStaffMelli("");
+      }
+    } catch (e: any) {
+      alert(`خطا: ${e.message}`);
+    }
+  };
+
+  // All Chapters awaiting Admin Approval across all series for Admin Approval tab
+  const [allPendingChaptersQueue, setAllPendingChaptersQueue] = useState<any[]>([]);
+  const [loadingPendingQueue, setLoadingPendingQueue] = useState(false);
+
+  const fetchPendingQueue = async () => {
+    if (!isGlobalAdmin) return;
+    setLoadingPendingQueue(true);
+    try {
+      const queue: any[] = [];
+      for (const s of seriesList) {
+        const res = await apiClient.get(`/api/series/${s.id}/chapters`);
+        if (res.data && Array.isArray(res.data)) {
+          const pendings = res.data.filter((ch: Chapter) => ch.isPending);
+          pendings.forEach((ch: Chapter) => {
+            queue.push({
+              ...ch,
+              seriesTitle: s.title,
+              seriesCover: s.cover,
+              seriesId: s.id
+            });
+          });
+        }
+      }
+      setAllPendingChaptersQueue(queue);
+    } catch (e) {
+      console.error("Failed to load pending chapters queue:", e);
+    } finally {
+      setLoadingPendingQueue(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSubTab === "admin_approval") {
+      fetchPendingQueue();
+    }
+  }, [activeSubTab, seriesList]);
 
   return (
-    <div className="space-y-6" dir="rtl">
-      {/* Title block */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-white/5 pb-6">
-        <div>
-          <h2 className="text-xl font-black text-white flex items-center gap-2">
-            <Briefcase className="text-[var(--color-asura-accent)]" /> 
-            میز کار کارهای تیمی و همکاری کادر فنی
-          </h2>
-          <p className="text-xs text-zinc-400 mt-1">
-            در این بخش، مترجمان، کلینرها و ادیتورها کارهای گروهی وبسایت را دریافت کرده و هماهنگ جلو می‌برند.
-          </p>
-        </div>
-      </div>
-
-      {/* Sub-tabs selection */}
-      <div className="flex flex-wrap gap-2 border-b border-white/5 pb-4">
-        {isGlobalAdmin && (
+    <div dir="rtl" className="space-y-6 text-right font-sans">
+      
+      {/* Tab Header Navigation */}
+      <div className="bg-zinc-900/90 border border-white/10 rounded-2xl p-2.5 flex flex-wrap gap-2 items-center justify-between shadow-xl">
+        <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => setActiveSubTab("admin_requests")}
-            className={`px-5 py-2.5 rounded-xl font-bold text-xs uppercase flex items-center gap-2 transition-colors ${activeSubTab === "admin_requests" ? "bg-amber-500 text-black" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            onClick={() => setActiveSubTab("all_series")}
+            className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 ${
+              activeSubTab === "all_series"
+                ? "bg-[var(--color-asura-accent)] text-white shadow-lg shadow-[var(--color-asura-accent)]/20"
+                : "bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10"
+            }`}
           >
-            <Clock size={15} /> بررسی درخواست‌های عضویت ({pendingRequests.length})
+            <Search size={15} />
+            جستجوی کارها و درخواست همکاری
           </button>
-        )}
-        
-        <button
-          onClick={() => setActiveSubTab("all_series")}
-          className={`px-5 py-2.5 rounded-xl font-bold text-xs uppercase flex items-center gap-2 transition-colors ${activeSubTab === "all_series" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
-        >
-          <UsersIcon size={15} /> کل آثار ساخته شده و درخواست عضویت
-        </button>
 
-        <button
-          onClick={() => setActiveSubTab("my_projects")}
-          className={`px-5 py-2.5 rounded-xl font-bold text-xs uppercase flex items-center gap-2 transition-colors ${activeSubTab === "my_projects" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
-        >
-          <FileCheck size={15} /> کارهای من ({myProjects.length})
-        </button>
-      </div>
+          <button
+            onClick={() => setActiveSubTab("my_projects")}
+            className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 ${
+              activeSubTab === "my_projects"
+                ? "bg-[var(--color-asura-accent)] text-white shadow-lg shadow-[var(--color-asura-accent)]/20"
+                : "bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10"
+            }`}
+          >
+            <Briefcase size={15} />
+            کارهای من و ارسال چپتر
+            {myApprovedSeries.length > 0 && (
+              <span className="bg-white/20 text-white text-[10px] px-2 py-0.5 rounded-full font-mono">
+                {myApprovedSeries.length}
+              </span>
+            )}
+          </button>
 
-      {/* Contents based on active subtab */}
-      {activeSubTab === "admin_requests" && (
-        <div className="space-y-4">
-          <h3 className="text-sm font-black text-white mb-2">درخواست‌های عضویت تیم فنی در کارهای مختلف</h3>
-          {pendingRequests.length === 0 ? (
-            <div className="bg-black/20 border border-white/5 rounded-2xl p-8 text-center text-zinc-500 text-xs font-bold">
-              هیچ درخواست عضویت در حال انتظاری یافت نشد.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {pendingRequests.map(({ series, req }, idx) => (
-                <div key={`${series.id}-${req.userId}-${idx}`} className="bg-black/40 border border-white/5 hover:border-white/10 rounded-2xl p-5 flex gap-4 transition-all group">
-                  <img src={series.cover} alt={series.title} className="w-16 h-24 object-cover rounded-xl shadow-lg shrink-0" />
-                  <div className="flex-1 min-w-0 flex flex-col justify-between">
-                    <div>
-                      <h4 className="font-black text-white text-sm truncate">{series.title}</h4>
-                      <div className="flex items-center gap-2 mt-2">
-                        <span className="text-zinc-400 font-bold text-xs">عضو:</span>
-                        <span className="text-zinc-200 font-black text-xs">{req.displayName}</span>
-                        <span className="text-zinc-500 text-[10px] font-mono">({req.email})</span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-zinc-400 font-bold text-xs">سمت درخواستی:</span>
-                        <span className="bg-[var(--color-asura-accent)]/15 border border-[var(--color-asura-accent)]/20 text-[var(--color-asura-accent-light)] font-black text-[10px] px-2 py-0.5 rounded-md">{getRoleLabel(req.role)}</span>
-                        {req.melliCode && (
-                          <span className="text-zinc-500 font-mono text-[10px] mr-2">کد ملی: {req.melliCode}</span>
-                        )}
-                      </div>
-                    </div>
+          {isGlobalAdmin && (
+            <>
+              <button
+                onClick={() => setActiveSubTab("admin_requests")}
+                className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 ${
+                  activeSubTab === "admin_requests"
+                    ? "bg-amber-500 text-black shadow-lg shadow-amber-500/20 font-black"
+                    : "bg-white/5 text-amber-400 hover:bg-amber-500/10"
+                }`}
+              >
+                <Shield size={15} />
+                مدیریت درخواست‌ها و تیم کادر
+                {pendingRequestsList.length > 0 && (
+                  <span className="bg-black text-amber-400 text-[10px] px-2 py-0.5 rounded-full font-black animate-pulse">
+                    {pendingRequestsList.length}
+                  </span>
+                )}
+              </button>
 
-                    <div className="flex items-center gap-2 mt-4">
-                      <button
-                        onClick={() => handleApproveContributor(series.id, req.userId, "approve")}
-                        disabled={processingActionId !== null}
-                        className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-black font-black text-[11px] px-4 py-2 rounded-xl transition-all"
-                      >
-                        {processingActionId === `${series.id}-${req.userId}` ? "در حال پردازش..." : "تایید درخواست"}
-                      </button>
-                      <button
-                        onClick={() => handleApproveContributor(series.id, req.userId, "reject")}
-                        disabled={processingActionId !== null}
-                        className="bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 text-red-400 font-bold text-[11px] px-4 py-2 rounded-xl transition-all"
-                      >
-                        رد درخواست
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+              <button
+                onClick={() => setActiveSubTab("admin_approval")}
+                className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 ${
+                  activeSubTab === "admin_approval"
+                    ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 font-black"
+                    : "bg-white/5 text-indigo-300 hover:bg-indigo-600/10"
+                }`}
+              >
+                <FileCheck size={15} />
+                تایید و انتشار چپترها
+                {allPendingChaptersQueue.length > 0 && (
+                  <span className="bg-amber-500 text-black text-[10px] px-2 py-0.5 rounded-full font-black">
+                    {allPendingChaptersQueue.length}
+                  </span>
+                )}
+              </button>
+            </>
           )}
         </div>
-      )}
 
+        {/* Revenue info note */}
+        <div className="hidden lg:flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl text-[11px] text-emerald-400 font-bold">
+          <DollarSign size={14} />
+          تقسیم سود خودکار: مترجم ۲۰٪ | کلینر ۳۰٪ | ادیتور ۳۰٪ | وب‌سایت ۲۰٪
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* SUB-TAB 1: CATALOG SEARCH & COLLABORATION REQUEST (جستجوی کارها و درخواست) */}
+      {/* ========================================================================= */}
       {activeSubTab === "all_series" && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-black text-white">لیست تمامی آثار ساخته شده وبسایت</h3>
-            <span className="text-xs text-zinc-500 font-bold">{seriesList.length} اثر موجود</span>
+        <div className="space-y-6">
+          
+          {/* Catalog Search & Filters Header */}
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4 shadow-lg">
+            <div className="flex flex-col sm:flex-row items-center gap-3">
+              <div className="relative flex-1 w-full">
+                <Search size={18} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                <input
+                  type="text"
+                  placeholder="جستجوی عنوان مانهوا، مانگا، نویسنده، طراح..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-black/60 border border-white/10 rounded-xl pr-10 pl-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)] transition-all font-bold placeholder:text-zinc-500"
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                <select
+                  value={selectedGenre}
+                  onChange={(e) => setSelectedGenre(e.target.value)}
+                  className="bg-black/60 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-zinc-200 font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                >
+                  <option value="all">همه ژانرها</option>
+                  {allGenresList.map(g => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={selectedType}
+                  onChange={(e) => setSelectedType(e.target.value)}
+                  className="bg-black/60 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-zinc-200 font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                >
+                  <option value="all">همه انواع</option>
+                  <option value="Manhwa">مانهوا (Manhwa)</option>
+                  <option value="Manhua">مانhua (Manhua)</option>
+                  <option value="Manga">مانگا (Manga)</option>
+                </select>
+
+                <select
+                  value={selectedStatus}
+                  onChange={(e) => setSelectedStatus(e.target.value)}
+                  className="bg-black/60 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-zinc-200 font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                >
+                  <option value="all">همه وضعیت‌ها</option>
+                  <option value="Ongoing">درحال انتشار</option>
+                  <option value="Completed">پایان یافته</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-zinc-400 pt-2 border-t border-white/5">
+              <span>نمایش <strong className="text-white font-mono">{filteredCatalogSeries.length}</strong> اثر در کاتالوگ کارها</span>
+              <span className="text-[11px] text-zinc-500">برای مشاهده جزئیات و درخواست همکاری روی هر اثر کلیک کنید</span>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {seriesList.map(s => {
-              const myReq = s.contributors?.find((c: any) => c.userId === user?.uid);
-              const approvedTeam = s.contributors?.filter((c: any) => c.status === "approved") || [];
+          {/* Catalog Series Grid (Website Search Page Style) */}
+          {filteredCatalogSeries.length === 0 ? (
+            <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-12 text-center text-zinc-400 space-y-3">
+              <Search size={36} className="mx-auto text-zinc-600 mb-2" />
+              <p className="text-base font-bold text-white">اثری با مشخصات جستجو شده یافت نشد</p>
+              <p className="text-xs text-zinc-500">عبارت دیگری را جستجو کنید یا فیلترها را ریست نمایید.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              {filteredCatalogSeries.map((s: any) => {
+                const approvedStaffCount = Array.isArray(s.contributors) 
+                  ? s.contributors.filter((c: any) => c.status === "approved").length 
+                  : 0;
+                const isMember = Array.isArray(s.contributors) && s.contributors.some((c: any) => c.userId === user?.uid && c.status === "approved");
+                const isPending = Array.isArray(s.contributors) && s.contributors.some((c: any) => c.userId === user?.uid && c.status === "pending");
 
-              return (
-                <div key={s.id} className="bg-black/30 border border-white/5 hover:border-white/10 rounded-2xl p-4 flex gap-4 transition-all duration-300 relative overflow-hidden group">
-                  <img src={s.cover} alt={s.title} className="w-20 h-28 object-cover rounded-xl shadow-md shrink-0 group-hover:scale-105 transition-transform duration-300" />
-                  <div className="flex-1 min-w-0 flex flex-col justify-between">
-                    <div>
-                      <h4 className="font-black text-white text-xs truncate group-hover:text-[var(--color-asura-accent-light)] transition-colors">{s.title}</h4>
-                      <p className="text-[10px] text-zinc-500 mt-1 font-bold">نوع: {s.type}</p>
-                      
-                      <div className="mt-3 flex flex-wrap gap-1">
-                        {approvedTeam.length === 0 ? (
-                          <span className="text-[10px] text-zinc-600 italic">تیم فنی هنوز عضو این کار نشده است.</span>
-                        ) : (
-                          approvedTeam.map((c: any, index: number) => (
-                            <span key={index} className="bg-white/5 border border-white/5 text-zinc-300 font-medium text-[9px] px-1.5 py-0.5 rounded" title={c.displayName}>
-                              {getRoleLabel(c.role)}: {c.displayName.substring(0, 10)}
-                            </span>
-                          ))
+                return (
+                  <div
+                    key={s.id}
+                    onClick={() => {
+                      setActiveCatalogSeries(s);
+                      setReqError("");
+                      setReqSuccess("");
+                    }}
+                    className={`group bg-zinc-900 border rounded-2xl p-2.5 transition-all duration-300 cursor-pointer flex flex-col justify-between hover:-translate-y-1 ${
+                      isMember 
+                        ? 'border-emerald-500/30 hover:border-emerald-500 shadow-lg shadow-emerald-500/5'
+                        : isPending
+                        ? 'border-amber-500/30 hover:border-amber-500'
+                        : 'border-white/10 hover:border-[var(--color-asura-accent)] shadow-md hover:shadow-xl'
+                    }`}
+                  >
+                    <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-black mb-3">
+                      <img
+                        src={s.cover}
+                        alt={s.title}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
+                      <div className="absolute top-2 right-2 flex flex-col gap-1 items-start">
+                        <span className="bg-black/80 backdrop-blur-md text-white text-[9px] font-black px-2 py-0.5 rounded-full border border-white/10">
+                          {s.type || "Manhwa"}
+                        </span>
+                        {isMember && (
+                          <span className="bg-emerald-500 text-black text-[9px] font-black px-2 py-0.5 rounded-full shadow">
+                            عضو تیم
+                          </span>
                         )}
+                        {isPending && (
+                          <span className="bg-amber-500 text-black text-[9px] font-black px-2 py-0.5 rounded-full shadow animate-pulse">
+                            در انتظار تایید
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="absolute bottom-2 left-2 bg-black/80 backdrop-blur-md text-zinc-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-white/10 flex items-center gap-1">
+                        <UsersIcon size={11} className="text-[var(--color-asura-accent-light)]" />
+                        <span>{approvedStaffCount} نفر کادر</span>
                       </div>
                     </div>
 
-                    <div className="mt-4">
-                      {myReq ? (
-                        myReq.status === "approved" ? (
-                          <div className="flex items-center gap-1 text-emerald-400 text-xs font-black">
-                            <Check size={14} /> شما عضو تایید شده هستید ({getRoleLabel(myReq.role)})
-                          </div>
-                        ) : (
-                          <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-black px-3 py-1.5 rounded-xl text-center">
-                            در انتظار تایید درخواست ({getRoleLabel(myReq.role)})
-                          </div>
-                        )
-                      ) : (
-                        requestingSeriesId === s.id ? (
-                          <div className="bg-black/40 border border-white/5 rounded-xl p-3 mt-2 space-y-2 text-right" dir="rtl">
-                            <div>
-                              <label className="block text-[10px] text-zinc-400 font-bold mb-1">سمت شما در این پروژه:</label>
-                              <select
-                                value={reqRole}
-                                onChange={(e: any) => setReqRole(e.target.value)}
-                                className="w-full bg-zinc-950 border border-white/5 text-white rounded-lg p-1.5 text-xs font-black focus:outline-none focus:border-[var(--color-asura-accent)]"
-                              >
-                                <option value="translator">مترجم (Translator) - ۲۰٪</option>
-                                <option value="cleaner">کلینر (Cleaner) - ۳۰٪</option>
-                                <option value="editor">ادیتور (Editor) - ۳۰٪</option>
-                              </select>
-                            </div>
-                            <div className="bg-zinc-950 border border-white/5 rounded-lg p-2 text-center">
-                              <span className="block text-[10px] text-zinc-400 font-bold mb-1">کد اختصاصی کاربری شما:</span>
-                              <strong className="text-xs text-white font-mono tracking-wider">{profile?.melliCode || "ثبت نشده (ابتدا از پروفایل دریافت کنید)"}</strong>
-                            </div>
+                    <div className="space-y-1.5 flex-1 flex flex-col justify-between">
+                      <div>
+                        <h4 className="text-xs font-black text-white group-hover:text-[var(--color-asura-accent-light)] transition-colors line-clamp-2 leading-snug">
+                          {s.title}
+                        </h4>
+                        <p className="text-[10px] text-zinc-400 truncate mt-0.5">{s.author || "نویسنده نامشخص"}</p>
+                      </div>
 
-                            {reqError && <p className="text-red-400 text-[10px] font-bold">{reqError}</p>}
-                            {reqSuccess && <p className="text-emerald-400 text-[10px] font-black">{reqSuccess}</p>}
-
-                            <div className="flex gap-2 pt-1">
-                              <button
-                                onClick={() => handleRequestCollaboration(s.id)}
-                                disabled={submittingReq}
-                                className="flex-1 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-[10px] py-1.5 rounded-lg transition-colors"
-                              >
-                                {submittingReq ? "ارسال..." : "ثبت نهایی"}
-                              </button>
-                              <button
-                                onClick={() => setRequestingSeriesId(null)}
-                                className="px-2 py-1 bg-white/5 hover:bg-white/10 text-zinc-400 text-[10px] rounded-lg transition-colors"
-                              >
-                                لغو
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              setRequestingSeriesId(s.id);
-                              setReqError("");
-                              setReqSuccess("");
-                            }}
-                            className="w-full bg-white/5 border border-white/5 hover:bg-white/10 text-white font-black text-xs py-2 rounded-xl transition-all flex items-center justify-center gap-1"
-                          >
-                            <Plus size={14} /> درخواست عضویت در این کار
-                          </button>
-                        )
-                      )}
+                      <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[10px]">
+                        <span className="text-amber-400 font-bold">{s.status === "Ongoing" ? "درحال انتشار" : "پایان یافته"}</span>
+                        <span className="text-[var(--color-asura-accent-light)] font-bold flex items-center gap-0.5">
+                          درخواست <ChevronDown size={12} />
+                        </span>
+                      </div>
                     </div>
                   </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Series Collaboration Request Modal / Drawer */}
+          {activeCatalogSeries && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+              <div className="bg-zinc-900 border border-white/15 rounded-3xl max-w-2xl w-full p-6 text-right space-y-6 relative max-h-[90vh] overflow-y-auto custom-scrollbar">
+                
+                {/* Modal Header */}
+                <div className="flex items-start justify-between border-b border-white/10 pb-4">
+                  <div className="flex items-center gap-4">
+                    <img src={activeCatalogSeries.cover} alt="" className="w-16 h-20 object-cover rounded-xl border border-white/10 shadow" />
+                    <div>
+                      <h3 className="text-lg font-black text-white">{activeCatalogSeries.title}</h3>
+                      <p className="text-xs text-zinc-400 mt-1">
+                        نویسنده: <span className="text-white font-bold">{activeCatalogSeries.author || 'نامشخص'}</span> | وضعیت: <span className="text-amber-400 font-bold">{activeCatalogSeries.status}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setActiveCatalogSeries(null)}
+                    className="p-2 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all"
+                  >
+                    <X size={18} />
+                  </button>
                 </div>
-              );
-            })}
-          </div>
+
+                {/* Synopsis */}
+                <div className="bg-black/40 border border-white/5 rounded-2xl p-4 text-xs text-zinc-300 leading-relaxed">
+                  <h4 className="text-[11px] font-black text-zinc-400 uppercase mb-1">خلاصه اثر:</h4>
+                  {activeCatalogSeries.synopsis || "توضیحاتی برای این اثر ثبت نشده است."}
+                </div>
+
+                {/* Current Staff List */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-black text-white flex items-center gap-2">
+                    <UsersIcon size={14} className="text-[var(--color-asura-accent)]" />
+                    اعضای فعال تیم این اثر:
+                  </h4>
+                  {(!activeCatalogSeries.contributors || activeCatalogSeries.contributors.filter((c: any) => c.status === "approved").length === 0) ? (
+                    <p className="text-xs text-zinc-500 bg-black/20 p-3 rounded-xl border border-white/5">هنوز همکاری برای این اثر ثبت نشده است.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      {activeCatalogSeries.contributors.filter((c: any) => c.status === "approved").map((c: any) => (
+                        <div key={c.userId} className="p-2.5 bg-black/40 border border-white/5 rounded-xl flex items-center justify-between">
+                          <div>
+                            <span className="block font-black text-white">{c.displayName}</span>
+                            <span className="block text-[10px] text-amber-400 font-bold">
+                              {c.role === 'translator' ? 'مترجم' : c.role === 'editor' ? 'ادیتور' : c.role === 'cleaner' ? 'کلینر' : c.role === 'typesetter' ? 'تایپیست' : c.role}
+                            </span>
+                          </div>
+                          {isGlobalAdmin && (
+                            <button
+                              onClick={() => handleAdminProcessRequest(activeCatalogSeries.id, c.userId, "reject")}
+                              className="text-red-400 hover:text-red-300 text-[10px] font-bold p-1 bg-red-500/10 rounded-lg"
+                            >
+                              حذف همکار
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Application / Work Space Locking State */}
+                {(() => {
+                  const myContribObj = activeCatalogSeries.contributors?.find((c: any) => c.userId === user?.uid);
+                  const isApproved = myContribObj?.status === "approved";
+                  const isPending = myContribObj?.status === "pending";
+
+                  if (isApproved) {
+                    return (
+                      <div className="bg-emerald-500/10 border border-emerald-500/30 p-4 rounded-2xl flex items-center justify-between gap-4">
+                        <div>
+                          <h4 className="text-xs font-black text-emerald-400 flex items-center gap-2">
+                            <CheckCircle size={16} /> شما عضو تایید شده تیم این اثر هستید
+                          </h4>
+                          <p className="text-[11px] text-zinc-400 mt-1">
+                            نقش شما: <strong className="text-white">{myContribObj.role === 'translator' ? 'مترجم' : myContribObj.role === 'cleaner' ? 'کلینر' : 'ادیتور'}</strong>
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setSelectedSeriesId(activeCatalogSeries.id);
+                            loadChaptersForSeries(activeCatalogSeries.id);
+                            setActiveCatalogSeries(null);
+                            setActiveSubTab("my_projects");
+                          }}
+                          className="px-4 py-2 bg-emerald-500 text-black font-black text-xs rounded-xl hover:bg-emerald-600 transition-all shadow"
+                        >
+                          ورود به پنل ارسال چپتر
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  if (isPending) {
+                    return (
+                      <div className="bg-amber-500/10 border border-amber-500/30 p-5 rounded-2xl space-y-2 text-center">
+                        <Lock size={28} className="mx-auto text-amber-400 mb-1" />
+                        <h4 className="text-sm font-black text-amber-400">صفحه کاری این اثر در انتظار تایید مدیریت قفل می‌باشد</h4>
+                        <p className="text-xs text-zinc-300">
+                          درخواست همکاری شما برای نقش <strong className="text-white font-black">{myContribObj.role === 'translator' ? 'مترجم' : myContribObj.role === 'cleaner' ? 'کلینر' : 'ادیتور'}</strong> ثبت شده است. پس از تایید توسط مدیریت، دسترسی ارسال چپتر برای شما فعال خواهد شد.
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4">
+                      <h4 className="text-xs font-black text-white flex items-center gap-2">
+                        <Plus size={16} className="text-[var(--color-asura-accent)]" />
+                        ثبت درخواست جدید جهت دریافت مسئولیت این اثر
+                      </h4>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                        <div>
+                          <label className="block text-[10px] text-zinc-400 font-bold mb-1">انتخاب نقش درخواستی:</label>
+                          <select
+                            value={reqRole}
+                            onChange={(e: any) => setReqRole(e.target.value)}
+                            className="w-full bg-black border border-white/10 rounded-xl p-2.5 text-xs text-white font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                          >
+                            <option value="translator">مترجم (Translator)</option>
+                            <option value="cleaner">کلینر (Cleaner)</option>
+                            <option value="editor">ادیتور و تایپیست (Editor)</option>
+                            <option value="typesetter">تایپیست (Typesetter)</option>
+                            <option value="proofreader">ویراستار (Proofreader)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] text-zinc-400 font-bold mb-1">کد ملی یا شناسنامه کاربری:</label>
+                          <input
+                            type="text"
+                            placeholder="مثلاً: 0021345678"
+                            value={reqMelliCode}
+                            onChange={(e) => setReqMelliCode(e.target.value)}
+                            className="w-full bg-black border border-white/10 rounded-xl p-2.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                          />
+                        </div>
+                      </div>
+
+                      {reqError && <p className="text-red-400 text-xs font-bold">{reqError}</p>}
+                      {reqSuccess && <p className="text-emerald-400 text-xs font-bold">{reqSuccess}</p>}
+
+                      <div className="pt-2 flex justify-end">
+                        <button
+                          onClick={() => handleSendRequest(activeCatalogSeries)}
+                          disabled={submittingReq}
+                          className="px-6 py-2.5 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-xs rounded-xl transition-all shadow-md flex items-center gap-2"
+                        >
+                          <Send size={14} />
+                          {submittingReq ? "در حال ثبت درخواست..." : "ارسال درخواست همکاری به مدیریت"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+              </div>
+            </div>
+          )}
+
         </div>
       )}
 
+      {/* ========================================================================= */}
+      {/* SUB-TAB 2: MY ASSIGNED WORKS & CHAPTER SUBMISSIONS (کارهای من و ارسال چپتر) */}
+      {/* ========================================================================= */}
       {activeSubTab === "my_projects" && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Projects sidebar */}
-          <div className="lg:col-span-4 space-y-4">
-            <h3 className="text-sm font-black text-white">پروژه‌هایی که عضو تایید شده آن‌ها هستید</h3>
-            {myProjects.length === 0 ? (
-              <div className="bg-black/20 border border-white/5 rounded-2xl p-8 text-center text-zinc-500 text-xs font-bold">
-                شما هنوز عضو تایید شده هیچ کار تیمی نشده‌اید. از تب "کل آثار ساخته شده" درخواست عضویت ارسال کنید.
+        <div className="space-y-6">
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4">
+            <h3 className="text-sm font-black text-white flex items-center gap-2">
+              <Briefcase size={18} className="text-[var(--color-asura-accent)]" />
+              پروژه‌های تایید شده و فعال شما
+            </h3>
+            <p className="text-xs text-zinc-400">
+              روی هر یک از مانهواهای زیر کلیک کنید تا پنل ارسال فایل‌های ترجمه، کلین یا ادیت برای شما باز شود.
+            </p>
+
+            {myApprovedSeries.length === 0 ? (
+              <div className="bg-black/30 border border-white/5 rounded-xl p-8 text-center text-zinc-400 space-y-2">
+                <AlertCircle size={28} className="mx-auto text-amber-400 mb-1" />
+                <p className="text-xs font-bold text-white">شما هنوز در هیچ پروژه‌ای عضو تایید شده نیستید.</p>
+                <p className="text-[11px] text-zinc-500">از تب «جستجوی کارها و درخواست همکاری» برای ارسال درخواست به مدیریت اقدام کنید.</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {myProjects.map(s => {
-                  const roleObj = s.contributors?.find((c: any) => c.userId === user?.uid && c.status === "approved");
-                  const isActive = selectedSeriesId === s.id;
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                {myApprovedSeries.map((s: any) => {
+                  const isSelected = selectedSeriesId === s.id;
+                  const myRoleObj = Array.isArray(s.contributors) 
+                    ? s.contributors.find((c: any) => c.userId === user?.uid && c.status === "approved")
+                    : null;
+                  const myRoleName = myRoleObj?.role || (isGlobalAdmin ? "مدیریت کل" : "همکار");
 
                   return (
                     <button
                       key={s.id}
                       onClick={() => loadChaptersForSeries(s.id)}
-                      className={`w-full text-right p-3.5 rounded-2xl border flex items-center gap-4 transition-all duration-300 ${isActive ? 'bg-[var(--color-asura-accent)]/10 border-[var(--color-asura-accent)] shadow-lg shadow-[var(--color-asura-accent)]/5' : 'bg-black/20 border-white/5 hover:bg-white/5'}`}
+                      className={`p-2.5 rounded-2xl border text-right transition-all flex flex-col justify-between ${
+                        isSelected 
+                          ? "bg-[var(--color-asura-accent)]/15 border-[var(--color-asura-accent)] ring-2 ring-[var(--color-asura-accent)]/30"
+                          : "bg-black/40 border-white/10 hover:border-white/20 hover:bg-black/60"
+                      }`}
                     >
-                      <img src={s.cover} alt={s.title} className="w-10 h-14 object-cover rounded-lg shrink-0 shadow-md" />
-                      <div className="flex-1 min-w-0">
-                        <h4 className={`font-black text-xs truncate ${isActive ? 'text-[var(--color-asura-accent-light)]' : 'text-zinc-200'}`}>{s.title}</h4>
-                        <span className="mt-1 bg-white/5 border border-white/10 text-zinc-400 font-bold text-[9px] px-1.5 py-0.5 rounded inline-block">
-                          سمت شما: {getRoleLabel(roleObj?.role || "")}
+                      <img src={s.cover} alt="" className="w-full aspect-[3/4] object-cover rounded-xl mb-2" />
+                      <div>
+                        <h4 className="text-xs font-black text-white truncate">{s.title}</h4>
+                        <span className="text-[10px] text-amber-400 font-bold block mt-0.5">
+                          نقش: {myRoleName === 'translator' ? 'مترجم' : myRoleName === 'cleaner' ? 'کلینر' : myRoleName === 'editor' ? 'ادیتور' : myRoleName}
                         </span>
                       </div>
                     </button>
@@ -560,401 +922,555 @@ export default function CooperationTab({
             )}
           </div>
 
-          {/* Active Chapters Workspace */}
-          <div className="lg:col-span-8 bg-black/40 border border-white/5 rounded-2xl p-6">
-            {!selectedSeriesId ? (
-              <div className="h-full flex flex-col items-center justify-center p-8 text-center text-zinc-500 text-xs font-bold min-h-[300px]">
-                <Briefcase size={40} className="text-zinc-600 mb-3 animate-pulse" />
-                یک پروژه را از سایدبار سمت راست انتخاب کنید تا لیست چپترها و فرم‌های ارسال کار نمایش داده شوند.
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {/* Series Title and New Chapter action */}
-                <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                  <h3 className="font-black text-white text-sm">
-                     چپترهای فعال پروژه: <span className="text-[var(--color-asura-accent-light)]">{seriesList.find(s => s.id === selectedSeriesId)?.title}</span>
+          {/* Chapters and Submission Workspace for Selected Series */}
+          {selectedSeriesId && (
+            <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-6">
+              
+              <div className="flex flex-wrap items-center justify-between border-b border-white/10 pb-4 gap-4">
+                <div>
+                  <h3 className="text-base font-black text-white flex items-center gap-2">
+                    <FileText size={18} className="text-[var(--color-asura-accent-light)]" />
+                    مدیریت چپترهای اثر: <span className="text-[var(--color-asura-accent-light)]">{seriesList.find((s: any) => s.id === selectedSeriesId)?.title}</span>
                   </h3>
-                  
-                  <button
-                    onClick={() => setShowCreateChapter(!showCreateChapter)}
-                    className="bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-[11px] px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
-                  >
-                    <Plus size={14} /> ایجاد چپتر جدید
-                  </button>
+                  <p className="text-xs text-zinc-400 mt-1">جهت ارسال ترجمه، کلین یا خروجی نهایی ادیت، چپتر مورد نظر را انتخاب نمایید.</p>
                 </div>
 
-                {/* Chapter fast create form */}
-                {showCreateChapter && (
-                  <div className="bg-zinc-950 border border-white/5 rounded-2xl p-4 space-y-3">
-                    <h4 className="text-xs font-black text-white">ایجاد چپتر جدید برای همکاری تیمی</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-[10px] text-zinc-400 font-bold mb-1">شماره چپتر:</label>
-                        <input
-                          type="number"
-                          step="any"
-                          placeholder="مثلاً 1 یا 15.5"
-                          value={newChapterNumber}
-                          onChange={(e) => setNewChapterNumber(e.target.value)}
-                          className="w-full bg-black border border-white/5 text-white rounded-lg p-2 text-xs font-black focus:outline-none focus:border-[var(--color-asura-accent)] text-center"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-zinc-400 font-bold mb-1">عنوان چپتر (اختیاری):</label>
-                        <input
-                          type="text"
-                          placeholder="مثلاً شروع نبرد"
-                          value={newChapterTitle}
-                          onChange={(e) => setNewChapterTitle(e.target.value)}
-                          className="w-full bg-black border border-white/5 text-white rounded-lg p-2 text-xs font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
-                        />
-                      </div>
+                <button
+                  onClick={() => setShowCreateChapter(!showCreateChapter)}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow"
+                >
+                  <Plus size={16} />
+                  ایجاد سریع چپتر جدید
+                </button>
+              </div>
+
+              {/* Fast chapter creation form */}
+              {showCreateChapter && (
+                <div className="bg-black/60 border border-indigo-500/30 p-4 rounded-2xl space-y-3">
+                  <h4 className="text-xs font-black text-indigo-400">ایجاد چپتر جدید برای این پروژه:</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="block text-[10px] text-zinc-400 font-bold mb-1">شماره چپتر (مثلاً 1 یا 10.5):</label>
+                      <input
+                        type="text"
+                        placeholder="1"
+                        value={newChapterNumber}
+                        onChange={(e) => setNewChapterNumber(e.target.value)}
+                        className="w-full bg-black border border-white/10 rounded-xl p-2.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-indigo-500"
+                      />
                     </div>
-                    <div className="flex gap-2 justify-end pt-2">
-                      <button
-                        onClick={handleCreatePendingChapter}
-                        disabled={creatingChapter}
-                        className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-black font-black text-xs px-4 py-2 rounded-xl transition-all"
-                      >
-                        {creatingChapter ? "در حال ساخت..." : "تایید و ساخت"}
-                      </button>
-                      <button
-                        onClick={() => setShowCreateChapter(false)}
-                        className="bg-white/5 hover:bg-white/10 text-zinc-400 text-xs px-4 py-2 rounded-xl transition-all"
-                      >
-                        لغو
-                      </button>
+                    <div>
+                      <label className="block text-[10px] text-zinc-400 font-bold mb-1">عنوان چپتر (اختیاری):</label>
+                      <input
+                        type="text"
+                        placeholder="چپتر 1"
+                        value={newChapterTitle}
+                        onChange={(e) => setNewChapterTitle(e.target.value)}
+                        className="w-full bg-black border border-white/10 rounded-xl p-2.5 text-xs text-white font-bold focus:outline-none focus:border-indigo-500"
+                      />
                     </div>
                   </div>
-                )}
-
-                {/* Chapters workflow list */}
-                {loadingChapters ? (
-                  <div className="text-center py-8 text-zinc-500 text-xs font-bold">در حال بارگذاری چپترها...</div>
-                ) : chaptersList.length === 0 ? (
-                  <div className="bg-black/20 border border-white/5 rounded-2xl p-8 text-center text-zinc-500 text-xs font-bold">
-                    هیچ چپتری هنوز ثبت نشده است. اولین چپتر را ایجاد کنید!
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      onClick={() => setShowCreateChapter(false)}
+                      className="px-3 py-1.5 bg-white/5 text-zinc-300 rounded-xl text-xs font-bold"
+                    >
+                      انصراف
+                    </button>
+                    <button
+                      onClick={handleCreateFastChapter}
+                      disabled={creatingChapter || !newChapterNumber.trim()}
+                      className="px-4 py-1.5 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 transition-all"
+                    >
+                      {creatingChapter ? "در حال ایجاد..." : "ثبت چپتر"}
+                    </button>
                   </div>
-                ) : (
-                  <div className="space-y-4">
-                    {chaptersList.map(ch => {
-                      const isExpanded = expandedChapterId === ch.id;
-                      const hasSubmissions = ch.submissions && ch.submissions.length > 0;
-                      
-                      // Active role in selected series
-                      const activeSeries = seriesList.find(s => s.id === ch.seriesId);
-                      const myRoleObj = activeSeries?.contributors?.find((c: any) => c.userId === user?.uid && c.status === "approved");
-                      const myRole = myRoleObj?.role || "translator";
+                </div>
+              )}
 
-                      // Submissions filtered by role
-                      const transSubs = ch.submissions?.filter((s: any) => s.role === "translator") || [];
-                      const cleanSubs = ch.submissions?.filter((s: any) => s.role === "cleaner" || s.role === "typesetter") || [];
-                      const editSubs = ch.submissions?.filter((s: any) => s.role === "editor") || [];
+              {/* Chapters List */}
+              {loadingChapters ? (
+                <div className="p-8 text-center text-zinc-400 text-xs animate-pulse">در حال دریافت لیست چپترها...</div>
+              ) : chaptersList.length === 0 ? (
+                <div className="p-8 text-center text-zinc-500 text-xs bg-black/30 rounded-xl border border-white/5">
+                  هیچ چپتری برای این اثر تعریف نشده است. از دکمه «ایجاد سریع چپتر جدید» استفاده کنید.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {chaptersList.map((ch: any) => {
+                    const isExpanded = expandedChapterId === ch.id;
+                    const activeSeriesObj = seriesList.find((s: any) => s.id === selectedSeriesId);
+                    const myRoleObj = Array.isArray(activeSeriesObj?.contributors) 
+                      ? activeSeriesObj?.contributors.find((c: any) => c.userId === user?.uid && c.status === "approved")
+                      : null;
+                    const myRole = myRoleObj?.role || (isGlobalAdmin ? "editor" : "translator");
 
-                      return (
-                        <div key={ch.id} className={`border rounded-2xl overflow-hidden transition-all duration-300 ${isExpanded ? 'bg-zinc-950/80 border-[var(--color-asura-accent)]/50' : 'bg-black/20 border-white/5 hover:bg-white/5'}`}>
-                          {/* Chapter row header */}
-                          <div 
-                            onClick={() => setExpandedChapterId(isExpanded ? null : ch.id)}
-                            className="p-4 flex items-center justify-between cursor-pointer select-none"
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 bg-black/40 border border-white/5 rounded-xl flex items-center justify-center shrink-0">
-                                <span className="font-black text-white text-sm">{ch.number}</span>
-                              </div>
-                              <div>
-                                <h4 className="font-bold text-white text-xs">{ch.title || `چپتر ${ch.number}`}</h4>
-                                <div className="flex items-center gap-2 mt-1">
-                                  {ch.isPending ? (
-                                    <span className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[9px] font-black px-2 py-0.5 rounded-full">
-                                      پرایوت (در انتظار تایید انتشار)
-                                    </span>
-                                  ) : (
-                                    <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-black px-2 py-0.5 rounded-full">
-                                      منتشر شده عمومی
-                                    </span>
-                                  )}
-                                  
-                                  <span className="text-[10px] text-zinc-500 font-bold">
-                                    تعداد سابمیشن‌ها: {ch.submissions?.length || 0}
+                    // Submissions inside chapter
+                    const submissions = ch.submissions || [];
+                    const translatorSub = submissions.find((s: any) => s.role === "translator");
+                    const cleanerSub = submissions.find((s: any) => s.role === "cleaner");
+                    const editorSub = submissions.find((s: any) => s.role === "editor");
+
+                    return (
+                      <div key={ch.id} className="bg-black/50 border border-white/10 rounded-2xl overflow-hidden">
+                        
+                        {/* Chapter summary row */}
+                        <div
+                          onClick={() => setExpandedChapterId(isExpanded ? null : ch.id)}
+                          className="p-4 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-all"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center font-black text-white text-sm font-mono border border-white/10">
+                              {ch.number}
+                            </span>
+                            <div>
+                              <h4 className="text-xs font-black text-white">{ch.title || `چپتر ${ch.number}`}</h4>
+                              <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-400 mt-1">
+                                {ch.isPending ? (
+                                  <span className="text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                                    در انتظار بررسی مدیریت
                                   </span>
-                                </div>
-                              </div>
-                            </div>
+                                ) : (
+                                  <span className="text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                                    منتشر شده پابلیک
+                                  </span>
+                                )}
 
-                            <div className="flex items-center gap-2">
-                              {/* Workflow mini indicators */}
-                              <div className="hidden sm:flex items-center gap-1.5 ml-4">
-                                <span className={`w-2.5 h-2.5 rounded-full ${transSubs.length > 0 ? "bg-emerald-500" : "bg-zinc-800"}`} title="ترجمه" />
-                                <span className={`w-2.5 h-2.5 rounded-full ${cleanSubs.length > 0 ? "bg-emerald-500" : "bg-zinc-800"}`} title="کلین" />
-                                <span className={`w-2.5 h-2.5 rounded-full ${editSubs.length > 0 ? "bg-emerald-500" : "bg-zinc-800"}`} title="ادیت" />
+                                {translatorSub && <span className="text-blue-400">✓ فایل ترجمه موجود</span>}
+                                {cleanerSub && <span className="text-teal-400">✓ فایل کلین موجود</span>}
+                                {editorSub && <span className="text-purple-400">✓ خروجی ادیت موجود</span>}
                               </div>
-                              {isExpanded ? <ChevronUp size={16} className="text-zinc-400" /> : <ChevronDown size={16} className="text-zinc-400" />}
                             </div>
                           </div>
 
-                          {/* Expanded content */}
-                          {isExpanded && (
-                            <div className="p-4 border-t border-white/5 bg-black/20 space-y-6 text-right">
-                              {/* Progress Map / Workflow steps */}
-                              <div className="bg-zinc-950 p-5 rounded-2xl border border-white/5 space-y-4">
-                                <div className="flex items-center justify-between">
-                                  <h5 className="text-[11px] font-black text-zinc-300 flex items-center gap-1.5 uppercase tracking-wider">
-                                    <Sparkles size={13} className="text-[var(--color-asura-accent)]" />
-                                    وضعیت و پیشرفت ساخت چپتر {ch.number}
-                                  </h5>
-                                  <span className="text-xs font-black font-mono text-[var(--color-asura-accent-light)] bg-white/5 px-2.5 py-1 rounded-lg border border-white/5">
-                                    {((transSubs.length > 0 ? 25 : 0) + (cleanSubs.length > 0 ? 25 : 0) + (editSubs.length > 0 ? 25 : 0) + (!ch.isPending ? 25 : 0))}%
-                                  </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-[var(--color-asura-accent-light)] flex items-center gap-1">
+                              {isExpanded ? "بستن پنل" : "ارسال فایل / دانلود"}
+                              {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Chapter Expanded Submission & Role Area */}
+                        {isExpanded && (
+                          <div className="p-5 border-t border-white/10 bg-zinc-900/80 space-y-5">
+                            
+                            {/* Workflow files status table */}
+                            <div className="bg-black/40 border border-white/5 rounded-xl p-4 text-xs space-y-3">
+                              <h5 className="font-black text-white flex items-center gap-2">
+                                <Clock size={14} className="text-amber-400" />
+                                وضعیت فایل‌های ارسالی همکاران برای چپتر {ch.number}:
+                              </h5>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                
+                                {/* Translator File */}
+                                <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
+                                  <span className="block text-[10px] text-zinc-400 font-bold uppercase">۱. فایل ترجمه (مترجم):</span>
+                                  {translatorSub ? (
+                                    <div className="space-y-1">
+                                      <span className="block text-emerald-400 font-bold">{translatorSub.userName}</span>
+                                      {translatorSub.fileUrl ? (
+                                        <a
+                                          href={translatorSub.fileUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="inline-flex items-center gap-1 text-[11px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-1 rounded-lg font-bold hover:bg-emerald-500/30 transition-all"
+                                        >
+                                          <Download size={12} />
+                                          دانلود فایل Word ترجمه
+                                        </a>
+                                      ) : (
+                                        <span className="text-zinc-500 text-[10px]">بدون فایل پیوست</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-amber-400/70 text-[11px]">هنوز ترجمه ثبت نشده است</span>
+                                  )}
                                 </div>
 
-                                {/* Visual Progress Bar */}
-                                <div className="relative w-full bg-black/60 h-2.5 rounded-full overflow-hidden border border-white/5">
-                                  <div 
-                                    className="h-full bg-gradient-to-r from-[var(--color-asura-accent)] via-purple-500 to-emerald-500 transition-all duration-500 rounded-full"
-                                    style={{ width: `${(transSubs.length > 0 ? 25 : 0) + (cleanSubs.length > 0 ? 25 : 0) + (editSubs.length > 0 ? 25 : 0) + (!ch.isPending ? 25 : 0)}%` }}
+                                {/* Cleaner File */}
+                                <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
+                                  <span className="block text-[10px] text-zinc-400 font-bold uppercase">۲. فایل کلین (کلینر):</span>
+                                  {cleanerSub ? (
+                                    <div className="space-y-1">
+                                      <span className="block text-emerald-400 font-bold">{cleanerSub.userName}</span>
+                                      {cleanerSub.fileUrl ? (
+                                        <a
+                                          href={cleanerSub.fileUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="inline-flex items-center gap-1 text-[11px] bg-teal-500/20 text-teal-300 border border-teal-500/30 px-2.5 py-1 rounded-lg font-bold hover:bg-teal-500/30 transition-all"
+                                        >
+                                          <Download size={12} />
+                                          دانلود فایل Zip کلین
+                                        </a>
+                                      ) : (
+                                        <span className="text-zinc-500 text-[10px]">بدون فایل پیوست</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-amber-400/70 text-[11px]">هنوز کلین ثبت نشده است</span>
+                                  )}
+                                </div>
+
+                                {/* Editor File */}
+                                <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
+                                  <span className="block text-[10px] text-zinc-400 font-bold uppercase">۳. خروجی نهایی (ادیتور):</span>
+                                  {editorSub ? (
+                                    <div className="space-y-1">
+                                      <span className="block text-purple-400 font-bold">{editorSub.userName}</span>
+                                      <span className="text-xs text-white font-mono block">
+                                        {Array.isArray(ch.images) ? `${ch.images.length} تصویر نهایی` : 'آماده بررسی'}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-amber-400/70 text-[11px]">در انتظار بارگذاری نهایی ادیتور</span>
+                                  )}
+                                </div>
+
+                              </div>
+                            </div>
+
+                            {/* Role Submission Form */}
+                            <div className="bg-black/60 border border-[var(--color-asura-accent)]/30 rounded-2xl p-5 space-y-4">
+                              <h5 className="text-xs font-black text-white flex items-center gap-2">
+                                <UploadCloud size={16} className="text-[var(--color-asura-accent)]" />
+                                ثبت و آپلود گزارش کار چپتر {ch.number} (به عنوان: <strong className="text-amber-400">{myRole === 'translator' ? 'مترجم' : myRole === 'cleaner' ? 'کلینر' : 'ادیتور'}</strong>)
+                              </h5>
+
+                              {/* Direct File Upload Control */}
+                              <div className="space-y-2">
+                                <label className="block text-[10px] text-zinc-300 font-bold">
+                                  {myRole === "translator" && "آپلود فایل Word (.docx / .doc) یا متنی ترجمه:"}
+                                  {myRole === "cleaner" && "آپلود آرشیو Zip یا عکس‌های کلین شده:"}
+                                  {myRole === "editor" && "آپلود صفحات نهایی فتوشاپ/ادیت شده (Zip یا عکس):"}
+                                </label>
+
+                                <div className="flex items-center gap-3">
+                                  <input
+                                    type="file"
+                                    accept={
+                                      myRole === "translator" 
+                                        ? ".doc,.docx,.txt" 
+                                        : ".zip,.rar,image/*"
+                                    }
+                                    multiple={myRole === "editor" || myRole === "cleaner"}
+                                    onChange={(e) => handleDirectFileUpload(e, myRole)}
+                                    disabled={uploadingFile}
+                                    className="block w-full text-xs text-zinc-400 file:mr-0 file:ml-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-[var(--color-asura-accent)] file:text-white hover:file:bg-[var(--color-asura-accent-hover)] cursor-pointer"
                                   />
                                 </div>
 
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2 text-center">
-                                  <div className={`p-3 rounded-xl border transition-all ${transSubs.length > 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-black/40 border-white/5 text-zinc-500"}`}>
-                                    <div className="flex items-center justify-center gap-1.5 text-[11px] font-black">
-                                      <CheckCircle size={13} className={transSubs.length > 0 ? "text-emerald-400" : "text-zinc-600"} />
-                                      ۱. ترجمه (Word)
-                                    </div>
-                                    <div className="text-[9px] mt-1.5 font-bold truncate">
-                                      {transSubs.length > 0 ? `توسط ${transSubs[transSubs.length-1].userName}` : "منتظر دریافت"}
-                                    </div>
-                                  </div>
-
-                                  <div className={`p-3 rounded-xl border transition-all ${cleanSubs.length > 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-black/40 border-white/5 text-zinc-500"}`}>
-                                    <div className="flex items-center justify-center gap-1.5 text-[11px] font-black">
-                                      <CheckCircle size={13} className={cleanSubs.length > 0 ? "text-emerald-400" : "text-zinc-600"} />
-                                      ۲. کلین و پاک‌سازی
-                                    </div>
-                                    <div className="text-[9px] mt-1.5 font-bold truncate">
-                                      {cleanSubs.length > 0 ? `توسط ${cleanSubs[cleanSubs.length-1].userName}` : "منتظر دریافت"}
-                                    </div>
-                                  </div>
-
-                                  <div className={`p-3 rounded-xl border transition-all ${editSubs.length > 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-black/40 border-white/5 text-zinc-500"}`}>
-                                    <div className="flex items-center justify-center gap-1.5 text-[11px] font-black">
-                                      <CheckCircle size={13} className={editSubs.length > 0 ? "text-emerald-400" : "text-zinc-600"} />
-                                      ۳. ادیت و تایپ
-                                    </div>
-                                    <div className="text-[9px] mt-1.5 font-bold truncate">
-                                      {editSubs.length > 0 ? `توسط ${editSubs[editSubs.length-1].userName}` : "منتظر دریافت"}
-                                    </div>
-                                  </div>
-
-                                  <div className={`p-3 rounded-xl border transition-all ${!ch.isPending ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-black/40 border-white/5 text-zinc-500"}`}>
-                                    <div className="flex items-center justify-center gap-1.5 text-[11px] font-black">
-                                      <CheckCircle size={13} className={!ch.isPending ? "text-emerald-400" : "text-zinc-600"} />
-                                      ۴. تایید و انتشار
-                                    </div>
-                                    <div className="text-[9px] mt-1.5 font-bold truncate">
-                                      {!ch.isPending ? "انتشار عمومی" : "در انتظار مدیریت"}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Chapter images preview for checking */}
-                              {ch.images && ch.images.length > 0 && (
-                                <div className="bg-zinc-950 p-4 rounded-xl border border-white/5">
-                                  <h5 className="text-[11px] font-black text-zinc-400 mb-2">تصاویر نهایی بارگذاری شده ({ch.images.length} تصویر)</h5>
-                                  <div className="flex gap-2 overflow-x-auto py-2 scrollbar-thin">
-                                    {ch.images.map((imgUrl, i) => (
-                                      <div key={i} className="relative w-12 h-16 bg-black rounded border border-white/10 shrink-0 overflow-hidden">
-                                        <img src={imgUrl} alt={`p${i}`} className="w-full h-full object-cover" />
-                                        <span className="absolute bottom-0 right-0 bg-black/80 text-[8px] font-sans text-white px-1">{i + 1}</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Submissions Feed / Workspace history */}
-                              <div className="space-y-3">
-                                <h5 className="text-xs font-black text-white">سابقه ارسال‌های این چپتر</h5>
-                                {!hasSubmissions ? (
-                                  <p className="text-[10px] text-zinc-500 italic">هیچ ارسالی تاکنون برای این چپتر ثبت نشده است.</p>
-                                ) : (
-                                  <div className="space-y-2">
-                                    {ch.submissions?.map((sub: any, sIdx: number) => (
-                                      <div key={sub.id || sIdx} className="bg-zinc-950 border border-white/5 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                        <div>
-                                          <div className="flex items-center gap-2">
-                                            <span className="text-xs font-black text-zinc-200">{sub.userName}</span>
-                                            <span className="bg-white/5 text-zinc-400 font-bold text-[9px] px-1.5 py-0.5 rounded">{getRoleLabel(sub.role)}</span>
-                                            <span className="text-zinc-600 font-mono text-[9px]">{new Date(sub.createdAt).toLocaleDateString('fa-IR')}</span>
-                                          </div>
-                                          {sub.note && <p className="text-zinc-400 text-xs mt-1 font-medium">{sub.note}</p>}
-                                        </div>
-                                        {sub.fileUrl && (
-                                          <a 
-                                            href={sub.fileUrl} 
-                                            target="_blank" 
-                                            referrerPolicy="no-referrer"
-                                            rel="noopener noreferrer" 
-                                            className="bg-white/5 hover:bg-white/10 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg border border-white/10 flex items-center justify-center gap-1 self-start sm:self-auto"
-                                          >
-                                            <ExternalLink size={12} /> باز کردن لینک کار
-                                          </a>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
+                                {uploadingFile && (
+                                  <p className="text-[11px] text-amber-400 font-bold animate-pulse">{uploadStatus}</p>
+                                )}
+                                {!uploadingFile && uploadStatus && (
+                                  <p className="text-[11px] text-emerald-400 font-bold">{uploadStatus}</p>
                                 )}
                               </div>
 
-                              {/* Submit work Form */}
-                              {!ch.isPending ? (
-                                <div className="bg-emerald-500/5 border border-emerald-500/20 p-5 rounded-2xl flex flex-col gap-1 text-emerald-400">
-                                  <h5 className="text-xs font-black flex items-center gap-1.5">
-                                    <CheckCircle size={14} /> چپتر تایید نهایی و منتشر شده است
-                                  </h5>
-                                  <p className="text-[10px] text-zinc-400 mt-1">
-                                    این چپتر توسط مدیریت کل تایید نهایی شده و روی سایت پابلیک است. امکان ارسال گزارش کار جدید، آپلود مجدد یا تغییر مقادیر برای کادر فنی مسدود می‌باشد.
-                                  </p>
-                                </div>
-                              ) : (
-                                <div className="bg-zinc-950 p-5 rounded-2xl border border-white/5 space-y-4">
-                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-3">
-                                    <h5 className="text-xs font-black text-white flex items-center gap-1.5">
-                                      <Send size={14} className="text-[var(--color-asura-accent)]" /> 
-                                      میز ارسال کار به عنوان <span className="text-[var(--color-asura-accent-light)] font-black">{getRoleLabel(myRole)}</span>
-                                    </h5>
-                                    <div className="bg-white/5 px-3 py-1 rounded-lg text-[11px] font-bold text-zinc-300 border border-white/5">
-                                      سهم شما از فروش چپتر: <span className="text-emerald-400 font-black">{myRole === 'translator' ? '۲۰٪' : myRole === 'cleaner' ? '۳۰٪' : myRole === 'editor' ? '۳۰٪' : 'پیش‌فرض'}</span>
-                                    </div>
-                                  </div>
+                              <div>
+                                <label className="block text-[10px] text-zinc-400 font-bold mb-1">
+                                  یا لینک مستقیم گوگل درایو / مگا (در صورت استفاده از هاست خارجی):
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="https://drive.google.com/file/d/..."
+                                  value={submitFileUrl}
+                                  onChange={(e) => setSubmitFileUrl(e.target.value)}
+                                  className="w-full bg-black border border-white/10 text-white rounded-xl p-2.5 text-xs font-mono font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                                />
+                              </div>
 
-                                  <div className="space-y-4">
-                                    {/* Direct File Upload Control */}
-                                    <div className="bg-black/40 border border-dashed border-white/10 hover:border-[var(--color-asura-accent)] p-4 rounded-xl transition-colors">
-                                      <label className="block text-xs font-bold text-white mb-1 flex items-center gap-1.5">
-                                        <UploadCloud size={15} className="text-[var(--color-asura-accent)]" />
-                                        {myRole === "translator" && "آپلود مستقیم فایل ترجمه (فایل Word با پسوند doc. یا docx.)"}
-                                        {myRole === "cleaner" && "آپلود مستقیم فایل کلین (فایل Zip یا تصاویر پاک‌سازی شده)"}
-                                        {myRole === "editor" && "آپلود مستقیم فایل ادیت/تایپوگرافی (فایل Zip یا صفحات نهایی مانهوا)"}
-                                        {myRole !== "translator" && myRole !== "cleaner" && myRole !== "editor" && "آپلود مستقیم فایل کار"}
-                                      </label>
-                                      <p className="text-[10px] text-zinc-400 mb-3">
-                                        {myRole === "translator" && "فایل وُرد پس از تایید مدیریت خودکار از هاست پاک می‌شود تا فضای سیستم اشغال نشود."}
-                                        {myRole === "cleaner" && "فایل زیپ کلین پس از انتشار عمومی خودکار جهت بهینه‌سازی حافظه پاک خواهد شد."}
-                                        {myRole === "editor" && "فایل‌های زیپ نهایی استخراج شده و به عنوان صفحات اختصاصی پرایوت چپتر ذخیره می‌شوند."}
-                                      </p>
-
-                                      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-                                        <input
-                                          type="file"
-                                          accept={
-                                            myRole === "translator" 
-                                              ? ".doc,.docx,.txt" 
-                                              : myRole === "cleaner" 
-                                              ? ".zip,image/*" 
-                                              : ".zip,image/*"
-                                          }
-                                          multiple={myRole === "editor" || myRole === "cleaner"}
-                                          onChange={(e) => handleDirectFileUpload(e, myRole)}
-                                          disabled={uploadingFile}
-                                          className="block w-full text-xs text-zinc-400 file:mr-0 file:ml-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-[var(--color-asura-accent)] file:text-white hover:file:bg-[var(--color-asura-accent-hover)] cursor-pointer"
-                                        />
-                                      </div>
-
-                                      {uploadingFile && (
-                                        <p className="text-[11px] text-amber-400 font-bold mt-2 animate-pulse">{uploadStatus}</p>
-                                      )}
-                                      {!uploadingFile && uploadStatus && (
-                                        <p className="text-[11px] text-emerald-400 font-bold mt-2">{uploadStatus}</p>
-                                      )}
-                                    </div>
-
-                                    <div>
-                                      <label className="block text-[10px] text-zinc-400 font-bold mb-1">لینک مستقیم فایل کار (در صورت استفاده از گوگل درایو یا مگا):</label>
-                                      <input
-                                        type="text"
-                                        placeholder="https://drive.google.com/..."
-                                        value={submitFileUrl}
-                                        onChange={(e) => setSubmitFileUrl(e.target.value)}
-                                        className="w-full bg-black border border-white/5 text-white rounded-xl p-2.5 text-xs font-bold text-left focus:outline-none focus:border-[var(--color-asura-accent)]"
-                                      />
-                                    </div>
-
-                                    {myRole === "editor" && (
-                                      <div>
-                                        <label className="block text-[10px] text-zinc-400 font-bold mb-1">
-                                          تصاویر نهایی چپتر (مخصوص ادیتور - لینک مستقیم یا خروجی آپلود زیپ):
-                                        </label>
-                                        <textarea
-                                          rows={3}
-                                          placeholder="https://site.com/img1.jpg&#10;https://site.com/img2.jpg"
-                                          value={submitImages}
-                                          onChange={(e) => setSubmitImages(e.target.value)}
-                                          className="w-full bg-black border border-white/5 text-white rounded-xl p-2.5 text-xs font-bold text-left focus:outline-none focus:border-[var(--color-asura-accent)] font-sans"
-                                        />
-                                        <span className="text-[9px] text-zinc-500 block mt-1">با بارگذاری فایل زیپ یا ارسال این لینک‌ها، صفحات چپتر به صورت پرایوت برای بررسی ادمین آماده می‌گردند.</span>
-                                      </div>
-                                    )}
-
-                                    <div>
-                                      <label className="block text-[10px] text-zinc-400 font-bold mb-1">توضیحات یا یادداشت برای همکاران و مدیریت:</label>
-                                      <textarea
-                                        rows={2}
-                                        placeholder="مثلاً: ترجمه این چپتر انجام شد. خسته نباشید."
-                                        value={submitNote}
-                                        onChange={(e) => setSubmitNote(e.target.value)}
-                                        className="w-full bg-black border border-white/5 text-white rounded-xl p-2.5 text-xs font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
-                                      />
-                                    </div>
-
-                                    {submitError && <p className="text-red-400 text-xs font-bold">{submitError}</p>}
-                                    {submitSuccess && <p className="text-emerald-400 text-xs font-black">{submitSuccess}</p>}
-
-                                    <div className="flex gap-2 justify-end pt-2">
-                                      <button
-                                        onClick={() => handleSubmitChapterWork(ch)}
-                                        disabled={submittingWork || uploadingFile}
-                                        className="bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] disabled:opacity-50 text-white font-black text-xs px-5 py-2.5 rounded-xl transition-all flex items-center gap-1.5"
-                                      >
-                                        <Send size={13} />
-                                        {submittingWork ? "در حال ارسال..." : "ارسال نهایی گزارش کار"}
-                                      </button>
-                                    </div>
-                                  </div>
+                              {myRole === "editor" && (
+                                <div>
+                                  <label className="block text-[10px] text-zinc-400 font-bold mb-1">
+                                    لیست آدرس تصاویر خروجی نهایی ادیتور (هر لینک در یک سطر):
+                                  </label>
+                                  <textarea
+                                    rows={3}
+                                    placeholder="https://site.com/uploads/ch1_p1.jpg&#10;https://site.com/uploads/ch1_p2.jpg"
+                                    value={submitImages}
+                                    onChange={(e) => setSubmitImages(e.target.value)}
+                                    className="w-full bg-black border border-white/10 text-white rounded-xl p-2.5 text-xs font-mono font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                                  />
                                 </div>
                               )}
 
-                              {/* Admin approval panel for pending chapters */}
-                              {isGlobalAdmin && ch.isPending && (
-                                <div className="bg-amber-500/5 border border-amber-500/20 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                                  <div>
-                                    <h5 className="text-xs font-black text-amber-400 flex items-center gap-1">
-                                      <AlertCircle size={14} /> تایید و انتشار عمومی این چپتر (مخصوص مدیریت)
-                                    </h5>
-                                    <p className="text-[10px] text-zinc-400 mt-1">این چپتر توسط کادر فنی آماده شده است. با زدن دکمه زیر، چپتر فوراً عمومی شده و اعلان آن برای کاربران ارسال می‌شود.</p>
-                                  </div>
-                                  <button
-                                    onClick={() => handleApproveChapter(ch)}
-                                    className="bg-amber-500 hover:bg-amber-600 text-black font-black text-xs px-5 py-2.5 rounded-xl transition-all shrink-0 flex items-center gap-1"
-                                  >
-                                    <Check size={14} /> تایید و انتشار چپتر
-                                  </button>
-                                </div>
-                              )}
+                              <div>
+                                <label className="block text-[10px] text-zinc-400 font-bold mb-1">یادداشت و توضیحات کار برای مدیریت و همکاران:</label>
+                                <textarea
+                                  rows={2}
+                                  placeholder="توضیحات اختیاری درباره این چپتر..."
+                                  value={submitNote}
+                                  onChange={(e) => setSubmitNote(e.target.value)}
+                                  className="w-full bg-black border border-white/10 text-white rounded-xl p-2.5 text-xs font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                                />
+                              </div>
+
+                              {submitError && <p className="text-red-400 text-xs font-bold">{submitError}</p>}
+                              {submitSuccess && <p className="text-emerald-400 text-xs font-black">{submitSuccess}</p>}
+
+                              <div className="flex justify-end pt-2">
+                                <button
+                                  onClick={() => handleSubmitChapterWork(ch, myRole)}
+                                  disabled={submittingWork || uploadingFile}
+                                  className="px-6 py-2.5 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-xs rounded-xl transition-all flex items-center gap-2 shadow"
+                                >
+                                  <Send size={14} />
+                                  {submittingWork ? "در حال ثبت..." : "تایید و ارسال کار به مدیریت"}
+                                </button>
+                              </div>
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
+
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SUB-TAB 3: SUPER ADMIN REQUESTS & TEAM MANAGEMENT (مدیریت درخواست‌ها و تیم) */}
+      {/* ========================================================================= */}
+      {activeSubTab === "admin_requests" && isGlobalAdmin && (
+        <div className="space-y-6">
+          
+          {/* Pending Applications Section */}
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <h3 className="text-base font-black text-amber-400 flex items-center gap-2">
+                <AlertCircle size={18} />
+                درخواست‌های جدید همکاری در انتظار تایید ({pendingRequestsList.length})
+              </h3>
+              <span className="text-xs text-zinc-400">تمام درخواست‌های کاربران جهت دریافت نقش روی آثار</span>
+            </div>
+
+            {pendingRequestsList.length === 0 ? (
+              <p className="text-xs text-zinc-500 bg-black/30 p-6 rounded-xl text-center border border-white/5">
+                هیچ درخواست جدیدی در انتظار تایید وجود ندارد.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {pendingRequestsList.map((req: any) => (
+                  <div key={`${req.seriesId}-${req.userId}`} className="bg-black/50 border border-amber-500/20 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-4 text-right">
+                      <img src={req.seriesCover} alt="" className="w-12 h-16 object-cover rounded-xl border border-white/10 shrink-0" />
+                      <div>
+                        <h4 className="text-sm font-black text-white">{req.displayName} ({req.email || 'بدون ایمیل'})</h4>
+                        <p className="text-xs text-zinc-300 mt-0.5">
+                          اثر درخواستی: <strong className="text-[var(--color-asura-accent-light)]">{req.seriesTitle}</strong>
+                        </p>
+                        <p className="text-[11px] text-zinc-400 mt-0.5">
+                          نقش: <strong className="text-amber-400">{req.role === 'translator' ? 'مترجم' : req.role === 'cleaner' ? 'کلینر' : 'ادیتور'}</strong> | کد کاربری/ملی: <strong className="text-white font-mono">{req.melliCode || 'ثبت نشده'}</strong>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleAdminProcessRequest(req.seriesId, req.userId, "approve", req.role)}
+                        disabled={processingActionId === `${req.seriesId}-${req.userId}`}
+                        className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-black text-xs rounded-xl transition-all flex items-center gap-1 shadow"
+                      >
+                        <Check size={14} /> تایید عضویت
+                      </button>
+
+                      <button
+                        onClick={() => handleAdminProcessRequest(req.seriesId, req.userId, "reject")}
+                        disabled={processingActionId === `${req.seriesId}-${req.userId}`}
+                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-black text-xs rounded-xl transition-all flex items-center gap-1 shadow"
+                      >
+                        <X size={14} /> رد درخواست
+                      </button>
+                    </div>
                   </div>
-                )}
+                ))}
               </div>
             )}
           </div>
+
+          {/* Series Staff & Chapter Attribution Management */}
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
+            <h3 className="text-base font-black text-white flex items-center gap-2">
+              <UsersIcon size={18} className="text-[var(--color-asura-accent)]" />
+              کاتالوگ آثار و مدیریت دست‌اندرکاران و چپترها
+            </h3>
+            <p className="text-xs text-zinc-400">برای تغییر، افزودن مستقیم یا حذف همکاران و مشاهده چپترها روی هر کار کلیک کنید.</p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              {seriesList.map((s: any) => {
+                const approvedCount = Array.isArray(s.contributors) 
+                  ? s.contributors.filter((c: any) => c.status === "approved").length 
+                  : 0;
+                return (
+                  <div key={s.id} className="p-3 bg-black/40 border border-white/10 rounded-2xl flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <img src={s.cover} alt="" className="w-10 h-14 object-cover rounded-lg shrink-0" />
+                      <div className="min-w-0">
+                        <h4 className="text-xs font-black text-white truncate">{s.title}</h4>
+                        <span className="text-[10px] text-zinc-400 block mt-0.5">{approvedCount} عضو فعال</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setActiveCatalogSeries(s);
+                        setShowAddStaffModal(false);
+                      }}
+                      className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl transition-all shrink-0"
+                    >
+                      مدیریت
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* SUB-TAB 4: SUPER ADMIN CHAPTER APPROVAL QUEUE (تایید و انتشار چپترها) */}
+      {/* ========================================================================= */}
+      {activeSubTab === "admin_approval" && isGlobalAdmin && (
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-6">
+          <div className="flex items-center justify-between border-b border-white/10 pb-4">
+            <div>
+              <h3 className="text-base font-black text-indigo-400 flex items-center gap-2">
+                <FileCheck size={18} />
+                صف تایید و انتشار عمومی چپترهای ارسالی ({allPendingChaptersQueue.length})
+              </h3>
+              <p className="text-xs text-zinc-400 mt-1">
+                چپترهای آماده شده توسط ادیتورها در این بخش منتظر تایید مدیریت هستند. با کلیک روی تایید، چپتر به همراه نوتیفیکیشن روی سایت منتشر می‌شود.
+              </p>
+            </div>
+
+            <button
+              onClick={fetchPendingQueue}
+              className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-white border border-white/10 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
+            >
+              <RefreshCw size={14} className={loadingPendingQueue ? "animate-spin" : ""} />
+              بروزرسانی صف
+            </button>
+          </div>
+
+          {loadingPendingQueue ? (
+            <div className="p-12 text-center text-zinc-400 text-xs animate-pulse">در حال دریافت صف چپترهای ارسالی...</div>
+          ) : allPendingChaptersQueue.length === 0 ? (
+            <div className="p-12 text-center text-zinc-500 bg-black/30 rounded-2xl border border-white/5 space-y-2">
+              <CheckCircle size={32} className="mx-auto text-emerald-400 mb-1" />
+              <p className="text-sm font-bold text-white">هیچ چپتری در صف تایید مدیریت قرار ندارد</p>
+              <p className="text-xs text-zinc-500">تمام چپترهای ارسالی بررسی و منتشر گردیده‌اند.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {allPendingChaptersQueue.map((ch: any) => {
+                const submissions = ch.submissions || [];
+                const translatorSub = submissions.find((s: any) => s.role === "translator");
+                const cleanerSub = submissions.find((s: any) => s.role === "cleaner");
+                const editorSub = submissions.find((s: any) => s.role === "editor");
+
+                return (
+                  <div key={`${ch.seriesId}-${ch.id}`} className="bg-black/60 border border-indigo-500/30 rounded-2xl p-5 space-y-4 shadow-xl">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/10 pb-3">
+                      <div className="flex items-center gap-3">
+                        <img src={ch.seriesCover} alt="" className="w-12 h-16 object-cover rounded-xl border border-white/10 shrink-0" />
+                        <div>
+                          <h4 className="text-sm font-black text-white">{ch.seriesTitle} - چپتر {ch.number}</h4>
+                          <span className="text-xs text-indigo-300 font-bold block mt-0.5">
+                            ارسال شده توسط ادیتور: {editorSub?.userName || 'کادر فنی'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setSelectedSeriesId(ch.seriesId);
+                            handleApproveChapter(ch);
+                          }}
+                          disabled={processingActionId === ch.id}
+                          className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-black font-black text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-emerald-500/20"
+                        >
+                          <Check size={16} /> تایید و انتشار عمومی روی سایت
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setSelectedSeriesId(ch.seriesId);
+                            handleRejectChapter(ch);
+                          }}
+                          disabled={processingActionId === ch.id}
+                          className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-black text-xs rounded-xl transition-all flex items-center gap-1 shadow"
+                        >
+                          <X size={15} /> رد چپتر
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Files and Notes */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                      
+                      <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-1">
+                        <span className="text-[10px] text-zinc-400 font-bold block">مترجم: {translatorSub?.userName || 'نامشخص'}</span>
+                        {translatorSub?.fileUrl ? (
+                          <a href={translatorSub.fileUrl} target="_blank" rel="noreferrer" className="text-emerald-400 font-bold hover:underline flex items-center gap-1">
+                            <Download size={12} /> دانلود فایل Word ترجمه
+                          </a>
+                        ) : (
+                          <span className="text-zinc-500">بدون فایل ترجمه</span>
+                        )}
+                      </div>
+
+                      <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-1">
+                        <span className="text-[10px] text-zinc-400 font-bold block">کلینر: {cleanerSub?.userName || 'نامشخص'}</span>
+                        {cleanerSub?.fileUrl ? (
+                          <a href={cleanerSub.fileUrl} target="_blank" rel="noreferrer" className="text-teal-400 font-bold hover:underline flex items-center gap-1">
+                            <Download size={12} /> دانلود فایل Zip کلین
+                          </a>
+                        ) : (
+                          <span className="text-zinc-500">بدون فایل کلین</span>
+                        )}
+                      </div>
+
+                      <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-1">
+                        <span className="text-[10px] text-zinc-400 font-bold block">تعداد تصاویر خروجی نهایی:</span>
+                        <span className="text-white font-mono font-bold">
+                          {Array.isArray(ch.images) ? `${ch.images.length} تصویر` : 'در دسترس'}
+                        </span>
+                      </div>
+
+                    </div>
+
+                    {/* Rejection note input */}
+                    <div className="pt-2 border-t border-white/5 flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="در صورت رد یا بازنگری، علت یا نکات اصلاحی را اینجا وارد کنید..."
+                        value={rejectionNoteMap[ch.id] || ""}
+                        onChange={(e) => setRejectionNoteMap({ ...rejectionNoteMap, [ch.id]: e.target.value })}
+                        className="flex-1 bg-black border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500 font-bold"
+                      />
+                    </div>
+
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }

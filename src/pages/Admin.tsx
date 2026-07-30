@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Layout } from "../components/Layout";
@@ -24,6 +24,8 @@ import {
   Coins,
   Eye,
   Trash2,
+  Activity,
+  RefreshCw,
 } from "lucide-react";
 import { Series } from "../lib/types";
 import CooperationTab from "../components/CooperationTab";
@@ -270,6 +272,41 @@ export default function Admin() {
   };
 
   const adminUid = (user as any)?.uid || user?.id || user?.email || 'admin';
+
+  const [dbStatus, setDbStatus] = useState<{
+    connected?: boolean;
+    isUsingMySQL?: boolean;
+    host?: string;
+    database?: string;
+    charset?: string;
+    latencyMs?: number;
+    tableCounts?: Record<string, number>;
+    statusText?: string;
+    lastChecked?: string;
+    loading?: boolean;
+  }>({});
+  const [fixingCharset, setFixingCharset] = useState(false);
+
+  const refreshDbStatus = useCallback(() => {
+    setDbStatus(prev => ({ ...prev, loading: true }));
+    apiClient.getDbStatus(adminUid)
+      .then(res => {
+        if (res) {
+          setDbStatus({ ...res, loading: false });
+        } else {
+          setDbStatus({ connected: false, statusText: "پاسخی از سرور دریافت نشد", loading: false });
+        }
+      })
+      .catch(err => {
+        setDbStatus({ connected: false, statusText: `خطا در دریافت وضعیت: ${err.message}`, loading: false });
+      });
+  }, [adminUid]);
+
+  useEffect(() => {
+    refreshDbStatus();
+    const interval = setInterval(refreshDbStatus, 15000);
+    return () => clearInterval(interval);
+  }, [refreshDbStatus]);
 
   const fetchStats = () => {
     apiClient.getAdminStats(adminUid).then(stats => {
@@ -1032,6 +1069,103 @@ export default function Admin() {
               <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4">
                 Platform Overview
               </h2>
+
+              {/* Real-time Live Database Connectivity Status Indicator */}
+              <div className="bg-gradient-to-r from-zinc-900 via-zinc-900/90 to-zinc-900 border border-white/10 rounded-2xl p-6 text-right space-y-4" dir="rtl">
+                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="relative flex h-3.5 w-3.5 items-center justify-center">
+                      {dbStatus.connected ? (
+                        <>
+                          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${dbStatus.isUsingMySQL ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+                          <span className={`relative inline-flex rounded-full h-3 w-3 ${dbStatus.isUsingMySQL ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                        </>
+                      ) : (
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-black text-white">وضعیت زنده اتصال به دیتابیس</h3>
+                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                          dbStatus.isUsingMySQL 
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+                            : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                        }`}>
+                          {dbStatus.isUsingMySQL ? 'MySQL Live (Shared Hosting)' : 'Local JSON Persistence'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-400 mt-0.5">{dbStatus.statusText || 'در حال بررسی اتصال به دیتابیس...'}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        if (fixingCharset) return;
+                        setFixingCharset(true);
+                        try {
+                          const res = await apiClient.fixCharset(adminUid);
+                          alert(res.message || 'عملیات بروزرسانی انکودینگ انجام شد.');
+                          refreshDbStatus();
+                        } catch (err: any) {
+                          alert(`خطا: ${err.message}`);
+                        } finally {
+                          setFixingCharset(false);
+                        }
+                      }}
+                      disabled={fixingCharset}
+                      className="px-3.5 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
+                    >
+                      <RefreshCw size={14} className={fixingCharset ? "animate-spin" : ""} />
+                      همگام‌سازی انکودینگ utf8mb4 (حل ???)
+                    </button>
+
+                    <button
+                      onClick={() => refreshDbStatus()}
+                      className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-white border border-white/10 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
+                    >
+                      <Activity size={14} className={dbStatus.loading ? "animate-spin" : ""} />
+                      تست مجدد اتصال
+                    </button>
+                  </div>
+                </div>
+
+                {/* Connection details grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="bg-black/40 border border-white/5 rounded-xl p-3 flex flex-col gap-1">
+                    <span className="text-zinc-500 text-[10px] font-bold uppercase">میزبان (Host):</span>
+                    <span className="text-white font-mono font-bold truncate">{dbStatus.host || '---'}</span>
+                  </div>
+                  <div className="bg-black/40 border border-white/5 rounded-xl p-3 flex flex-col gap-1">
+                    <span className="text-zinc-500 text-[10px] font-bold uppercase">نام دیتابیس:</span>
+                    <span className="text-white font-mono font-bold truncate">{dbStatus.database || '---'}</span>
+                  </div>
+                  <div className="bg-black/40 border border-white/5 rounded-xl p-3 flex flex-col gap-1">
+                    <span className="text-zinc-500 text-[10px] font-bold uppercase">انکودینگ متن (Charset):</span>
+                    <span className="text-emerald-400 font-mono font-bold">{dbStatus.charset || 'utf8mb4_unicode_ci'}</span>
+                  </div>
+                  <div className="bg-black/40 border border-white/5 rounded-xl p-3 flex flex-col gap-1">
+                    <span className="text-zinc-500 text-[10px] font-bold uppercase">زمان پاسخ‌دهی (Latency):</span>
+                    <span className="text-amber-400 font-mono font-bold">{dbStatus.latencyMs !== undefined ? `${dbStatus.latencyMs}ms` : '---'}</span>
+                  </div>
+                </div>
+
+                {/* Real-time row counts from DB tables */}
+                {dbStatus.tableCounts && (
+                  <div className="pt-2 border-t border-white/5">
+                    <p className="text-[11px] font-bold text-zinc-400 mb-2">تعداد رکورد‌های واقعی ثبت‌شده در تیبل‌های دیتابیس live:</p>
+                    <div className="flex flex-wrap gap-2 text-[11px]">
+                      {Object.entries(dbStatus.tableCounts).map(([table, count]) => (
+                        <div key={table} className="bg-white/5 border border-white/10 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+                          <span className="text-zinc-400 font-mono">{table}:</span>
+                          <span className="text-white font-black font-mono">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-black/40 border border-white/10 rounded-xl p-6 flex items-center gap-4">

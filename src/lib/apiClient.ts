@@ -52,7 +52,8 @@ export const apiClient = {
   // Utility header builder for admin requests
   getHeaders(userId?: string) {
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json; charset=utf-8',
+      'Accept': 'application/json; charset=utf-8'
     };
     const savedUid = localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid');
     const uid = userId || savedUid || 'admin';
@@ -554,6 +555,24 @@ export const apiClient = {
     return res.json();
   },
 
+  async rejectChapter(seriesId: string, chapterId: string, note: string, adminUid: string) {
+    const res = await fetch(`${API_URL}/api/series/${seriesId}/chapters/${chapterId}/reject`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify({ note })
+    });
+    return res.json();
+  },
+
+  async requestChapterRevision(seriesId: string, chapterId: string, note: string, adminUid: string) {
+    const res = await fetch(`${API_URL}/api/series/${seriesId}/chapters/${chapterId}/revision`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify({ note })
+    });
+    return res.json();
+  },
+
   async updateCommentContent(commentId: string, content: string) {
     const res = await fetch(`${API_URL}/api/comments/${commentId}`, {
       method: 'PUT',
@@ -600,6 +619,23 @@ export const apiClient = {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify({ userId, seriesId, chapterId })
+    });
+    return res.json();
+  },
+
+  async getDbStatus(uid?: string) {
+    const adminUid = uid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const res = await fetch(`${API_URL}/api/admin/db-status?adminUid=${encodeURIComponent(adminUid)}`, {
+      headers: this.getHeaders(adminUid)
+    });
+    return res.json();
+  },
+
+  async fixCharset(uid?: string) {
+    const adminUid = uid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const res = await fetch(`${API_URL}/api/admin/fix-charset?adminUid=${encodeURIComponent(adminUid)}`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid)
     });
     return res.json();
   }
