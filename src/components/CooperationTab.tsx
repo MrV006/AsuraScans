@@ -6,7 +6,6 @@ import {
   Clock, 
   CheckCircle, 
   AlertCircle, 
-  ExternalLink, 
   ChevronDown, 
   ChevronUp, 
   UploadCloud, 
@@ -23,11 +22,16 @@ import {
   Filter,
   Shield,
   Trash2,
-  Edit,
   DollarSign,
   UserPlus,
   RefreshCw,
-  FileCheck
+  FileCheck,
+  Info,
+  Layers,
+  FileArchive,
+  ArrowLeft,
+  Eye,
+  CheckSquare
 } from "lucide-react";
 import { Series, Chapter } from "../lib/types";
 
@@ -68,19 +72,18 @@ export default function CooperationTab({
   const [settleFilterStatus, setSettleFilterStatus] = useState<string>("all");
   const [settleRejectNoteMap, setSettleRejectNoteMap] = useState<Record<string, string>>({});
 
-  // Search and filter for Catalog (Search Page format)
+  // Search and filter for Catalog
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedGenre, setSelectedGenre] = useState<string>("all");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
 
-  // Selected series for catalog popup/drawer
+  // Selected series for catalog popup/modal
   const [activeCatalogSeries, setActiveCatalogSeries] = useState<Series | null>(null);
 
   // Request Collaboration form state inside catalog modal
   const [reqRole, setReqRole] = useState<"translator" | "cleaner" | "editor" | "typesetter" | "proofreader">("translator");
-  const [reqMelliCode, setReqMelliCode] = useState(profile?.melliCode || "");
-  const [reqNotes, setReqNotes] = useState("");
+  const [reqUserCode, setReqUserCode] = useState(profile?.melliCode || user?.uid || "");
   const [reqError, setReqError] = useState("");
   const [reqSuccess, setReqSuccess] = useState("");
   const [submittingReq, setSubmittingReq] = useState(false);
@@ -91,8 +94,7 @@ export default function CooperationTab({
   const [loadingChapters, setLoadingChapters] = useState(false);
   const [expandedChapterId, setExpandedChapterId] = useState<string | null>(null);
 
-  // Submit Chapter Work state
-  const [submitChapterNumber, setSubmitChapterNumber] = useState("");
+  // Work Submission form state per chapter
   const [submitFileUrl, setSubmitFileUrl] = useState("");
   const [submitNote, setSubmitNote] = useState("");
   const [submitImages, setSubmitImages] = useState("");
@@ -120,7 +122,7 @@ export default function CooperationTab({
   const [addStaffEmail, setAddStaffEmail] = useState("");
   const [addStaffRole, setAddStaffRole] = useState("translator");
   const [addStaffUserId, setAddStaffUserId] = useState("");
-  const [addStaffMelli, setAddStaffMelli] = useState("");
+  const [addStaffUserCode, setAddStaffUserCode] = useState("");
 
   // Chapter Contributor Attribution Editing Modal (Admin)
   const [editingChapterContribId, setEditingChapterContribId] = useState<string | null>(null);
@@ -239,7 +241,7 @@ export default function CooperationTab({
     return Array.from(set).filter(Boolean);
   }, [seriesList]);
 
-  // Filter series list for the catalog search view
+  // Filter series list for catalog search view
   const filteredCatalogSeries = useMemo(() => {
     return seriesList.filter((s: any) => {
       const matchSearch = searchQuery.trim() === "" || 
@@ -288,7 +290,7 @@ export default function CooperationTab({
     return list;
   }, [seriesList]);
 
-  // Load chapters when selecting a series in My Projects or Admin
+  // Load chapters when selecting a series
   const loadChaptersForSeries = async (seriesId: string) => {
     setLoadingChapters(true);
     setSelectedSeriesId(seriesId);
@@ -309,7 +311,7 @@ export default function CooperationTab({
     if (!files || files.length === 0) return;
 
     setUploadingFile(true);
-    setUploadStatus("در حال بارگذاری و پردازش فایل روی هاست...");
+    setUploadStatus("در حال بارگذاری و پردازش فایل روی سرور...");
     setSubmitError("");
 
     const formData = new FormData();
@@ -333,7 +335,7 @@ export default function CooperationTab({
       if (res && res.urls && res.urls.length > 0) {
         if (targetRole === "translator" || targetRole === "cleaner") {
           setSubmitFileUrl(res.urls[0]);
-          setUploadStatus(`فایل با موفقیت آپلود شد: ${res.urls[0]}`);
+          setUploadStatus(`فایل با موفقیت بارگذاری شد: ${res.urls[0]}`);
         } else if (targetRole === "editor") {
           const newUrls = res.urls;
           const currentArr = submitImages.trim() ? submitImages.split(/[\n,]+/).map(s => s.trim()).filter(Boolean) : [];
@@ -342,13 +344,13 @@ export default function CooperationTab({
           setUploadStatus(`${newUrls.length} تصویر با موفقیت بارگذاری شد.`);
         } else {
           setSubmitFileUrl(res.urls[0]);
-          setUploadStatus("فایل آپلود شد.");
+          setUploadStatus("فایل بارگذاری شد.");
         }
       } else {
         setSubmitError("پاسخی از سرور دریافت نشد.");
       }
     } catch (err: any) {
-      setSubmitError(err.response?.data?.error || err.message || "خطا در آپلود فایل");
+      setSubmitError(err.response?.data?.error || err.message || "خطا در بارگذاری فایل");
     } finally {
       setUploadingFile(false);
     }
@@ -370,7 +372,7 @@ export default function CooperationTab({
         email: user.email || "",
         displayName: profile?.displayName || user.displayName || user.email || "همکار",
         role: reqRole,
-        melliCode: reqMelliCode || profile?.melliCode || ""
+        melliCode: reqUserCode || profile?.melliCode || user.uid || ""
       });
 
       if (res.series) {
@@ -378,7 +380,7 @@ export default function CooperationTab({
         if (activeCatalogSeries?.id === series.id) {
           setActiveCatalogSeries(res.series);
         }
-        setReqSuccess("درخواست همکاری شما با موفقیت برای مدیریت ارسال شد. پس از بررسی، پیام تایید ارسال خواهد شد.");
+        setReqSuccess("درخواست همکاری شما با موفقیت برای مدیریت ارسال شد. پس از بررسی، دسترسی شما فعال خواهد شد.");
       } else {
         setReqError(res.error || "خطا در ثبت درخواست");
       }
@@ -427,7 +429,7 @@ export default function CooperationTab({
       });
 
       if (res && res.id) {
-        setSubmitSuccess("فایل با موفقیت ارسال شد و به اطلاع همکاران و مدیریت رسید.");
+        setSubmitSuccess("فایل با موفقیت ارسال شد و در سیستم ثبت گردید.");
         setSubmitFileUrl("");
         setSubmitNote("");
         setSubmitImages("");
@@ -437,7 +439,7 @@ export default function CooperationTab({
         }
       }
     } catch (e: any) {
-      setSubmitError(e.message || "خطا در ثبت کار چپتر");
+      setSubmitError(e.message || "خطا در ثبت فایل چپتر");
     } finally {
       setSubmittingWork(false);
     }
@@ -470,13 +472,17 @@ export default function CooperationTab({
   };
 
   // Admin Chapter Approval
-  const handleApproveChapter = async (ch: Chapter) => {
-    if (!selectedSeriesId) return;
-    setProcessingActionId(ch.id);
+  const handleApproveChapter = async (seriesId: string, chId: string, chNumber: number) => {
+    setProcessingActionId(chId);
     try {
-      await apiClient.put(`/api/series/${selectedSeriesId}/chapters/${ch.id}/approve`, {}, user?.uid);
-      alert(`چپتر ${ch.number} با موفقیت تایید و روی وب‌سایت منتشر شد! نوتیفیکیشن برای نشان‌گذاران و همکاران ارسال گردید.`);
-      loadChaptersForSeries(selectedSeriesId);
+      await apiClient.put(`/api/series/${seriesId}/chapters/${chId}/approve`, {}, user?.uid);
+      alert(`چپتر ${chNumber} با موفقیت تایید و روی وب‌سایت منتشر شد! فایل‌های موقت Word/Zip پاکسازی گردید.`);
+      if (selectedSeriesId === seriesId) {
+        loadChaptersForSeries(seriesId);
+      }
+      if (activeSubTab === "admin_approval") {
+        fetchPendingQueue();
+      }
     } catch (e: any) {
       alert(`خطا در تایید چپتر: ${e.message}`);
     } finally {
@@ -485,14 +491,18 @@ export default function CooperationTab({
   };
 
   // Admin Chapter Rejection
-  const handleRejectChapter = async (ch: Chapter) => {
-    if (!selectedSeriesId) return;
-    const note = rejectionNoteMap[ch.id] || "نیازمند اصلاح توسط کادر پروژه";
-    setProcessingActionId(ch.id);
+  const handleRejectChapter = async (seriesId: string, chId: string, chNumber: number) => {
+    const note = rejectionNoteMap[chId] || "نیازمند اصلاح توسط کادر پروژه";
+    setProcessingActionId(chId);
     try {
-      await apiClient.rejectChapter(selectedSeriesId, ch.id, note, user?.uid);
-      alert(`چپتر ${ch.number} رد شد و به اطلاع کادر رسانده شد.`);
-      loadChaptersForSeries(selectedSeriesId);
+      await apiClient.rejectChapter(seriesId, chId, note, user?.uid);
+      alert(`چپتر ${chNumber} رد شد و پیام علت رد برای کادر ارسالی ثبت گردید.`);
+      if (selectedSeriesId === seriesId) {
+        loadChaptersForSeries(seriesId);
+      }
+      if (activeSubTab === "admin_approval") {
+        fetchPendingQueue();
+      }
     } catch (e: any) {
       alert(`خطا در رد چپتر: ${e.message}`);
     } finally {
@@ -500,54 +510,7 @@ export default function CooperationTab({
     }
   };
 
-  // Admin Chapter Revision Request
-  const handleRequestRevision = async (ch: Chapter) => {
-    if (!selectedSeriesId) return;
-    const note = rejectionNoteMap[ch.id] || "نیاز به بازنگری و اصلاح فایل‌های ارسالی دارد.";
-    setProcessingActionId(ch.id);
-    try {
-      await apiClient.requestChapterRevision(selectedSeriesId, ch.id, note, user?.uid);
-      alert(`درخواست بازنگری برای چپتر ${ch.number} ثبت گردید.`);
-      loadChaptersForSeries(selectedSeriesId);
-    } catch (e: any) {
-      alert(`خطا در ثبت درخواست بازنگری: ${e.message}`);
-    } finally {
-      setProcessingActionId(null);
-    }
-  };
-
-  // Admin Add Staff Member directly
-  const handleAddStaffDirectly = async (seriesId: string) => {
-    if (!addStaffDisplayName.trim()) {
-      alert("لطفاً نام همکار را وارد کنید.");
-      return;
-    }
-    try {
-      const res = await apiClient.addContributor(seriesId, {
-        userId: addStaffUserId.trim() || `user_${Date.now()}`,
-        email: addStaffEmail.trim(),
-        displayName: addStaffDisplayName.trim(),
-        role: addStaffRole,
-        melliCode: addStaffMelli.trim()
-      }, user?.uid);
-
-      if (res.series) {
-        onUpdateSeries(res.series);
-        if (activeCatalogSeries?.id === seriesId) {
-          setActiveCatalogSeries(res.series);
-        }
-        setShowAddStaffModal(false);
-        setAddStaffDisplayName("");
-        setAddStaffEmail("");
-        setAddStaffUserId("");
-        setAddStaffMelli("");
-      }
-    } catch (e: any) {
-      alert(`خطا: ${e.message}`);
-    }
-  };
-
-  // All Chapters awaiting Admin Approval across all series for Admin Approval tab
+  // All Chapters awaiting Admin Approval across all series
   const [allPendingChaptersQueue, setAllPendingChaptersQueue] = useState<any[]>([]);
   const [loadingPendingQueue, setLoadingPendingQueue] = useState(false);
 
@@ -587,9 +550,10 @@ export default function CooperationTab({
   return (
     <div dir="rtl" className="space-y-6 text-right font-sans">
       
-      {/* Tab Header Navigation */}
-      <div className="bg-zinc-900/90 border border-white/10 rounded-2xl p-2.5 flex flex-wrap gap-2 items-center justify-between shadow-xl">
+      {/* Sub-Tab Navigation Header */}
+      <div className="bg-zinc-900/95 border border-white/10 rounded-2xl p-2.5 flex flex-wrap gap-2 items-center justify-between shadow-xl">
         <div className="flex flex-wrap gap-2">
+          
           <button
             onClick={() => setActiveSubTab("all_series")}
             className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 ${
@@ -599,7 +563,7 @@ export default function CooperationTab({
             }`}
           >
             <Search size={15} />
-            جستجوی کارها و درخواست همکاری
+            کاتالوگ آثار و درخواست عضویت
           </button>
 
           <button
@@ -611,9 +575,9 @@ export default function CooperationTab({
             }`}
           >
             <Briefcase size={15} />
-            کارهای من و ارسال چپتر
+            پروژه‌های من و آپلود چپترها
             {myApprovedSeries.length > 0 && (
-              <span className="bg-white/20 text-white text-[10px] px-2 py-0.5 rounded-full font-mono">
+              <span className="bg-white/20 text-white text-[10px] px-2 py-0.5 rounded-full font-mono font-black">
                 {myApprovedSeries.length}
               </span>
             )}
@@ -628,7 +592,7 @@ export default function CooperationTab({
             }`}
           >
             <DollarSign size={15} />
-            {isGlobalAdmin ? "مدیریت تسویه‌حساب‌های مالی" : "تسویه‌حساب و درآمد من"}
+            {isGlobalAdmin ? "تسویه‌حساب‌های مالی کادر" : "تسویه‌حساب و درآمد من"}
             {isGlobalAdmin && settlementRequests.filter(r => r.status === 'pending').length > 0 && (
               <span className="bg-black text-emerald-400 text-[10px] px-2 py-0.5 rounded-full font-black animate-pulse">
                 {settlementRequests.filter(r => r.status === 'pending').length}
@@ -647,7 +611,7 @@ export default function CooperationTab({
                 }`}
               >
                 <Shield size={15} />
-                مدیریت درخواست‌ها و تیم کادر
+                مدیریت تیم و درخواست‌ها
                 {pendingRequestsList.length > 0 && (
                   <span className="bg-black text-amber-400 text-[10px] px-2 py-0.5 rounded-full font-black animate-pulse">
                     {pendingRequestsList.length}
@@ -664,7 +628,7 @@ export default function CooperationTab({
                 }`}
               >
                 <FileCheck size={15} />
-                تایید و انتشار چپترها
+                مرکز بررسی و تایید چپترها
                 {allPendingChaptersQueue.length > 0 && (
                   <span className="bg-amber-500 text-black text-[10px] px-2 py-0.5 rounded-full font-black">
                     {allPendingChaptersQueue.length}
@@ -673,173 +637,193 @@ export default function CooperationTab({
               </button>
             </>
           )}
+
         </div>
 
-        {/* Revenue info note */}
-        <div className="hidden lg:flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl text-[11px] text-emerald-400 font-bold">
-          <DollarSign size={14} />
-          تقسیم سود خودکار: مترجم ۲۰٪ | کلینر ۳۰٪ | ادیتور ۳۰٪ | وب‌سایت ۲۰٪
+        <div className="text-[11px] text-zinc-400 font-bold px-3 py-1 bg-black/40 rounded-xl border border-white/5">
+          نقش شما: <strong className="text-amber-400">{isSuperAdmin ? "مدیریت کل (Super Admin)" : profile?.role === "admin" ? "ادمین" : profile?.role === "translator" ? "مترجم" : profile?.role === "cleaner" ? "کلینر" : profile?.role === "editor" ? "ادیتور" : "همکار"}</strong>
         </div>
       </div>
 
       {/* ========================================================================= */}
-      {/* SUB-TAB 1: CATALOG SEARCH & COLLABORATION REQUEST (جستجوی کارها و درخواست) */}
+      {/* SUB-TAB 1: CATALOG SEARCH & MEMBERSHIP REQUEST (کاتالوگ آثار و درخواست عضویت) */}
       {/* ========================================================================= */}
       {activeSubTab === "all_series" && (
         <div className="space-y-6">
           
-          {/* Catalog Search & Filters Header */}
-          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4 shadow-lg">
-            <div className="flex flex-col sm:flex-row items-center gap-3">
-              <div className="relative flex-1 w-full">
-                <Search size={18} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+          {/* Search & Filters Bar */}
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4 shadow-xl">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-black text-white flex items-center gap-2">
+                  <Search size={18} className="text-[var(--color-asura-accent)]" />
+                  جستجوی کاتالوگ آثار و ثبت درخواست عضویت در تیم تولید
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1">
+                  اثر مورد نظر خود را جستجو کرده و جهت دریافت مسئولیت (ترجمه، کلین، ادیت) درخواست عضویت ارسال نمایید.
+                </p>
+              </div>
+              <span className="text-xs text-zinc-400 font-mono bg-black/50 px-3 py-1.5 rounded-xl border border-white/10">
+                تعداد آثار: <strong className="text-white">{filteredCatalogSeries.length}</strong>
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2">
+              <div className="relative">
                 <input
                   type="text"
-                  placeholder="جستجوی عنوان مانهوا، مانگا، نویسنده، طراح..."
+                  placeholder="جستجوی نام اثر، نویسنده یا طراح..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-black/60 border border-white/10 rounded-xl pr-10 pl-4 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)] transition-all font-bold placeholder:text-zinc-500"
+                  className="w-full bg-black border border-white/10 rounded-xl pr-10 pl-4 py-2.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none focus:border-[var(--color-asura-accent)]"
                 />
+                <Search size={16} className="absolute right-3 top-3 text-zinc-500" />
               </div>
 
-              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+              <div>
                 <select
                   value={selectedGenre}
                   onChange={(e) => setSelectedGenre(e.target.value)}
-                  className="bg-black/60 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-zinc-200 font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                  className="w-full bg-black border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)] font-bold"
                 >
                   <option value="all">همه ژانرها</option>
                   {allGenresList.map(g => (
                     <option key={g} value={g}>{g}</option>
                   ))}
                 </select>
+              </div>
 
+              <div>
                 <select
                   value={selectedType}
                   onChange={(e) => setSelectedType(e.target.value)}
-                  className="bg-black/60 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-zinc-200 font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                  className="w-full bg-black border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)] font-bold"
                 >
-                  <option value="all">همه انواع</option>
+                  <option value="all">همه انواع (مانهوا، مانگا...)</option>
                   <option value="Manhwa">مانهوا (Manhwa)</option>
-                  <option value="Manhua">مانhua (Manhua)</option>
                   <option value="Manga">مانگا (Manga)</option>
+                  <option value="Manhua">مانhua (Manhua)</option>
                 </select>
+              </div>
 
+              <div>
                 <select
                   value={selectedStatus}
                   onChange={(e) => setSelectedStatus(e.target.value)}
-                  className="bg-black/60 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-zinc-200 font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                  className="w-full bg-black border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)] font-bold"
                 >
                   <option value="all">همه وضعیت‌ها</option>
-                  <option value="Ongoing">درحال انتشار</option>
-                  <option value="Completed">پایان یافته</option>
+                  <option value="Ongoing">در حال انتشار (Ongoing)</option>
+                  <option value="Completed">تکمیل شده (Completed)</option>
+                  <option value="Hiatus">متوقف شده (Hiatus)</option>
                 </select>
               </div>
             </div>
-
-            <div className="flex items-center justify-between text-xs text-zinc-400 pt-2 border-t border-white/5">
-              <span>نمایش <strong className="text-white font-mono">{filteredCatalogSeries.length}</strong> اثر در کاتالوگ کارها</span>
-              <span className="text-[11px] text-zinc-500">برای مشاهده جزئیات و درخواست همکاری روی هر اثر کلیک کنید</span>
-            </div>
           </div>
 
-          {/* Catalog Series Grid (Website Search Page Style) */}
-          {filteredCatalogSeries.length === 0 ? (
-            <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-12 text-center text-zinc-400 space-y-3">
-              <Search size={36} className="mx-auto text-zinc-600 mb-2" />
-              <p className="text-base font-bold text-white">اثری با مشخصات جستجو شده یافت نشد</p>
-              <p className="text-xs text-zinc-500">عبارت دیگری را جستجو کنید یا فیلترها را ریست نمایید.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-              {filteredCatalogSeries.map((s: any) => {
-                const approvedStaffCount = Array.isArray(s.contributors) 
-                  ? s.contributors.filter((c: any) => c.status === "approved").length 
-                  : 0;
-                const isMember = Array.isArray(s.contributors) && s.contributors.some((c: any) => c.userId === user?.uid && c.status === "approved");
-                const isPending = Array.isArray(s.contributors) && s.contributors.some((c: any) => c.userId === user?.uid && c.status === "pending");
+          {/* Series Cards Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            {filteredCatalogSeries.map((s: any) => {
+              const contribs = Array.isArray(s.contributors) ? s.contributors : [];
+              const translator = contribs.find((c: any) => c.role === 'translator' && c.status === 'approved');
+              const cleaner = contribs.find((c: any) => c.role === 'cleaner' && c.status === 'approved');
+              const editor = contribs.find((c: any) => c.role === 'editor' && c.status === 'approved');
+              
+              const myContrib = contribs.find((c: any) => c.userId === user?.uid);
+              const isApproved = myContrib?.status === 'approved';
+              const isPending = myContrib?.status === 'pending';
 
-                return (
-                  <div
-                    key={s.id}
-                    onClick={() => {
-                      setActiveCatalogSeries(s);
-                      setReqError("");
-                      setReqSuccess("");
-                    }}
-                    className={`group bg-zinc-900 border rounded-2xl p-2.5 transition-all duration-300 cursor-pointer flex flex-col justify-between hover:-translate-y-1 ${
-                      isMember 
-                        ? 'border-emerald-500/30 hover:border-emerald-500 shadow-lg shadow-emerald-500/5'
-                        : isPending
-                        ? 'border-amber-500/30 hover:border-amber-500'
-                        : 'border-white/10 hover:border-[var(--color-asura-accent)] shadow-md hover:shadow-xl'
-                    }`}
-                  >
-                    <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-black mb-3">
-                      <img
-                        src={s.cover}
-                        alt={s.title}
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      />
-                      <div className="absolute top-2 right-2 flex flex-col gap-1 items-start">
-                        <span className="bg-black/80 backdrop-blur-md text-white text-[9px] font-black px-2 py-0.5 rounded-full border border-white/10">
-                          {s.type || "Manhwa"}
-                        </span>
-                        {isMember && (
-                          <span className="bg-emerald-500 text-black text-[9px] font-black px-2 py-0.5 rounded-full shadow">
-                            عضو تیم
-                          </span>
-                        )}
-                        {isPending && (
-                          <span className="bg-amber-500 text-black text-[9px] font-black px-2 py-0.5 rounded-full shadow animate-pulse">
-                            در انتظار تایید
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="absolute bottom-2 left-2 bg-black/80 backdrop-blur-md text-zinc-300 text-[10px] font-black px-2 py-0.5 rounded-full border border-white/10 flex items-center gap-1">
-                        <UsersIcon size={11} className="text-[var(--color-asura-accent-light)]" />
-                        <span>{approvedStaffCount} نفر کادر</span>
-                      </div>
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => {
+                    setActiveCatalogSeries(s);
+                    setReqError("");
+                    setReqSuccess("");
+                  }}
+                  className="group bg-zinc-900 border border-white/10 hover:border-[var(--color-asura-accent)]/60 rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 flex flex-col justify-between hover:shadow-xl hover:shadow-[var(--color-asura-accent)]/10"
+                >
+                  <div className="relative aspect-[3/4] overflow-hidden bg-black">
+                    <img
+                      src={s.cover}
+                      alt={s.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                    <div className="absolute top-2 right-2 flex flex-col gap-1">
+                      <span className="bg-black/80 backdrop-blur text-[10px] font-mono font-black text-amber-400 px-2 py-0.5 rounded-lg border border-white/10">
+                        {s.type || "Manhwa"}
+                      </span>
                     </div>
 
-                    <div className="space-y-1.5 flex-1 flex flex-col justify-between">
-                      <div>
-                        <h4 className="text-xs font-black text-white group-hover:text-[var(--color-asura-accent-light)] transition-colors line-clamp-2 leading-snug">
-                          {s.title}
-                        </h4>
-                        <p className="text-[10px] text-zinc-400 truncate mt-0.5">{s.author || "نویسنده نامشخص"}</p>
-                      </div>
+                    {isApproved && (
+                      <span className="absolute bottom-2 right-2 bg-emerald-500 text-black text-[9px] font-black px-2 py-0.5 rounded-full shadow flex items-center gap-1">
+                        <CheckCircle size={10} /> عضو تیم
+                      </span>
+                    )}
 
-                      <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[10px]">
-                        <span className="text-amber-400 font-bold">{s.status === "Ongoing" ? "درحال انتشار" : "پایان یافته"}</span>
-                        <span className="text-[var(--color-asura-accent-light)] font-bold flex items-center gap-0.5">
-                          درخواست <ChevronDown size={12} />
-                        </span>
-                      </div>
-                    </div>
+                    {isPending && (
+                      <span className="absolute bottom-2 right-2 bg-amber-500 text-black text-[9px] font-black px-2 py-0.5 rounded-full shadow flex items-center gap-1">
+                        <Clock size={10} /> در انتظار تایید
+                      </span>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-          )}
 
-          {/* Series Collaboration Request Modal / Drawer */}
+                  <div className="p-3 space-y-2">
+                    <h4 className="text-xs font-black text-white group-hover:text-[var(--color-asura-accent-light)] transition-colors truncate">
+                      {s.title}
+                    </h4>
+
+                    {/* Staff Roles Status Pills */}
+                    <div className="space-y-1 text-[10px]">
+                      <div className="flex items-center justify-between bg-black/40 px-2 py-1 rounded-lg border border-white/5">
+                        <span className="text-zinc-500">🗣️ مترجم:</span>
+                        <span className={`font-bold truncate max-w-[80px] ${translator ? "text-emerald-400" : "text-amber-500/60"}`}>
+                          {translator ? translator.displayName : "خالی"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between bg-black/40 px-2 py-1 rounded-lg border border-white/5">
+                        <span className="text-zinc-500">🧹 کلینر:</span>
+                        <span className={`font-bold truncate max-w-[80px] ${cleaner ? "text-teal-400" : "text-amber-500/60"}`}>
+                          {cleaner ? cleaner.displayName : "خالی"}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between bg-black/40 px-2 py-1 rounded-lg border border-white/5">
+                        <span className="text-zinc-500">🎨 ادیتور:</span>
+                        <span className={`font-bold truncate max-w-[80px] ${editor ? "text-purple-400" : "text-amber-500/60"}`}>
+                          {editor ? editor.displayName : "خالی"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button className="w-full py-1.5 bg-white/5 group-hover:bg-[var(--color-asura-accent)] group-hover:text-white text-zinc-300 font-bold text-[10px] rounded-xl transition-all flex items-center justify-center gap-1">
+                      مشاهده و درخواست همکاری
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Series Detail & Team Application Modal */}
           {activeCatalogSeries && (
-            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-              <div className="bg-zinc-900 border border-white/15 rounded-3xl max-w-2xl w-full p-6 text-right space-y-6 relative max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+              <div className="bg-zinc-900 border border-white/10 rounded-3xl max-w-2xl w-full p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto custom-scrollbar animate-fadeIn shadow-2xl">
                 
-                {/* Modal Header */}
                 <div className="flex items-start justify-between border-b border-white/10 pb-4">
                   <div className="flex items-center gap-4">
-                    <img src={activeCatalogSeries.cover} alt="" className="w-16 h-20 object-cover rounded-xl border border-white/10 shadow" />
+                    <img
+                      src={activeCatalogSeries.cover}
+                      alt=""
+                      className="w-16 h-22 object-cover rounded-xl border border-white/10 shrink-0"
+                    />
                     <div>
-                      <h3 className="text-lg font-black text-white">{activeCatalogSeries.title}</h3>
-                      <p className="text-xs text-zinc-400 mt-1">
-                        نویسنده: <span className="text-white font-bold">{activeCatalogSeries.author || 'نامشخص'}</span> | وضعیت: <span className="text-amber-400 font-bold">{activeCatalogSeries.status}</span>
+                      <h3 className="text-base font-black text-white">{activeCatalogSeries.title}</h3>
+                      <p className="text-xs text-zinc-400 mt-0.5 font-mono">
+                        نویسنده: {activeCatalogSeries.author || "نامشخص"} | طراح: {activeCatalogSeries.artist || "نامشخص"}
                       </p>
                     </div>
                   </div>
+
                   <button
                     onClick={() => setActiveCatalogSeries(null)}
                     className="p-2 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all"
@@ -848,59 +832,57 @@ export default function CooperationTab({
                   </button>
                 </div>
 
-                {/* Synopsis */}
-                <div className="bg-black/40 border border-white/5 rounded-2xl p-4 text-xs text-zinc-300 leading-relaxed">
-                  <h4 className="text-[11px] font-black text-zinc-400 uppercase mb-1">خلاصه اثر:</h4>
-                  {activeCatalogSeries.synopsis || "توضیحاتی برای این اثر ثبت نشده است."}
-                </div>
-
-                {/* Current Staff List */}
-                <div className="space-y-3">
+                {/* Current Staff Matrix */}
+                <div className="bg-black/40 border border-white/5 rounded-2xl p-4 space-y-3">
                   <h4 className="text-xs font-black text-white flex items-center gap-2">
-                    <UsersIcon size={14} className="text-[var(--color-asura-accent)]" />
-                    اعضای فعال تیم این اثر:
+                    <UsersIcon size={16} className="text-amber-400" />
+                    کادر فعلی پروژه:
                   </h4>
-                  {(!activeCatalogSeries.contributors || activeCatalogSeries.contributors.filter((c: any) => c.status === "approved").length === 0) ? (
-                    <p className="text-xs text-zinc-500 bg-black/20 p-3 rounded-xl border border-white/5">هنوز همکاری برای این اثر ثبت نشده است.</p>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                      {activeCatalogSeries.contributors.filter((c: any) => c.status === "approved").map((c: any) => (
-                        <div key={c.userId} className="p-2.5 bg-black/40 border border-white/5 rounded-xl flex items-center justify-between">
-                          <div>
-                            <span className="block font-black text-white">{c.displayName}</span>
-                            <span className="block text-[10px] text-amber-400 font-bold">
-                              {c.role === 'translator' ? 'مترجم' : c.role === 'editor' ? 'ادیتور' : c.role === 'cleaner' ? 'کلینر' : c.role === 'typesetter' ? 'تایپیست' : c.role}
-                            </span>
-                          </div>
-                          {isGlobalAdmin && (
-                            <button
-                              onClick={() => handleAdminProcessRequest(activeCatalogSeries.id, c.userId, "reject")}
-                              className="text-red-400 hover:text-red-300 text-[10px] font-bold p-1 bg-red-500/10 rounded-lg"
-                            >
-                              حذف همکار
-                            </button>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {['translator', 'cleaner', 'editor'].map(role => {
+                      const contrib = (activeCatalogSeries.contributors || []).find((c: any) => c.role === role && c.status === 'approved');
+                      const roleLabel = role === 'translator' ? 'مترجم' : role === 'cleaner' ? 'کلینر' : 'ادیتور';
+
+                      return (
+                        <div key={role} className="p-3 bg-zinc-900/80 rounded-xl border border-white/5 space-y-1">
+                          <span className="text-[10px] text-zinc-400 font-bold block">{roleLabel}:</span>
+                          {contrib ? (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black text-emerald-400">{contrib.displayName}</span>
+                              {isGlobalAdmin && (
+                                <button
+                                  onClick={() => handleAdminProcessRequest(activeCatalogSeries.id, contrib.userId, "reject", role)}
+                                  className="text-red-400 text-[9px] hover:underline"
+                                >
+                                  حذف
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs font-bold text-amber-500/80">بلاتصدی (آماده عضویت)</span>
                           )}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      );
+                    })}
+                  </div>
                 </div>
 
-                {/* Application / Work Space Locking State */}
+                {/* Application or Access Locking Section */}
                 {(() => {
-                  const myContribObj = activeCatalogSeries.contributors?.find((c: any) => c.userId === user?.uid);
+                  const myContribObj = (activeCatalogSeries.contributors || []).find((c: any) => c.userId === user?.uid);
                   const isApproved = myContribObj?.status === "approved";
                   const isPending = myContribObj?.status === "pending";
 
                   if (isApproved) {
                     return (
-                      <div className="bg-emerald-500/10 border border-emerald-500/30 p-4 rounded-2xl flex items-center justify-between gap-4">
+                      <div className="bg-emerald-500/10 border border-emerald-500/30 p-5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
                         <div>
                           <h4 className="text-xs font-black text-emerald-400 flex items-center gap-2">
                             <CheckCircle size={16} /> شما عضو تایید شده تیم این اثر هستید
                           </h4>
                           <p className="text-[11px] text-zinc-400 mt-1">
-                            نقش شما: <strong className="text-white">{myContribObj.role === 'translator' ? 'مترجم' : myContribObj.role === 'cleaner' ? 'کلینر' : 'ادیتور'}</strong>
+                            نقش تایید شده: <strong className="text-white font-bold">{myContribObj.role === 'translator' ? 'مترجم' : myContribObj.role === 'cleaner' ? 'کلینر' : 'ادیتور'}</strong>
                           </p>
                         </div>
                         <button
@@ -910,9 +892,9 @@ export default function CooperationTab({
                             setActiveCatalogSeries(null);
                             setActiveSubTab("my_projects");
                           }}
-                          className="px-4 py-2 bg-emerald-500 text-black font-black text-xs rounded-xl hover:bg-emerald-600 transition-all shadow"
+                          className="px-5 py-2.5 bg-emerald-500 text-black font-black text-xs rounded-xl hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-500/20"
                         >
-                          ورود به پنل ارسال چپتر
+                          ورود مستقیم به پنل آپلود چپتر
                         </button>
                       </div>
                     );
@@ -920,47 +902,46 @@ export default function CooperationTab({
 
                   if (isPending) {
                     return (
-                      <div className="bg-amber-500/10 border border-amber-500/30 p-5 rounded-2xl space-y-2 text-center">
-                        <Lock size={28} className="mx-auto text-amber-400 mb-1" />
-                        <h4 className="text-sm font-black text-amber-400">صفحه کاری این اثر در انتظار تایید مدیریت قفل می‌باشد</h4>
+                      <div className="bg-amber-500/10 border border-amber-500/30 p-6 rounded-2xl text-center space-y-2">
+                        <Lock size={32} className="mx-auto text-amber-400 mb-1" />
+                        <h4 className="text-sm font-black text-amber-400">پنل کاری این اثر در انتظار تایید مدیریت قفل می‌باشد</h4>
                         <p className="text-xs text-zinc-300">
-                          درخواست همکاری شما برای نقش <strong className="text-white font-black">{myContribObj.role === 'translator' ? 'مترجم' : myContribObj.role === 'cleaner' ? 'کلینر' : 'ادیتور'}</strong> ثبت شده است. پس از تایید توسط مدیریت، دسترسی ارسال چپتر برای شما فعال خواهد شد.
+                          درخواست همکاری شما برای نقش <strong className="text-white font-black">{myContribObj.role === 'translator' ? 'مترجم' : myContribObj.role === 'cleaner' ? 'کلینر' : 'ادیتور'}</strong> ثبت شده است. پس از تایید توسط مدیریت کل، دسترسی آپلود چپتر برای شما باز خواهد شد.
                         </p>
                       </div>
                     );
                   }
 
                   return (
-                    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4">
+                    <div className="bg-zinc-950 border border-white/10 rounded-2xl p-6 space-y-4">
                       <h4 className="text-xs font-black text-white flex items-center gap-2">
                         <Plus size={16} className="text-[var(--color-asura-accent)]" />
-                        ثبت درخواست جدید جهت دریافت مسئولیت این اثر
+                        ثبت درخواست عضویت در تیم تولید این اثر
                       </h4>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                         <div>
-                          <label className="block text-[10px] text-zinc-400 font-bold mb-1">انتخاب نقش درخواستی:</label>
+                          <label className="block text-xs font-bold text-zinc-300 mb-1.5">انتخاب نقش درخواستی شما:</label>
                           <select
                             value={reqRole}
                             onChange={(e: any) => setReqRole(e.target.value)}
-                            className="w-full bg-black border border-white/10 rounded-xl p-2.5 text-xs text-white font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                            className="w-full bg-zinc-900 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
                           >
-                            <option value="translator">مترجم (Translator)</option>
-                            <option value="cleaner">کلینر (Cleaner)</option>
-                            <option value="editor">ادیتور و تایپیست (Editor)</option>
-                            <option value="typesetter">تایپیست (Typesetter)</option>
+                            <option value="translator">مترجم (Translator) - سهم ۲۰٪</option>
+                            <option value="cleaner">کلینر (Cleaner) - سهم ۳۰٪</option>
+                            <option value="editor">ادیتور و تایپیست (Editor) - سهم ۳۰٪</option>
                             <option value="proofreader">ویراستار (Proofreader)</option>
                           </select>
                         </div>
 
                         <div>
-                          <label className="block text-[10px] text-zinc-400 font-bold mb-1">کد اختصاصی کاربری:</label>
+                          <label className="block text-xs font-bold text-zinc-300 mb-1.5">شناسه اختصاصی کاربری:</label>
                           <input
                             type="text"
-                            placeholder="مثلاً: 0021345678"
-                            value={reqMelliCode}
-                            onChange={(e) => setReqMelliCode(e.target.value)}
-                            className="w-full bg-black border border-white/10 rounded-xl p-2.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
+                            placeholder="شناسه اختصاصی شما..."
+                            value={reqUserCode}
+                            onChange={(e) => setReqUserCode(e.target.value)}
+                            className="w-full bg-zinc-900 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
                           />
                         </div>
                       </div>
@@ -972,10 +953,10 @@ export default function CooperationTab({
                         <button
                           onClick={() => handleSendRequest(activeCatalogSeries)}
                           disabled={submittingReq}
-                          className="px-6 py-2.5 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-xs rounded-xl transition-all shadow-md flex items-center gap-2"
+                          className="px-6 py-2.5 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-xs rounded-xl transition-all shadow-lg flex items-center gap-2"
                         >
                           <Send size={14} />
-                          {submittingReq ? "در حال ثبت درخواست..." : "ارسال درخواست همکاری به مدیریت"}
+                          {submittingReq ? "در حال ارسال..." : "ارسال درخواست عضویت به مدیریت"}
                         </button>
                       </div>
                     </div>
@@ -990,24 +971,23 @@ export default function CooperationTab({
       )}
 
       {/* ========================================================================= */}
-      {/* SUB-TAB 2: MY ASSIGNED WORKS & CHAPTER SUBMISSIONS (کارهای من و ارسال چپتر) */}
+      {/* SUB-TAB 2: MY PROJECTS & CHAPTER WORKSTATION (پروژه‌های من و آپلود چپترها) */}
       {/* ========================================================================= */}
       {activeSubTab === "my_projects" && (
         <div className="space-y-6">
+          
+          {/* Projects Bar */}
           <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4">
             <h3 className="text-sm font-black text-white flex items-center gap-2">
               <Briefcase size={18} className="text-[var(--color-asura-accent)]" />
-              پروژه‌های تایید شده و فعال شما
+              پروژه‌های فعال و تایید شده شما
             </h3>
-            <p className="text-xs text-zinc-400">
-              روی هر یک از مانهواهای زیر کلیک کنید تا پنل ارسال فایل‌های ترجمه، کلین یا ادیت برای شما باز شود.
-            </p>
 
             {myApprovedSeries.length === 0 ? (
               <div className="bg-black/30 border border-white/5 rounded-xl p-8 text-center text-zinc-400 space-y-2">
                 <AlertCircle size={28} className="mx-auto text-amber-400 mb-1" />
                 <p className="text-xs font-bold text-white">شما هنوز در هیچ پروژه‌ای عضو تایید شده نیستید.</p>
-                <p className="text-[11px] text-zinc-500">از تب «جستجوی کارها و درخواست همکاری» برای ارسال درخواست به مدیریت اقدام کنید.</p>
+                <p className="text-[11px] text-zinc-500">از تب «کاتالوگ آثار و درخواست عضویت» برای ارسال درخواست به مدیریت اقدام فرمایید.</p>
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
@@ -1042,35 +1022,37 @@ export default function CooperationTab({
             )}
           </div>
 
-          {/* Chapters and Submission Workspace for Selected Series */}
+          {/* Chapters List and Chapter Workstation */}
           {selectedSeriesId && (
-            <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-6">
+            <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-6 shadow-2xl">
               
               <div className="flex flex-wrap items-center justify-between border-b border-white/10 pb-4 gap-4">
                 <div>
                   <h3 className="text-base font-black text-white flex items-center gap-2">
                     <FileText size={18} className="text-[var(--color-asura-accent-light)]" />
-                    مدیریت چپترهای اثر: <span className="text-[var(--color-asura-accent-light)]">{seriesList.find((s: any) => s.id === selectedSeriesId)?.title}</span>
+                    میز کار چپترهای اثر: <span className="text-[var(--color-asura-accent-light)]">{seriesList.find((s: any) => s.id === selectedSeriesId)?.title}</span>
                   </h3>
-                  <p className="text-xs text-zinc-400 mt-1">جهت ارسال ترجمه، کلین یا خروجی نهایی ادیت، چپتر مورد نظر را انتخاب نمایید.</p>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    جهت آپلود ترجمه، کلین یا خروجی نهایی ادیتور، چپتر مورد نظر را باز نمایید.
+                  </p>
                 </div>
 
                 <button
                   onClick={() => setShowCreateChapter(!showCreateChapter)}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow"
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow"
                 >
                   <Plus size={16} />
                   ایجاد سریع چپتر جدید
                 </button>
               </div>
 
-              {/* Fast chapter creation form */}
+              {/* Fast Chapter Creation */}
               {showCreateChapter && (
                 <div className="bg-black/60 border border-indigo-500/30 p-4 rounded-2xl space-y-3">
-                  <h4 className="text-xs font-black text-indigo-400">ایجاد چپتر جدید برای این پروژه:</h4>
+                  <h4 className="text-xs font-black text-indigo-400">ایجاد چپتر جدید:</h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                     <div>
-                      <label className="block text-[10px] text-zinc-400 font-bold mb-1">شماره چپتر (مثلاً 1 یا 10.5):</label>
+                      <label className="block text-[10px] text-zinc-400 font-bold mb-1">شماره چپتر (مثلا 1 یا 1.5):</label>
                       <input
                         type="text"
                         placeholder="1"
@@ -1108,12 +1090,12 @@ export default function CooperationTab({
                 </div>
               )}
 
-              {/* Chapters List */}
+              {/* Chapters List Table */}
               {loadingChapters ? (
                 <div className="p-8 text-center text-zinc-400 text-xs animate-pulse">در حال دریافت لیست چپترها...</div>
               ) : chaptersList.length === 0 ? (
                 <div className="p-8 text-center text-zinc-500 text-xs bg-black/30 rounded-xl border border-white/5">
-                  هیچ چپتری برای این اثر تعریف نشده است. از دکمه «ایجاد سریع چپتر جدید» استفاده کنید.
+                  هیچ چپتری برای این اثر ثبت نشده است. از دکمه «ایجاد سریع چپتر جدید» استفاده کنید.
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -1125,16 +1107,17 @@ export default function CooperationTab({
                       : null;
                     const myRole = myRoleObj?.role || (isGlobalAdmin ? "editor" : "translator");
 
-                    // Submissions inside chapter
                     const submissions = ch.submissions || [];
                     const translatorSub = submissions.find((s: any) => s.role === "translator");
                     const cleanerSub = submissions.find((s: any) => s.role === "cleaner");
                     const editorSub = submissions.find((s: any) => s.role === "editor");
 
+                    const isRejected = ch.status === "rejected" || Boolean(ch.rejectionNote);
+
                     return (
-                      <div key={ch.id} className="bg-black/50 border border-white/10 rounded-2xl overflow-hidden">
+                      <div key={ch.id} className="bg-black/50 border border-white/10 rounded-2xl overflow-hidden shadow">
                         
-                        {/* Chapter summary row */}
+                        {/* Chapter Summary Header */}
                         <div
                           onClick={() => setExpandedChapterId(isExpanded ? null : ch.id)}
                           className="p-4 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-all"
@@ -1146,58 +1129,78 @@ export default function CooperationTab({
                             <div>
                               <h4 className="text-xs font-black text-white">{ch.title || `چپتر ${ch.number}`}</h4>
                               <div className="flex flex-wrap items-center gap-2 text-[10px] text-zinc-400 mt-1">
-                                {ch.isPending ? (
+                                {isRejected ? (
+                                  <span className="text-red-400 font-black bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20 flex items-center gap-1">
+                                    <AlertCircle size={10} /> رد شده توسط مدیریت (نیازمند اصلاح)
+                                  </span>
+                                ) : ch.isPending ? (
                                   <span className="text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-                                    در انتظار بررسی مدیریت
+                                    در انتظار بررسی و تایید مدیریت
                                   </span>
                                 ) : (
                                   <span className="text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                                    منتشر شده پابلیک
+                                    منتشر شده (Public)
                                   </span>
                                 )}
 
-                                {translatorSub && <span className="text-blue-400">✓ فایل ترجمه موجود</span>}
-                                {cleanerSub && <span className="text-teal-400">✓ فایل کلین موجود</span>}
-                                {editorSub && <span className="text-purple-400">✓ خروجی ادیت موجود</span>}
+                                {translatorSub && <span className="text-blue-400 font-bold">✓ فایل ترجمه</span>}
+                                {cleanerSub && <span className="text-teal-400 font-bold">✓ فایل کلین</span>}
+                                {editorSub && <span className="text-purple-400 font-bold">✓ خروجی ادیت</span>}
                               </div>
                             </div>
                           </div>
 
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-bold text-[var(--color-asura-accent-light)] flex items-center gap-1">
-                              {isExpanded ? "بستن پنل" : "ارسال فایل / دانلود"}
+                              {isExpanded ? "بستن پنل" : "ارسال فایل / دانلود فایل‌ها"}
                               {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                             </span>
                           </div>
                         </div>
 
-                        {/* Chapter Expanded Submission & Role Area */}
+                        {/* Chapter Expanded Workstation */}
                         {isExpanded && (
-                          <div className="p-5 border-t border-white/10 bg-zinc-900/80 space-y-5">
+                          <div className="p-5 border-t border-white/10 bg-zinc-900/90 space-y-5 animate-fadeIn">
                             
-                            {/* Workflow files status table */}
-                            <div className="bg-black/40 border border-white/5 rounded-xl p-4 text-xs space-y-3">
-                              <h5 className="font-black text-white flex items-center gap-2">
-                                <Clock size={14} className="text-amber-400" />
-                                وضعیت فایل‌های ارسالی همکاران برای چپتر {ch.number}:
+                            {/* Rejection Warning Banner */}
+                            {isRejected && (
+                              <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-2xl space-y-2">
+                                <div className="flex items-center gap-2 text-red-400 font-black text-xs">
+                                  <AlertCircle size={18} />
+                                  علت رد این چپتر توسط مدیریت:
+                                </div>
+                                <p className="text-xs text-red-200 bg-black/40 p-3 rounded-xl border border-red-500/20 font-bold">
+                                  {ch.rejectionNote || "تایپوگرافی یا ترجمه نیازمند بازبینی و اصلاح می‌باشد."}
+                                </p>
+                                <p className="text-[11px] text-zinc-400">
+                                  لطفا فایل اصلاح شده را مجددا از بخش مربوطه آپلود کنید تا وضعیت چپتر بروزرسانی گردد.
+                                </p>
+                              </div>
+                            )}
+
+                            {/* SOURCE FILES DISPLAY SECTION */}
+                            <div className="bg-black/60 border border-white/10 rounded-2xl p-4 space-y-3">
+                              <h5 className="text-xs font-black text-white flex items-center gap-2">
+                                <Layers size={16} className="text-amber-400" />
+                                فایل‌های اولیه ثبت شده برای چپتر {ch.number}:
                               </h5>
 
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 
-                                {/* Translator File */}
-                                <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
-                                  <span className="block text-[10px] text-zinc-400 font-bold uppercase">۱. فایل ترجمه (مترجم):</span>
+                                {/* 1. Translator File */}
+                                <div className="p-3.5 bg-zinc-900 rounded-xl border border-white/5 space-y-2">
+                                  <span className="text-[10px] text-zinc-400 font-bold uppercase block">۱. فایل ترجمه (مترجم):</span>
                                   {translatorSub ? (
-                                    <div className="space-y-1">
-                                      <span className="block text-emerald-400 font-bold">{translatorSub.userName}</span>
+                                    <div className="space-y-2">
+                                      <span className="text-xs font-black text-emerald-400 block">{translatorSub.userName}</span>
                                       {translatorSub.fileUrl ? (
                                         <a
                                           href={translatorSub.fileUrl}
                                           target="_blank"
                                           rel="noreferrer"
-                                          className="inline-flex items-center gap-1 text-[11px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-1 rounded-lg font-bold hover:bg-emerald-500/30 transition-all"
+                                          className="inline-flex items-center gap-1.5 text-xs bg-blue-500/20 text-blue-300 border border-blue-500/30 px-3 py-1.5 rounded-xl font-bold hover:bg-blue-500/30 transition-all"
                                         >
-                                          <Download size={12} />
+                                          <Download size={14} />
                                           دانلود فایل Word ترجمه
                                         </a>
                                       ) : (
@@ -1205,24 +1208,24 @@ export default function CooperationTab({
                                       )}
                                     </div>
                                   ) : (
-                                    <span className="text-amber-400/70 text-[11px]">هنوز ترجمه ثبت نشده است</span>
+                                    <span className="text-amber-500/70 text-xs font-bold block">هنوز ترجمه آپلود نشده است</span>
                                   )}
                                 </div>
 
-                                {/* Cleaner File */}
-                                <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
-                                  <span className="block text-[10px] text-zinc-400 font-bold uppercase">۲. فایل کلین (کلینر):</span>
+                                {/* 2. Cleaner File */}
+                                <div className="p-3.5 bg-zinc-900 rounded-xl border border-white/5 space-y-2">
+                                  <span className="text-[10px] text-zinc-400 font-bold uppercase block">۲. فایل کلین (کلینر):</span>
                                   {cleanerSub ? (
-                                    <div className="space-y-1">
-                                      <span className="block text-emerald-400 font-bold">{cleanerSub.userName}</span>
+                                    <div className="space-y-2">
+                                      <span className="text-xs font-black text-teal-400 block">{cleanerSub.userName}</span>
                                       {cleanerSub.fileUrl ? (
                                         <a
                                           href={cleanerSub.fileUrl}
                                           target="_blank"
                                           rel="noreferrer"
-                                          className="inline-flex items-center gap-1 text-[11px] bg-teal-500/20 text-teal-300 border border-teal-500/30 px-2.5 py-1 rounded-lg font-bold hover:bg-teal-500/30 transition-all"
+                                          className="inline-flex items-center gap-1.5 text-xs bg-teal-500/20 text-teal-300 border border-teal-500/30 px-3 py-1.5 rounded-xl font-bold hover:bg-teal-500/30 transition-all"
                                         >
-                                          <Download size={12} />
+                                          <Download size={14} />
                                           دانلود فایل Zip کلین
                                         </a>
                                       ) : (
@@ -1230,122 +1233,126 @@ export default function CooperationTab({
                                       )}
                                     </div>
                                   ) : (
-                                    <span className="text-amber-400/70 text-[11px]">هنوز کلین ثبت نشده است</span>
-                                  )}
-                                </div>
-
-                                {/* Editor File */}
-                                <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
-                                  <span className="block text-[10px] text-zinc-400 font-bold uppercase">۳. خروجی نهایی (ادیتور):</span>
-                                  {editorSub ? (
-                                    <div className="space-y-1">
-                                      <span className="block text-purple-400 font-bold">{editorSub.userName}</span>
-                                      <span className="text-xs text-white font-mono block">
-                                        {Array.isArray(ch.images) ? `${ch.images.length} تصویر نهایی` : 'آماده بررسی'}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <span className="text-amber-400/70 text-[11px]">در انتظار بارگذاری نهایی ادیتور</span>
+                                    <span className="text-amber-500/70 text-xs font-bold block">هنوز کلین آپلود نشده است</span>
                                   )}
                                 </div>
 
                               </div>
                             </div>
 
-                            {/* Role Submission Form */}
-                            <div className="bg-black/60 border border-[var(--color-asura-accent)]/30 rounded-2xl p-5 space-y-4">
-                              <h5 className="text-xs font-black text-white flex items-center gap-2">
+                            {/* ROLE-SPECIFIC UPLOAD ACTIONS */}
+                            <div className="bg-zinc-950 border border-white/10 rounded-2xl p-5 space-y-4">
+                              <h5 className="text-xs font-black text-white flex items-center gap-2 border-b border-white/10 pb-3">
                                 <UploadCloud size={16} className="text-[var(--color-asura-accent)]" />
-                                ثبت و آپلود گزارش کار چپتر {ch.number} (به عنوان: <strong className="text-amber-400">{myRole === 'translator' ? 'مترجم' : myRole === 'cleaner' ? 'کلینر' : 'ادیتور'}</strong>)
+                                پنل بارگذاری فایل اختصاصی (نقش شما: <span className="text-amber-400">{myRole === 'translator' ? 'مترجم' : myRole === 'cleaner' ? 'کلینر' : 'ادیتور'}</span>)
                               </h5>
 
-                              {/* Direct File Upload Control */}
-                              <div className="space-y-2">
-                                <label className="block text-[10px] text-zinc-300 font-bold">
-                                  {myRole === "translator" && "آپلود فایل Word (.docx / .doc) یا متنی ترجمه:"}
-                                  {myRole === "cleaner" && "آپلود آرشیو Zip یا عکس‌های کلین شده:"}
-                                  {myRole === "editor" && "آپلود صفحات نهایی فتوشاپ/ادیت شده (Zip یا عکس):"}
-                                </label>
-
-                                <div className="flex items-center gap-3">
-                                  <input
-                                    type="file"
-                                    accept={
-                                      myRole === "translator" 
-                                        ? ".doc,.docx,.txt" 
-                                        : ".zip,.rar,image/*"
-                                    }
-                                    multiple={myRole === "editor" || myRole === "cleaner"}
-                                    onChange={(e) => handleDirectFileUpload(e, myRole)}
-                                    disabled={uploadingFile}
-                                    className="block w-full text-xs text-zinc-400 file:mr-0 file:ml-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-[var(--color-asura-accent)] file:text-white hover:file:bg-[var(--color-asura-accent-hover)] cursor-pointer"
-                                  />
-                                </div>
-
-                                {uploadingFile && (
-                                  <p className="text-[11px] text-amber-400 font-bold animate-pulse">{uploadStatus}</p>
-                                )}
-                                {!uploadingFile && uploadStatus && (
-                                  <p className="text-[11px] text-emerald-400 font-bold">{uploadStatus}</p>
-                                )}
-                              </div>
-
-                              <div>
-                                <label className="block text-[10px] text-zinc-400 font-bold mb-1">
-                                  یا لینک مستقیم گوگل درایو / مگا (در صورت استفاده از هاست خارجی):
-                                </label>
-                                <input
-                                  type="text"
-                                  placeholder="https://drive.google.com/file/d/..."
-                                  value={submitFileUrl}
-                                  onChange={(e) => setSubmitFileUrl(e.target.value)}
-                                  className="w-full bg-black border border-white/10 text-white rounded-xl p-2.5 text-xs font-mono font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
-                                />
-                              </div>
-
-                              {myRole === "editor" && (
-                                <div>
-                                  <label className="block text-[10px] text-zinc-400 font-bold mb-1">
-                                    لیست آدرس تصاویر خروجی نهایی ادیتور (هر لینک در یک سطر):
-                                  </label>
-                                  <textarea
-                                    rows={3}
-                                    placeholder="https://site.com/uploads/ch1_p1.jpg&#10;https://site.com/uploads/ch1_p2.jpg"
-                                    value={submitImages}
-                                    onChange={(e) => setSubmitImages(e.target.value)}
-                                    className="w-full bg-black border border-white/10 text-white rounded-xl p-2.5 text-xs font-mono font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
-                                  />
+                              {submitError && (
+                                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300 font-bold">
+                                  {submitError}
                                 </div>
                               )}
 
-                              <div>
-                                <label className="block text-[10px] text-zinc-400 font-bold mb-1">یادداشت و توضیحات کار برای مدیریت و همکاران:</label>
-                                <textarea
-                                  rows={2}
-                                  placeholder="توضیحات اختیاری درباره این چپتر..."
-                                  value={submitNote}
-                                  onChange={(e) => setSubmitNote(e.target.value)}
-                                  className="w-full bg-black border border-white/10 text-white rounded-xl p-2.5 text-xs font-bold focus:outline-none focus:border-[var(--color-asura-accent)]"
-                                />
-                              </div>
+                              {submitSuccess && (
+                                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 font-bold">
+                                  {submitSuccess}
+                                </div>
+                              )}
 
-                              {submitError && <p className="text-red-400 text-xs font-bold">{submitError}</p>}
-                              {submitSuccess && <p className="text-emerald-400 text-xs font-black">{submitSuccess}</p>}
+                              {/* FOR TRANSLATOR */}
+                              {(myRole === "translator" || isGlobalAdmin) && (
+                                <div className="space-y-3">
+                                  <h6 className="text-xs font-bold text-zinc-300">📄 بارگذاری فایل Word ترجمه (.docx / .doc):</h6>
+                                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                                    <input
+                                      type="file"
+                                      accept=".doc,.docx,.txt"
+                                      onChange={(e) => handleDirectFileUpload(e, "translator")}
+                                      className="text-xs text-zinc-400 bg-black border border-white/10 rounded-xl p-2 file:ml-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white"
+                                    />
+                                    <button
+                                      onClick={() => handleSubmitChapterWork(ch, "translator")}
+                                      disabled={submittingWork || uploadingFile || !submitFileUrl}
+                                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black rounded-xl transition-all shadow flex items-center justify-center gap-1.5 shrink-0"
+                                    >
+                                      <Send size={14} />
+                                      ثبت و ارسال فایل ترجمه
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
 
-                              <div className="flex justify-end pt-2">
-                                <button
-                                  onClick={() => handleSubmitChapterWork(ch, myRole)}
-                                  disabled={submittingWork || uploadingFile}
-                                  className="px-6 py-2.5 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-xs rounded-xl transition-all flex items-center gap-2 shadow"
-                                >
-                                  <Send size={14} />
-                                  {submittingWork ? "در حال ثبت..." : "تایید و ارسال کار به مدیریت"}
-                                </button>
-                              </div>
+                              {/* FOR CLEANER */}
+                              {(myRole === "cleaner" || isGlobalAdmin) && (
+                                <div className="space-y-3 pt-2">
+                                  <h6 className="text-xs font-bold text-zinc-300">🎨 بارگذاری فایل Zip صفحات پاک‌سازی شده:</h6>
+                                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                                    <input
+                                      type="file"
+                                      accept=".zip,.rar,.7z"
+                                      onChange={(e) => handleDirectFileUpload(e, "cleaner")}
+                                      className="text-xs text-zinc-400 bg-black border border-white/10 rounded-xl p-2 file:ml-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-teal-600 file:text-white"
+                                    />
+                                    <button
+                                      onClick={() => handleSubmitChapterWork(ch, "cleaner")}
+                                      disabled={submittingWork || uploadingFile || !submitFileUrl}
+                                      className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-black rounded-xl transition-all shadow flex items-center justify-center gap-1.5 shrink-0"
+                                    >
+                                      <Send size={14} />
+                                      ثبت و ارسال فایل کلین
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* FOR EDITOR (TYPESETTER) */}
+                              {(myRole === "editor" || isGlobalAdmin) && (
+                                <div className="space-y-4 pt-3 border-t border-white/10">
+                                  <div>
+                                    <h6 className="text-xs font-bold text-purple-300 mb-1">🖌️ بارگذاری صفحات نهایی تایپوگرافی شده (برای انتشار در سایت):</h6>
+                                    <p className="text-[11px] text-zinc-400">
+                                      تصاویر نهایی چپتر را انتخاب نمایید (یک یا چند تصویر):
+                                    </p>
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    <input
+                                      type="file"
+                                      multiple
+                                      accept="image/*"
+                                      onChange={(e) => handleDirectFileUpload(e, "editor")}
+                                      className="w-full text-xs text-zinc-400 bg-black border border-white/10 rounded-xl p-2 file:ml-3 file:py-1.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-purple-600 file:text-white"
+                                    />
+
+                                    {uploadStatus && <p className="text-xs text-purple-300 font-mono">{uploadStatus}</p>}
+
+                                    <textarea
+                                      rows={3}
+                                      placeholder="لینک تصاویر صفحات (هر تصویر در یک سطر)..."
+                                      value={submitImages}
+                                      onChange={(e) => setSubmitImages(e.target.value)}
+                                      className="w-full bg-black border border-white/10 rounded-xl p-3 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                                    />
+                                  </div>
+
+                                  <div className="flex justify-end pt-1">
+                                    <button
+                                      onClick={() => handleSubmitChapterWork(ch, "editor")}
+                                      disabled={submittingWork || uploadingFile || !submitImages.trim()}
+                                      className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white text-xs font-black rounded-xl transition-all shadow-lg shadow-purple-600/20 flex items-center gap-2"
+                                    >
+                                      <Send size={14} />
+                                      ثبت خروجی نهایی و ارسال به مدیریت جهت بررسی و انتشار
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
                             </div>
 
                           </div>
                         )}
+
                       </div>
                     );
                   })}
@@ -1359,10 +1366,151 @@ export default function CooperationTab({
       )}
 
       {/* ========================================================================= */}
-      {/* SUB-TAB: SETTLEMENTS & FINANCIAL EARNINGS (تسویه‌حساب و درآمد کادر) */}
+      {/* SUB-TAB 3: ADMIN CHAPTER REVIEW & PUBLICATION CENTER (مرکز بررسی و تایید چپترها) */}
+      {/* ========================================================================= */}
+      {activeSubTab === "admin_approval" && isGlobalAdmin && (
+        <div className="space-y-6">
+          <div className="bg-gradient-to-r from-indigo-950/60 via-zinc-900 to-black border border-indigo-500/30 rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 shadow-2xl">
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+                  <FileCheck size={22} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white">مرکز بررسی و تایید چپترهای ارسالی کادر</h3>
+                  <p className="text-xs text-zinc-400">
+                    بررسی خروجی نهایی ادیتورها، پاکسازی فایل‌های موقت Word/Zip پس از انتشار و واریز خودکار سهم درآمد
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={fetchPendingQueue}
+              className="px-5 py-3 bg-white/5 hover:bg-white/10 text-white font-bold text-xs rounded-2xl transition-all border border-white/10 flex items-center gap-2"
+            >
+              <RefreshCw size={16} className={loadingPendingQueue ? "animate-spin" : ""} />
+              بروزرسانی صف بررسی ({allPendingChaptersQueue.length})
+            </button>
+          </div>
+
+          {loadingPendingQueue ? (
+            <div className="py-12 text-center text-xs text-zinc-400 animate-pulse">در حال دریافت چپترهای در انتظار بررسی...</div>
+          ) : allPendingChaptersQueue.length === 0 ? (
+            <div className="py-12 text-center text-zinc-500 text-xs font-bold bg-black/30 rounded-3xl border border-white/5 space-y-2">
+              <CheckCircle size={32} className="mx-auto text-emerald-500 mb-1" />
+              <p className="text-sm font-black text-white">هیچ چپتری در صف انتظار بررسی وجود ندارد.</p>
+              <p className="text-xs text-zinc-500">تمامی چپترهای ارسالی تعیین تکلیف شده‌اند.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {allPendingChaptersQueue.map((ch: any) => (
+                <div
+                  key={ch.id}
+                  className="bg-zinc-900 border border-white/10 rounded-3xl p-6 space-y-5 shadow-xl hover:border-indigo-500/30 transition-all"
+                >
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+                    <div className="flex items-center gap-4">
+                      {ch.seriesCover && (
+                        <img src={ch.seriesCover} alt="" className="w-12 h-16 object-cover rounded-xl border border-white/10" />
+                      )}
+                      <div>
+                        <h4 className="text-sm font-black text-white">{ch.seriesTitle}</h4>
+                        <span className="text-xs text-indigo-400 font-mono font-black mt-0.5 block">
+                          چپتر {ch.number} ({ch.title})
+                        </span>
+                      </div>
+                    </div>
+
+                    <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-black px-3 py-1 rounded-full animate-pulse flex items-center gap-1">
+                      <Clock size={14} /> در انتظار تایید مدیریت کل
+                    </span>
+                  </div>
+
+                  {/* Revenue Share Preview Card */}
+                  <div className="bg-black/40 border border-white/5 rounded-2xl p-4 space-y-2 text-xs">
+                    <h5 className="font-black text-emerald-400 flex items-center gap-2">
+                      <DollarSign size={16} /> پیش‌نمایش تقسیم درآمد حاصل از فروش این چپتر:
+                    </h5>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                      <div className="bg-zinc-900 p-2.5 rounded-xl border border-white/5">
+                        <span className="text-zinc-400 block">🗣️ مترجم:</span>
+                        <strong className="text-emerald-400 font-black">۲۰٪ سهم فروش</strong>
+                      </div>
+                      <div className="bg-zinc-900 p-2.5 rounded-xl border border-white/5">
+                        <span className="text-zinc-400 block">🧹 کلینر:</span>
+                        <strong className="text-emerald-400 font-black">۳۰٪ سهم فروش</strong>
+                      </div>
+                      <div className="bg-zinc-900 p-2.5 rounded-xl border border-white/5">
+                        <span className="text-zinc-400 block">🎨 ادیتور:</span>
+                        <strong className="text-emerald-400 font-black">۳۰٪ سهم فروش</strong>
+                      </div>
+                      <div className="bg-zinc-900 p-2.5 rounded-xl border border-white/5">
+                        <span className="text-zinc-400 block">🌐 سهم وب‌سایت:</span>
+                        <strong className="text-emerald-400 font-black">۲۰٪ سهم فروش</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Submitted Pages Preview */}
+                  {Array.isArray(ch.images) && ch.images.length > 0 && (
+                    <div className="space-y-2">
+                      <span className="text-xs font-bold text-zinc-300 block">
+                        پیش‌نمایش صفحات ارسالی ادیتور ({ch.images.length} صفحه):
+                      </span>
+                      <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                        {ch.images.slice(0, 10).map((imgUrl: string, idx: number) => (
+                          <img
+                            key={idx}
+                            src={imgUrl}
+                            alt=""
+                            className="w-20 h-28 object-cover rounded-xl border border-white/10 shrink-0"
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Admin Actions */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 pt-2 border-t border-white/10">
+                    <div className="flex items-center gap-2 flex-1">
+                      <input
+                        type="text"
+                        placeholder="علت رد (در صورت عدم تایید)..."
+                        value={rejectionNoteMap[ch.id] || ""}
+                        onChange={(e) => setRejectionNoteMap({ ...rejectionNoteMap, [ch.id]: e.target.value })}
+                        className="bg-black border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder:text-zinc-600 focus:outline-none w-full max-w-sm font-bold"
+                      />
+                      <button
+                        onClick={() => handleRejectChapter(ch.seriesId, ch.id, ch.number)}
+                        disabled={processingActionId === ch.id}
+                        className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-black text-xs rounded-xl transition-all flex items-center justify-center gap-1 shadow shrink-0"
+                      >
+                        <X size={16} /> رد چپتر
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => handleApproveChapter(ch.seriesId, ch.id, ch.number)}
+                      disabled={processingActionId === ch.id}
+                      className="px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-black font-black text-xs rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 shrink-0"
+                    >
+                      <Check size={18} /> تایید نهایی و انتشار عمومی (Public)
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SUB-TAB 4: SETTLEMENTS & FINANCIAL EARNINGS (تسویه‌حساب و درآمد کادر) */}
       {/* ========================================================================= */}
       {activeSubTab === "settlements" && (
-        <div className="space-y-6 animate-fadeIn">
+        <div className="space-y-6">
+          
           {/* Header Banner */}
           <div className="bg-gradient-to-r from-emerald-950/60 via-zinc-900 to-black border border-emerald-500/20 rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 shadow-2xl">
             <div className="space-y-2">
@@ -1397,7 +1545,7 @@ export default function CooperationTab({
             </div>
           </div>
 
-          {/* New Settlement Request Form Modal/Card */}
+          {/* New Settlement Form */}
           {showSettleForm && (
             <div className="bg-black/80 border border-emerald-500/30 rounded-3xl p-6 sm:p-8 space-y-5 animate-fadeIn shadow-2xl">
               <div className="border-b border-white/10 pb-4 flex items-center justify-between">
@@ -1632,57 +1780,62 @@ export default function CooperationTab({
       )}
 
       {/* ========================================================================= */}
-      {/* SUB-TAB 3: SUPER ADMIN REQUESTS & TEAM MANAGEMENT (مدیریت درخواست‌ها و تیم) */}
+      {/* SUB-TAB 5: ADMIN REQUESTS & TEAM MANAGEMENT (مدیریت درخواست‌ها و تیم) */}
       {/* ========================================================================= */}
       {activeSubTab === "admin_requests" && isGlobalAdmin && (
         <div className="space-y-6">
-          
-          {/* Pending Applications Section */}
-          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-between border-b border-white/10 pb-4">
-              <h3 className="text-base font-black text-amber-400 flex items-center gap-2">
-                <AlertCircle size={18} />
-                درخواست‌های جدید همکاری در انتظار تایید ({pendingRequestsList.length})
-              </h3>
-              <span className="text-xs text-zinc-400">تمام درخواست‌های کاربران جهت دریافت نقش روی آثار</span>
+              <div>
+                <h3 className="text-sm font-black text-white flex items-center gap-2">
+                  <Shield size={18} className="text-amber-400" />
+                  درخواست‌های عضویت در انتظار تایید مدیریت کل ({pendingRequestsList.length})
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1">
+                  درخواست‌های ارسال شده توسط همکاران جهت دریافت مسئولیت روی آثار مختلف
+                </p>
+              </div>
             </div>
 
             {pendingRequestsList.length === 0 ? (
-              <p className="text-xs text-zinc-500 bg-black/30 p-6 rounded-xl text-center border border-white/5">
-                هیچ درخواست جدیدی در انتظار تایید وجود ندارد.
-              </p>
+              <div className="p-8 text-center text-zinc-500 text-xs bg-black/30 rounded-xl border border-white/5">
+                هیچ درخواستی در صف انتظار وجود ندارد.
+              </div>
             ) : (
               <div className="space-y-3">
                 {pendingRequestsList.map((req: any) => (
-                  <div key={`${req.seriesId}-${req.userId}`} className="bg-black/50 border border-amber-500/20 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <div className="flex items-center gap-4 text-right">
-                      <img src={req.seriesCover} alt="" className="w-12 h-16 object-cover rounded-xl border border-white/10 shrink-0" />
+                  <div
+                    key={`${req.seriesId}-${req.userId}`}
+                    className="bg-black/60 border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+                  >
+                    <div className="flex items-center gap-3">
+                      <img src={req.seriesCover} alt="" className="w-10 h-14 object-cover rounded-lg" />
                       <div>
-                        <h4 className="text-sm font-black text-white">{req.displayName} ({req.email || 'بدون ایمیل'})</h4>
-                        <p className="text-xs text-zinc-300 mt-0.5">
-                          اثر درخواستی: <strong className="text-[var(--color-asura-accent-light)]">{req.seriesTitle}</strong>
-                        </p>
-                        <p className="text-[11px] text-zinc-400 mt-0.5">
-                          نقش: <strong className="text-amber-400">{req.role === 'translator' ? 'مترجم' : req.role === 'cleaner' ? 'کلینر' : 'ادیتور'}</strong> | کد کاربری: <strong className="text-white font-mono">{req.melliCode || 'ثبت نشده'}</strong>
-                        </p>
+                        <h4 className="text-xs font-black text-white">{req.displayName || req.email}</h4>
+                        <span className="text-[11px] text-zinc-400 block font-mono">{req.email}</span>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[10px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-md font-bold border border-amber-500/30">
+                            نقش درخواستی: {req.role === 'translator' ? 'مترجم' : req.role === 'cleaner' ? 'کلینر' : 'ادیتور'}
+                          </span>
+                          <span className="text-[10px] text-zinc-400 font-bold">
+                            اثر: <strong className="text-white">{req.seriesTitle}</strong>
+                          </span>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
                       <button
                         onClick={() => handleAdminProcessRequest(req.seriesId, req.userId, "approve", req.role)}
-                        disabled={processingActionId === `${req.seriesId}-${req.userId}`}
-                        className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-black text-xs rounded-xl transition-all flex items-center gap-1 shadow"
+                        className="flex-1 sm:flex-none px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-black text-xs rounded-xl transition-all shadow"
                       >
-                        <Check size={14} /> تایید عضویت
+                        تایید و اعطای دسترسی
                       </button>
-
                       <button
-                        onClick={() => handleAdminProcessRequest(req.seriesId, req.userId, "reject")}
-                        disabled={processingActionId === `${req.seriesId}-${req.userId}`}
-                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-black text-xs rounded-xl transition-all flex items-center gap-1 shadow"
+                        onClick={() => handleAdminProcessRequest(req.seriesId, req.userId, "reject", req.role)}
+                        className="flex-1 sm:flex-none px-3 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl transition-all shadow"
                       >
-                        <X size={14} /> رد درخواست
+                        رد درخواست
                       </button>
                     </div>
                   </div>
@@ -1690,177 +1843,6 @@ export default function CooperationTab({
               </div>
             )}
           </div>
-
-          {/* Series Staff & Chapter Attribution Management */}
-          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
-            <h3 className="text-base font-black text-white flex items-center gap-2">
-              <UsersIcon size={18} className="text-[var(--color-asura-accent)]" />
-              کاتالوگ آثار و مدیریت دست‌اندرکاران و چپترها
-            </h3>
-            <p className="text-xs text-zinc-400">برای تغییر، افزودن مستقیم یا حذف همکاران و مشاهده چپترها روی هر کار کلیک کنید.</p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {seriesList.map((s: any) => {
-                const approvedCount = Array.isArray(s.contributors) 
-                  ? s.contributors.filter((c: any) => c.status === "approved").length 
-                  : 0;
-                return (
-                  <div key={s.id} className="p-3 bg-black/40 border border-white/10 rounded-2xl flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <img src={s.cover} alt="" className="w-10 h-14 object-cover rounded-lg shrink-0" />
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-black text-white truncate">{s.title}</h4>
-                        <span className="text-[10px] text-zinc-400 block mt-0.5">{approvedCount} عضو فعال</span>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        setActiveCatalogSeries(s);
-                        setShowAddStaffModal(false);
-                      }}
-                      className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl transition-all shrink-0"
-                    >
-                      مدیریت
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* SUB-TAB 4: SUPER ADMIN CHAPTER APPROVAL QUEUE (تایید و انتشار چپترها) */}
-      {/* ========================================================================= */}
-      {activeSubTab === "admin_approval" && isGlobalAdmin && (
-        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-6">
-          <div className="flex items-center justify-between border-b border-white/10 pb-4">
-            <div>
-              <h3 className="text-base font-black text-indigo-400 flex items-center gap-2">
-                <FileCheck size={18} />
-                صف تایید و انتشار عمومی چپترهای ارسالی ({allPendingChaptersQueue.length})
-              </h3>
-              <p className="text-xs text-zinc-400 mt-1">
-                چپترهای آماده شده توسط ادیتورها در این بخش منتظر تایید مدیریت هستند. با کلیک روی تایید، چپتر به همراه نوتیفیکیشن روی سایت منتشر می‌شود.
-              </p>
-            </div>
-
-            <button
-              onClick={fetchPendingQueue}
-              className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-white border border-white/10 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
-            >
-              <RefreshCw size={14} className={loadingPendingQueue ? "animate-spin" : ""} />
-              بروزرسانی صف
-            </button>
-          </div>
-
-          {loadingPendingQueue ? (
-            <div className="p-12 text-center text-zinc-400 text-xs animate-pulse">در حال دریافت صف چپترهای ارسالی...</div>
-          ) : allPendingChaptersQueue.length === 0 ? (
-            <div className="p-12 text-center text-zinc-500 bg-black/30 rounded-2xl border border-white/5 space-y-2">
-              <CheckCircle size={32} className="mx-auto text-emerald-400 mb-1" />
-              <p className="text-sm font-bold text-white">هیچ چپتری در صف تایید مدیریت قرار ندارد</p>
-              <p className="text-xs text-zinc-500">تمام چپترهای ارسالی بررسی و منتشر گردیده‌اند.</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {allPendingChaptersQueue.map((ch: any) => {
-                const submissions = ch.submissions || [];
-                const translatorSub = submissions.find((s: any) => s.role === "translator");
-                const cleanerSub = submissions.find((s: any) => s.role === "cleaner");
-                const editorSub = submissions.find((s: any) => s.role === "editor");
-
-                return (
-                  <div key={`${ch.seriesId}-${ch.id}`} className="bg-black/60 border border-indigo-500/30 rounded-2xl p-5 space-y-4 shadow-xl">
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/10 pb-3">
-                      <div className="flex items-center gap-3">
-                        <img src={ch.seriesCover} alt="" className="w-12 h-16 object-cover rounded-xl border border-white/10 shrink-0" />
-                        <div>
-                          <h4 className="text-sm font-black text-white">{ch.seriesTitle} - چپتر {ch.number}</h4>
-                          <span className="text-xs text-indigo-300 font-bold block mt-0.5">
-                            ارسال شده توسط ادیتور: {editorSub?.userName || 'کادر فنی'}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          onClick={() => {
-                            setSelectedSeriesId(ch.seriesId);
-                            handleApproveChapter(ch);
-                          }}
-                          disabled={processingActionId === ch.id}
-                          className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-black font-black text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-lg shadow-emerald-500/20"
-                        >
-                          <Check size={16} /> تایید و انتشار عمومی روی سایت
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            setSelectedSeriesId(ch.seriesId);
-                            handleRejectChapter(ch);
-                          }}
-                          disabled={processingActionId === ch.id}
-                          className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-black text-xs rounded-xl transition-all flex items-center gap-1 shadow"
-                        >
-                          <X size={15} /> رد چپتر
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Files and Notes */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                      
-                      <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-1">
-                        <span className="text-[10px] text-zinc-400 font-bold block">مترجم: {translatorSub?.userName || 'نامشخص'}</span>
-                        {translatorSub?.fileUrl ? (
-                          <a href={translatorSub.fileUrl} target="_blank" rel="noreferrer" className="text-emerald-400 font-bold hover:underline flex items-center gap-1">
-                            <Download size={12} /> دانلود فایل Word ترجمه
-                          </a>
-                        ) : (
-                          <span className="text-zinc-500">بدون فایل ترجمه</span>
-                        )}
-                      </div>
-
-                      <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-1">
-                        <span className="text-[10px] text-zinc-400 font-bold block">کلینر: {cleanerSub?.userName || 'نامشخص'}</span>
-                        {cleanerSub?.fileUrl ? (
-                          <a href={cleanerSub.fileUrl} target="_blank" rel="noreferrer" className="text-teal-400 font-bold hover:underline flex items-center gap-1">
-                            <Download size={12} /> دانلود فایل Zip کلین
-                          </a>
-                        ) : (
-                          <span className="text-zinc-500">بدون فایل کلین</span>
-                        )}
-                      </div>
-
-                      <div className="p-3 bg-white/5 rounded-xl border border-white/5 space-y-1">
-                        <span className="text-[10px] text-zinc-400 font-bold block">تعداد تصاویر خروجی نهایی:</span>
-                        <span className="text-white font-mono font-bold">
-                          {Array.isArray(ch.images) ? `${ch.images.length} تصویر` : 'در دسترس'}
-                        </span>
-                      </div>
-
-                    </div>
-
-                    {/* Rejection note input */}
-                    <div className="pt-2 border-t border-white/5 flex items-center gap-2">
-                      <input
-                        type="text"
-                        placeholder="در صورت رد یا بازنگری، علت یا نکات اصلاحی را اینجا وارد کنید..."
-                        value={rejectionNoteMap[ch.id] || ""}
-                        onChange={(e) => setRejectionNoteMap({ ...rejectionNoteMap, [ch.id]: e.target.value })}
-                        className="flex-1 bg-black border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500 font-bold"
-                      />
-                    </div>
-
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
 
