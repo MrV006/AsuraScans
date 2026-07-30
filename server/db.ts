@@ -186,6 +186,7 @@ class DatabaseManager {
     reports: any[];
     wallet_transactions: WalletTransaction[];
     purchased_chapters: PurchasedChapter[];
+    settlement_requests: any[];
   } = {
     series: [],
     chapters: [],
@@ -198,6 +199,7 @@ class DatabaseManager {
     reports: [],
     wallet_transactions: [],
     purchased_chapters: [],
+    settlement_requests: [],
     settings: {
       global: {
         siteName: 'AsuraClone',
@@ -467,6 +469,20 @@ class DatabaseManager {
           chapterId VARCHAR(100) NOT NULL,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           UNIQUE KEY uniq_user_chap (userId, seriesId, chapterId)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+        `CREATE TABLE IF NOT EXISTS settlement_requests (
+          id VARCHAR(100) PRIMARY KEY,
+          userId VARCHAR(100) NOT NULL,
+          userName VARCHAR(100),
+          userEmail VARCHAR(255),
+          amount INT NOT NULL,
+          cardOrSheba VARCHAR(100) NOT NULL,
+          accountHolder VARCHAR(100) NOT NULL,
+          status VARCHAR(20) DEFAULT 'pending',
+          rejectionNote TEXT,
+          createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+          processedAt DATETIME NULL,
+          processedBy VARCHAR(100) NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
       ];
 
@@ -2194,7 +2210,27 @@ class DatabaseManager {
   // -----------------------------------------------------------------
   // NOTIFICATION METHODS
   // -----------------------------------------------------------------
+  async cleanupOldNotifications(): Promise<void> {
+    try {
+      const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const sevenDaysAgo = new Date(cutoffMs).toISOString();
+      if (this.isUsingMySQL && this.pool) {
+        await this.pool.execute('DELETE FROM notifications WHERE createdAt < ?', [sevenDaysAgo]);
+      } else {
+        if (this.localData.notifications) {
+          this.localData.notifications = this.localData.notifications.filter(
+            n => new Date(n.createdAt).getTime() >= cutoffMs
+          );
+          await this.saveLocalData();
+        }
+      }
+    } catch (err) {
+      console.error("Failed to cleanup old notifications:", err);
+    }
+  }
+
   async getNotifications(userId: string): Promise<Notification[]> {
+    await this.cleanupOldNotifications();
     if (this.isUsingMySQL && this.pool) {
       const [rows] = await this.pool.execute('SELECT * FROM notifications WHERE userId = ? ORDER BY createdAt DESC', [userId]);
       return (rows as any[]).map(r => ({
@@ -2401,6 +2437,175 @@ class DatabaseManager {
     }
   }
 
+  // -----------------------------------------------------------------
+  // SETTLEMENT REQUESTS METHODS
+  // -----------------------------------------------------------------
+  async getSettlementRequests(userId?: string): Promise<any[]> {
+    if (this.isUsingMySQL && this.pool) {
+      let query = 'SELECT * FROM settlement_requests';
+      const params: any[] = [];
+      if (userId) {
+        query += ' WHERE userId = ?';
+        params.push(userId);
+      }
+      query += ' ORDER BY createdAt DESC';
+      const [rows] = await this.pool.execute(query, params);
+      return rows as any[];
+    }
+    if (!this.localData.settlement_requests) this.localData.settlement_requests = [];
+    let list = this.localData.settlement_requests;
+    if (userId) {
+      list = list.filter((r: any) => r.userId === userId);
+    }
+    return list.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async createSettlementRequest(data: {
+    userId: string;
+    userName: string;
+    userEmail: string;
+    amount: number;
+    cardOrSheba: string;
+    accountHolder: string;
+  }): Promise<{ success: boolean; request?: any; error?: string }> {
+    const user = await this.getUser(data.userId);
+    if (!user) return { success: false, error: 'کاربر یافت نشد.' };
+    const currentBalance = user.walletBalance || 0;
+    if (currentBalance < data.amount) {
+      return { success: false, error: `موجودی کیف پول شما (${currentBalance.toLocaleString()} تومان) کمتر از مبلغ درخواستی است.` };
+    }
+    if (data.amount < 10000) {
+      return { success: false, error: 'حداقل مبلغ جهت درخواست تسویه 10,000 تومان می‌باشد.' };
+    }
+
+    const id = `sr-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const now = new Date().toISOString();
+    const reqObj = {
+      id,
+      userId: data.userId,
+      userName: data.userName || user.displayName || user.email,
+      userEmail: data.userEmail || user.email || '',
+      amount: data.amount,
+      cardOrSheba: data.cardOrSheba,
+      accountHolder: data.accountHolder,
+      status: 'pending',
+      rejectionNote: '',
+      createdAt: now,
+      processedAt: null,
+      processedBy: null
+    };
+
+    if (this.isUsingMySQL && this.pool) {
+      await this.pool.execute(
+        'INSERT INTO settlement_requests (id, userId, userName, userEmail, amount, cardOrSheba, accountHolder, status, rejectionNote, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [id, data.userId, reqObj.userName, reqObj.userEmail, data.amount, data.cardOrSheba, data.accountHolder, 'pending', '', now]
+      );
+    } else {
+      if (!this.localData.settlement_requests) this.localData.settlement_requests = [];
+      this.localData.settlement_requests.push(reqObj);
+      await this.saveLocalData();
+    }
+
+    return { success: true, request: reqObj };
+  }
+
+  async processSettlementRequest(
+    requestId: string,
+    action: 'approve' | 'reject',
+    adminUid: string,
+    rejectionNote?: string
+  ): Promise<{ success: boolean; request?: any; error?: string }> {
+    let reqObj: any = null;
+    if (this.isUsingMySQL && this.pool) {
+      const [rows] = await this.pool.execute('SELECT * FROM settlement_requests WHERE id = ?', [requestId]);
+      reqObj = (rows as any[])[0];
+    } else {
+      reqObj = (this.localData.settlement_requests || []).find((r: any) => r.id === requestId);
+    }
+
+    if (!reqObj) return { success: false, error: 'درخواست تسویه یافت نشد.' };
+    if (reqObj.status !== 'pending') return { success: false, error: 'این درخواست قبلاً پردازش شده است.' };
+
+    const now = new Date().toISOString();
+
+    if (action === 'approve') {
+      const user = await this.getUser(reqObj.userId);
+      if (!user) return { success: false, error: 'کاربر مربوطه یافت نشد.' };
+      const currentBalance = user.walletBalance || 0;
+      if (currentBalance < reqObj.amount) {
+        return { success: false, error: `موجودی کاربر (${currentBalance.toLocaleString()} تومان) از مبلغ تسویه کمتر است.` };
+      }
+
+      const newBalance = currentBalance - reqObj.amount;
+      const transId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      const desc = `تسویه حساب و واریز به کارت/شبا ${reqObj.cardOrSheba} (${reqObj.accountHolder})`;
+
+      if (this.isUsingMySQL && this.pool) {
+        await this.pool.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newBalance, reqObj.userId]);
+        await this.pool.execute(
+          'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [transId, reqObj.userId, user.displayName, -reqObj.amount, 'debit', desc, adminUid, 'مدیریت کل', now]
+        );
+        await this.pool.execute(
+          'UPDATE settlement_requests SET status = ?, processedAt = ?, processedBy = ? WHERE id = ?',
+          ['approved', now, adminUid, requestId]
+        );
+      } else {
+        user.walletBalance = newBalance;
+        if (!this.localData.wallet_transactions) this.localData.wallet_transactions = [];
+        this.localData.wallet_transactions.push({
+          id: transId,
+          userId: reqObj.userId,
+          userName: user.displayName,
+          amount: -reqObj.amount,
+          type: 'debit',
+          description: desc,
+          creatorId: adminUid,
+          creatorName: 'مدیریت کل',
+          createdAt: now
+        });
+        reqObj.status = 'approved';
+        reqObj.processedAt = now;
+        reqObj.processedBy = adminUid;
+        await this.saveLocalData();
+      }
+
+      await this.addNotification(
+        reqObj.userId,
+        'system',
+        'تسویه حساب مالی انجام شد',
+        `درخواست تسویه حساب شما به مبلغ ${reqObj.amount.toLocaleString()} تومان با موفقیت تایید و به شماره کارت/شبا ${reqObj.cardOrSheba} واریز گردید.`,
+        '/profile'
+      );
+
+      return { success: true, request: reqObj };
+    } else {
+      const note = rejectionNote || 'درخواست تسویه شما توسط مدیریت رد گردید.';
+      if (this.isUsingMySQL && this.pool) {
+        await this.pool.execute(
+          'UPDATE settlement_requests SET status = ?, rejectionNote = ?, processedAt = ?, processedBy = ? WHERE id = ?',
+          ['rejected', note, now, adminUid, requestId]
+        );
+      } else {
+        reqObj.status = 'rejected';
+        reqObj.rejectionNote = note;
+        reqObj.processedAt = now;
+        reqObj.processedBy = adminUid;
+        await this.saveLocalData();
+      }
+
+      await this.addNotification(
+        reqObj.userId,
+        'system',
+        'رد درخواست تسویه حساب',
+        `درخواست تسویه حساب شما به مبلغ ${reqObj.amount.toLocaleString()} تومان رد شد. علت: ${note}`,
+        '/profile'
+      );
+
+      return { success: true, request: reqObj };
+    }
+  }
+
   async purchaseChapter(
     userId: string,
     seriesId: string,
@@ -2438,8 +2643,8 @@ class DatabaseManager {
     // Calculate dynamic revenue distribution
     const rolesSetting = await this.getSettings('revenue_roles') || [
       { id: 'editor', name: 'ادیتور', percentage: 30 },
-      { id: 'translator', name: 'مترجم', percentage: 30 },
-      { id: 'cleaner', name: 'کلینر', percentage: 20 },
+      { id: 'translator', name: 'مترجم', percentage: 20 },
+      { id: 'cleaner', name: 'کلینر', percentage: 30 },
       { id: 'website', name: 'وبسایت', percentage: 20 }
     ];
 
@@ -2771,6 +2976,7 @@ class DatabaseManager {
       backup.notifications = this.localData.notifications || [];
       backup.wallet_transactions = this.localData.wallet_transactions || [];
       backup.purchased_chapters = this.localData.purchased_chapters || [];
+      backup.settlement_requests = this.localData.settlement_requests || [];
     }
 
     return backup;
@@ -2793,7 +2999,8 @@ class DatabaseManager {
       reports: Array.isArray(data.reports) ? data.reports : [],
       notifications: Array.isArray(data.notifications) ? data.notifications : [],
       wallet_transactions: Array.isArray(data.wallet_transactions) ? data.wallet_transactions : [],
-      purchased_chapters: Array.isArray(data.purchased_chapters) ? data.purchased_chapters : []
+      purchased_chapters: Array.isArray(data.purchased_chapters) ? data.purchased_chapters : [],
+      settlement_requests: Array.isArray(data.settlement_requests) ? data.settlement_requests : []
     };
 
     if (this.isUsingMySQL && this.pool) {

@@ -1482,7 +1482,7 @@ export default function Admin() {
               <div className="mb-6">
                 <input
                   type="text"
-                  placeholder="جستجو بر اساس آیدی ۶ رقمی (کد ملی)، نام و نام خانوادگی، شماره تلفن، نام کاربری یا ایمیل..."
+                  placeholder="جستجو بر اساس شناسه اختصاصی (کد کاربری)، نام و نام خانوادگی، شماره تلفن، نام کاربری یا ایمیل..."
                   value={userSearchQuery}
                   onChange={(e) => setUserSearchQuery(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]/50 transition-colors placeholder:text-zinc-500"

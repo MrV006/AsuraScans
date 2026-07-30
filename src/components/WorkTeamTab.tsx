@@ -998,7 +998,7 @@ export default function WorkTeamTab({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-300 mb-1">کد کاربری / ملی (اختیاری)</label>
+                <label className="block text-xs font-bold text-zinc-300 mb-1">کد کاربری اختصاصی (اختیاری)</label>
                 <input
                   type="text"
                   placeholder="0012345678"

@@ -477,7 +477,7 @@ export default function Series() {
               <button
                 onClick={() => {
                   if (!profile?.melliCode) {
-                    alert("لطفا ابتدا شناسه ۶ رقمی (کد ملی سایت) خود را در صفحه تنظیمات حساب کاربری ثبت کنید.");
+                    alert("لطفا ابتدا شناسه اختصاصی (کد کاربری) خود را در صفحه تنظیمات حساب کاربری ثبت کنید.");
                     return;
                   }
                   setShowJoinModal(true);
@@ -1127,7 +1127,7 @@ export default function Series() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-300 mb-1">کد کاربری / ملی (اختیاری)</label>
+                <label className="block text-xs font-bold text-zinc-300 mb-1">کد کاربری اختصاصی (اختیاری)</label>
                 <input
                   type="text"
                   placeholder="0012345678"

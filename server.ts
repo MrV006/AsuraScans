@@ -1043,6 +1043,24 @@ async function startServer() {
           ch.isPrivate = false;
           ch.status = "public";
           ch.revisionNote = "";
+          if (Array.isArray(ch.submissions)) {
+            for (const sub of ch.submissions) {
+              if (sub.role === 'translator' || sub.role === 'cleaner') {
+                if (sub.fileUrl && sub.fileUrl.startsWith('/uploads/')) {
+                  const relName = sub.fileUrl.replace(/^\/uploads\//, '');
+                  const fullPath = path.join(uploadsDir, relName);
+                  try {
+                    if (fs.existsSync(fullPath)) {
+                      await fs.promises.unlink(fullPath);
+                    }
+                  } catch (e) {
+                    console.error("Failed to delete temp file:", e);
+                  }
+                }
+                sub.fileUrl = "";
+              }
+            }
+          }
         } else if (action === "private") {
           ch.isPending = true;
           ch.isPrivate = true;
@@ -2063,6 +2081,83 @@ async function startServer() {
       );
 
       res.json({ success: true, balance: updatedBalance });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // -----------------------------------------------------------------
+  // SETTLEMENT REQUESTS API
+  // -----------------------------------------------------------------
+  app.get("/api/settlement/requests", async (req, res) => {
+    try {
+      const requesterUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
+      const user = requesterUid ? await dbManager.getUser(requesterUid) : null;
+      const isSuper = isSuperAdminUser(user) || user?.role === 'admin';
+      const { userId } = req.query;
+
+      const targetUserId = isSuper ? (userId as string) : requesterUid;
+      const requests = await dbManager.getSettlementRequests(targetUserId);
+      res.json(requests);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/settlement/request", async (req, res) => {
+    try {
+      const requesterUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
+      if (!requesterUid) return res.status(401).json({ error: "Unauthorized" });
+
+      const { amount, cardOrSheba, accountHolder } = req.body;
+      if (!amount || !cardOrSheba || !accountHolder) {
+        return res.status(400).json({ error: "لطفاً تمام اطلاعات (مبلغ، شماره کارت/شبا، و نام صاحب حساب) را تکمیل نمایید." });
+      }
+
+      const user = await dbManager.getUser(requesterUid);
+      if (!user) return res.status(404).json({ error: "کاربر یافت نشد." });
+
+      const result = await dbManager.createSettlementRequest({
+        userId: requesterUid,
+        userName: user.displayName || user.email,
+        userEmail: user.email || '',
+        amount: Number(amount),
+        cardOrSheba,
+        accountHolder
+      });
+
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      io.emit("settlement:updated", { requestId: result.request.id });
+      res.json(result.request);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/settlement/process", requireAdmin, async (req, res) => {
+    try {
+      const adminUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
+      const { requestId, action, rejectionNote } = req.body;
+
+      if (!requestId || !action) {
+        return res.status(400).json({ error: "اطلاعات درخواست ناقص است." });
+      }
+
+      const result = await dbManager.processSettlementRequest(requestId, action, adminUid, rejectionNote);
+      if (!result.success) {
+        return res.status(400).json({ error: result.error });
+      }
+
+      if (result.request?.userId) {
+        io.emit(`wallet:updated:${result.request.userId}`, { userId: result.request.userId });
+      }
+      io.emit("settlement:updated", { requestId });
+      io.emit("wallet:any_update");
+
+      res.json({ success: true, request: result.request });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

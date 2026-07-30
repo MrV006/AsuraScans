@@ -37,7 +37,7 @@ interface CooperationTabProps {
   profile: any;
   isSuperAdmin: boolean;
   onUpdateSeries: (updatedSeries: Series) => void;
-  defaultSubTab?: "all_series" | "my_projects" | "admin_requests" | "admin_approval";
+  defaultSubTab?: "all_series" | "my_projects" | "settlements" | "admin_requests" | "admin_approval";
 }
 
 export default function CooperationTab({ 
@@ -50,9 +50,23 @@ export default function CooperationTab({
 }: CooperationTabProps) {
   const isGlobalAdmin = isSuperAdmin || profile?.role === "admin";
 
-  const [activeSubTab, setActiveSubTab] = useState<"all_series" | "my_projects" | "admin_requests" | "admin_approval">(
+  const [activeSubTab, setActiveSubTab] = useState<"all_series" | "my_projects" | "settlements" | "admin_requests" | "admin_approval">(
     defaultSubTab || (isGlobalAdmin ? "admin_requests" : "all_series")
   );
+
+  // Settlements state
+  const [settlementRequests, setSettlementRequests] = useState<any[]>([]);
+  const [loadingSettlements, setLoadingSettlements] = useState(false);
+  const [userWalletBalance, setUserWalletBalance] = useState<number>(profile?.walletBalance || 0);
+  const [showSettleForm, setShowSettleForm] = useState(false);
+  const [settleAmount, setSettleAmount] = useState("");
+  const [settleCardOrSheba, setSettleCardOrSheba] = useState("");
+  const [settleAccountHolder, setSettleAccountHolder] = useState(profile?.displayName || "");
+  const [settleSubmitting, setSettleSubmitting] = useState(false);
+  const [settleError, setSettleError] = useState("");
+  const [settleSuccess, setSettleSuccess] = useState("");
+  const [settleFilterStatus, setSettleFilterStatus] = useState<string>("all");
+  const [settleRejectNoteMap, setSettleRejectNoteMap] = useState<Record<string, string>>({});
 
   // Search and filter for Catalog (Search Page format)
   const [searchQuery, setSearchQuery] = useState("");
@@ -121,6 +135,95 @@ export default function CooperationTab({
       setActiveSubTab(defaultSubTab);
     }
   }, [defaultSubTab]);
+
+  const fetchSettlements = async () => {
+    setLoadingSettlements(true);
+    try {
+      const res = await apiClient.getSettlementRequests(isGlobalAdmin ? undefined : user?.uid);
+      if (Array.isArray(res)) {
+        setSettlementRequests(res);
+      }
+      if (user?.uid) {
+        const u = await apiClient.get(`/api/users/${user.uid}`);
+        if (u && typeof u.walletBalance === 'number') {
+          setUserWalletBalance(u.walletBalance);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load settlements:", e);
+    } finally {
+      setLoadingSettlements(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSettlements();
+  }, [user?.uid, isGlobalAdmin]);
+
+  const handleSubmitSettlement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSettleError("");
+    setSettleSuccess("");
+
+    const amt = Number(settleAmount);
+    if (!amt || amt < 10000) {
+      setSettleError("حداقل مبلغ جهت درخواست تسویه 10,000 تومان می‌باشد.");
+      return;
+    }
+    if (amt > userWalletBalance) {
+      setSettleError(`مبلغ درخواستی (${amt.toLocaleString()} تومان) از موجودی کیف پول شما بیشتر است.`);
+      return;
+    }
+    if (!settleCardOrSheba.trim() || !settleAccountHolder.trim()) {
+      setSettleError("لطفا شماره کارت/شبا و نام صاحب حساب را وارد نمایید.");
+      return;
+    }
+
+    setSettleSubmitting(true);
+    try {
+      const res = await apiClient.createSettlementRequest({
+        userId: user?.uid,
+        userName: profile?.displayName || user?.email,
+        userEmail: user?.email || "",
+        amount: amt,
+        cardOrSheba: settleCardOrSheba.trim(),
+        accountHolder: settleAccountHolder.trim()
+      });
+
+      if (res && res.id) {
+        setSettleSuccess("درخواست تسویه حساب با موفقیت ثبت شد و در صف بررسی مدیریت قرار گرفت.");
+        setSettleAmount("");
+        setShowSettleForm(false);
+        fetchSettlements();
+      } else {
+        setSettleError(res.error || "خطا در ثبت درخواست تسویه.");
+      }
+    } catch (err: any) {
+      setSettleError(err.message || "خطا در ارتباط با سرور.");
+    } finally {
+      setSettleSubmitting(false);
+    }
+  };
+
+  const handleProcessSettlement = async (requestId: string, action: 'approve' | 'reject') => {
+    const rejectionNote = settleRejectNoteMap[requestId] || "";
+    if (action === 'reject' && !rejectionNote.trim()) {
+      alert("لطفا علت رد درخواست تسویه را وارد کنید.");
+      return;
+    }
+
+    try {
+      const res = await apiClient.processSettlementRequest(requestId, action, rejectionNote, user?.uid);
+      if (res && res.success) {
+        alert(action === 'approve' ? "درخواست تسویه با موفقیت تایید و مبلغ از حساب همکار کسر گردید." : "درخواست تسویه رد شد.");
+        fetchSettlements();
+      } else {
+        alert("خطا: " + (res.error || "عملیات ناموفق بود."));
+      }
+    } catch (err: any) {
+      alert("خطا: " + err.message);
+    }
+  };
 
   // Extract all unique genres for filter dropdown
   const allGenresList = useMemo(() => {
@@ -516,6 +619,23 @@ export default function CooperationTab({
             )}
           </button>
 
+          <button
+            onClick={() => setActiveSubTab("settlements")}
+            className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 ${
+              activeSubTab === "settlements"
+                ? "bg-emerald-500 text-black shadow-lg shadow-emerald-500/20 font-black"
+                : "bg-white/5 text-emerald-400 hover:bg-emerald-500/10"
+            }`}
+          >
+            <DollarSign size={15} />
+            {isGlobalAdmin ? "مدیریت تسویه‌حساب‌های مالی" : "تسویه‌حساب و درآمد من"}
+            {isGlobalAdmin && settlementRequests.filter(r => r.status === 'pending').length > 0 && (
+              <span className="bg-black text-emerald-400 text-[10px] px-2 py-0.5 rounded-full font-black animate-pulse">
+                {settlementRequests.filter(r => r.status === 'pending').length}
+              </span>
+            )}
+          </button>
+
           {isGlobalAdmin && (
             <>
               <button
@@ -834,7 +954,7 @@ export default function CooperationTab({
                         </div>
 
                         <div>
-                          <label className="block text-[10px] text-zinc-400 font-bold mb-1">کد ملی یا شناسنامه کاربری:</label>
+                          <label className="block text-[10px] text-zinc-400 font-bold mb-1">کد اختصاصی کاربری:</label>
                           <input
                             type="text"
                             placeholder="مثلاً: 0021345678"
@@ -1239,6 +1359,279 @@ export default function CooperationTab({
       )}
 
       {/* ========================================================================= */}
+      {/* SUB-TAB: SETTLEMENTS & FINANCIAL EARNINGS (تسویه‌حساب و درآمد کادر) */}
+      {/* ========================================================================= */}
+      {activeSubTab === "settlements" && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-emerald-950/60 via-zinc-900 to-black border border-emerald-500/20 rounded-3xl p-6 sm:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 shadow-2xl">
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  <DollarSign size={22} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white">مدیریت درآمدها و تسویه‌حساب مالی</h3>
+                  <p className="text-xs text-zinc-400">
+                    آمار درآمد تجمعی حاصل از سهم مشارکت در فصل‌ها و ثبت درخواست تسویه حساب کاربری
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full md:w-auto">
+              <div className="bg-black/60 border border-white/10 rounded-2xl px-5 py-3 text-right">
+                <span className="text-[10px] text-zinc-400 font-bold block mb-0.5">موجودی کیف پول / قابل تسویه:</span>
+                <span className="text-lg font-black font-mono text-emerald-400">
+                  {userWalletBalance.toLocaleString()} <span className="text-xs font-sans text-zinc-400">تومان</span>
+                </span>
+              </div>
+
+              <button
+                onClick={() => setShowSettleForm(!showSettleForm)}
+                className="px-5 py-3.5 bg-emerald-500 hover:bg-emerald-600 text-black font-black text-xs rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
+              >
+                <Plus size={16} />
+                {showSettleForm ? "بستن فرم تسویه" : "ثبت درخواست تسویه جدید"}
+              </button>
+            </div>
+          </div>
+
+          {/* New Settlement Request Form Modal/Card */}
+          {showSettleForm && (
+            <div className="bg-black/80 border border-emerald-500/30 rounded-3xl p-6 sm:p-8 space-y-5 animate-fadeIn shadow-2xl">
+              <div className="border-b border-white/10 pb-4 flex items-center justify-between">
+                <h4 className="text-sm font-black text-white flex items-center gap-2">
+                  <DollarSign size={18} className="text-emerald-400" />
+                  فرم درخواست تسویه حساب مالی
+                </h4>
+                <span className="text-xs text-zinc-400 font-bold">
+                  موجودی شما: <strong className="text-emerald-400 font-mono">{userWalletBalance.toLocaleString()} تومان</strong>
+                </span>
+              </div>
+
+              {settleError && (
+                <div className="p-3.5 bg-red-500/10 border border-red-500/30 rounded-2xl text-xs text-red-300 font-bold flex items-center gap-2">
+                  <AlertCircle size={16} />
+                  {settleError}
+                </div>
+              )}
+
+              {settleSuccess && (
+                <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-xs text-emerald-300 font-bold flex items-center gap-2">
+                  <CheckCircle size={16} />
+                  {settleSuccess}
+                </div>
+              )}
+
+              <form onSubmit={handleSubmitSettlement} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-zinc-300 mb-1.5">
+                    مبلغ درخواستی (تومان):
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="مثلا: 100000"
+                    value={settleAmount}
+                    onChange={(e) => setSettleAmount(e.target.value)}
+                    className="w-full bg-zinc-900 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-emerald-500"
+                    required
+                  />
+                  <span className="text-[10px] text-zinc-500 mt-1 block">حداقل 10,000 تومان</span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-zinc-300 mb-1.5">
+                    شماره کارت ۱۶ رقمی یا شبا (IR):
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="603799... یا IR..."
+                    value={settleCardOrSheba}
+                    onChange={(e) => setSettleCardOrSheba(e.target.value)}
+                    className="w-full bg-zinc-900 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-emerald-500 text-left dir-ltr"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-zinc-300 mb-1.5">
+                    نام و نام خانوادگی صاحب حساب:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مطابق با صاحب کارت/حساب"
+                    value={settleAccountHolder}
+                    onChange={(e) => setSettleAccountHolder(e.target.value)}
+                    className="w-full bg-zinc-900 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:outline-none focus:border-emerald-500"
+                    required
+                  />
+                </div>
+
+                <div className="md:col-span-3 flex justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowSettleForm(false)}
+                    className="px-5 py-2.5 bg-white/5 hover:bg-white/10 text-white font-bold text-xs rounded-xl transition-all"
+                  >
+                    انصراف
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={settleSubmitting}
+                    className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-black font-black text-xs rounded-xl transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/20"
+                  >
+                    {settleSubmitting ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" />
+                        در حال ثبت...
+                      </>
+                    ) : (
+                      <>
+                        <Send size={14} />
+                        ارسال درخواست تسویه
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* List of Settlement Requests */}
+          <div className="bg-zinc-900/80 border border-white/10 rounded-3xl p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+              <div>
+                <h4 className="text-sm font-black text-white flex items-center gap-2">
+                  <Clock size={16} className="text-emerald-400" />
+                  {isGlobalAdmin ? "لیست کامل درخواست‌های تسویه مالی همکاران" : "تاریخچه درخواست‌های تسویه حساب شما"}
+                </h4>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  تعداد کل درخواست‌ها: <strong className="text-white font-mono">{settlementRequests.length}</strong>
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={fetchSettlements}
+                  className="p-2 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-all border border-white/10"
+                  title="بروزرسانی لیست"
+                >
+                  <RefreshCw size={14} className={loadingSettlements ? "animate-spin" : ""} />
+                </button>
+
+                {isGlobalAdmin && (
+                  <select
+                    value={settleFilterStatus}
+                    onChange={(e) => setSettleFilterStatus(e.target.value)}
+                    className="bg-black border border-white/10 rounded-xl px-3 py-2 text-xs text-white font-bold focus:outline-none"
+                  >
+                    <option value="all">همه وضعیت‌ها</option>
+                    <option value="pending">در انتظار بررسی</option>
+                    <option value="approved">تایید و واریز شده</option>
+                    <option value="rejected">رد شده</option>
+                  </select>
+                )}
+              </div>
+            </div>
+
+            {loadingSettlements ? (
+              <div className="py-12 text-center text-xs text-zinc-400 animate-pulse">در حال دریافت لیست تسویه‌حساب‌ها...</div>
+            ) : settlementRequests.length === 0 ? (
+              <div className="py-12 text-center text-zinc-500 text-xs font-bold bg-black/30 rounded-2xl border border-white/5 space-y-1">
+                <CheckCircle size={28} className="mx-auto text-zinc-600 mb-1" />
+                <p>تاکنون هیچ درخواست تسویه‌حسابی ثبت نشده است.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {settlementRequests
+                  .filter(r => settleFilterStatus === 'all' || r.status === settleFilterStatus)
+                  .map((req: any) => (
+                    <div
+                      key={req.id}
+                      className="bg-black/60 border border-white/10 hover:border-emerald-500/30 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all"
+                    >
+                      <div className="space-y-2 flex-1">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-sm font-black text-white">{req.userName}</span>
+                          <span className="text-xs text-zinc-400 font-mono">({req.userEmail})</span>
+                          
+                          {req.status === 'pending' && (
+                            <span className="bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
+                              <Clock size={12} /> در انتظار بررسی مدیریت
+                            </span>
+                          )}
+                          {req.status === 'approved' && (
+                            <span className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                              <CheckCircle size={12} /> تایید و واریز گردید
+                            </span>
+                          )}
+                          {req.status === 'rejected' && (
+                            <span className="bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                              <X size={12} /> رد شده
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-zinc-300">
+                          <div>
+                            مبلغ: <strong className="text-emerald-400 font-mono font-black text-sm">{Number(req.amount).toLocaleString()} تومان</strong>
+                          </div>
+                          <div>
+                            کارت/شبا: <strong className="text-white font-mono dir-ltr inline-block">{req.cardOrSheba}</strong>
+                          </div>
+                          <div>
+                            صاحب حساب: <strong className="text-white font-bold">{req.accountHolder}</strong>
+                          </div>
+                        </div>
+
+                        {req.rejectionNote && (
+                          <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl p-2.5">
+                            علت رد: {req.rejectionNote}
+                          </p>
+                        )}
+
+                        <span className="text-[10px] text-zinc-500 font-mono block">
+                          زمان ثبت: {new Date(req.createdAt).toLocaleString('fa-IR')}
+                        </span>
+                      </div>
+
+                      {/* Admin Actions */}
+                      {isGlobalAdmin && req.status === 'pending' && (
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto shrink-0 border-t md:border-t-0 md:border-r border-white/10 pt-3 md:pt-0 md:pr-4">
+                          <button
+                            onClick={() => handleProcessSettlement(req.id, 'approve')}
+                            className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-black font-black text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 shadow"
+                          >
+                            <Check size={16} /> تایید و کسر/پرداخت
+                          </button>
+
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              placeholder="علت رد..."
+                              value={settleRejectNoteMap[req.id] || ""}
+                              onChange={(e) => setSettleRejectNoteMap({ ...settleRejectNoteMap, [req.id]: e.target.value })}
+                              className="bg-black border border-white/10 rounded-xl px-2.5 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none w-32 font-bold"
+                            />
+                            <button
+                              onClick={() => handleProcessSettlement(req.id, 'reject')}
+                              className="px-3 py-2.5 bg-red-600 hover:bg-red-700 text-white font-black text-xs rounded-xl transition-all flex items-center justify-center gap-1 shadow shrink-0"
+                            >
+                              <X size={15} /> رد
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
       {/* SUB-TAB 3: SUPER ADMIN REQUESTS & TEAM MANAGEMENT (مدیریت درخواست‌ها و تیم) */}
       {/* ========================================================================= */}
       {activeSubTab === "admin_requests" && isGlobalAdmin && (
@@ -1270,7 +1663,7 @@ export default function CooperationTab({
                           اثر درخواستی: <strong className="text-[var(--color-asura-accent-light)]">{req.seriesTitle}</strong>
                         </p>
                         <p className="text-[11px] text-zinc-400 mt-0.5">
-                          نقش: <strong className="text-amber-400">{req.role === 'translator' ? 'مترجم' : req.role === 'cleaner' ? 'کلینر' : 'ادیتور'}</strong> | کد کاربری/ملی: <strong className="text-white font-mono">{req.melliCode || 'ثبت نشده'}</strong>
+                          نقش: <strong className="text-amber-400">{req.role === 'translator' ? 'مترجم' : req.role === 'cleaner' ? 'کلینر' : 'ادیتور'}</strong> | کد کاربری: <strong className="text-white font-mono">{req.melliCode || 'ثبت نشده'}</strong>
                         </p>
                       </div>
                     </div>

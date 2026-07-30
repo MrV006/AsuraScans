@@ -623,6 +623,30 @@ export const apiClient = {
     return res.json();
   },
 
+  async getSettlementRequests(userId?: string) {
+    const url = userId ? `${API_URL}/api/settlement/requests?userId=${userId}` : `${API_URL}/api/settlement/requests`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    return res.json();
+  },
+
+  async createSettlementRequest(data: { userId: string; userName: string; userEmail: string; amount: number; cardOrSheba: string; accountHolder: string }) {
+    const res = await fetch(`${API_URL}/api/settlement/request`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(data)
+    });
+    return res.json();
+  },
+
+  async processSettlementRequest(requestId: string, action: 'approve' | 'reject', rejectionNote?: string, adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/settlement/process`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify({ requestId, action, rejectionNote })
+    });
+    return res.json();
+  },
+
   async getDbStatus(uid?: string) {
     const adminUid = uid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
     const res = await fetch(`${API_URL}/api/admin/db-status?adminUid=${encodeURIComponent(adminUid)}`, {
