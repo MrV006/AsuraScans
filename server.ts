@@ -12,6 +12,7 @@ import fs from "fs";
 import crypto from "crypto";
 import { generateSeoHtml } from "./server/seo";
 import { uploadFileToFtp, uploadBatchFilesToFtp, testFtpConnection } from "./server/ftpStorage";
+import { organizeAllFiles, sanitizeFolderName } from "./server/organizer";
 
 async function startServer() {
   const app = express();
@@ -22,6 +23,15 @@ async function startServer() {
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
+
+  // Automatically organize legacy and unorganized files in background on startup
+  setTimeout(() => {
+    organizeAllFiles().then(res => {
+      console.log("Auto file organizer finished:", res.message);
+    }).catch(err => {
+      console.error("Auto file organizer error:", err);
+    });
+  }, 3000);
   
   // Set up Socket.io for Real-time
   const io = new Server(httpServer, {
@@ -2042,7 +2052,7 @@ function sanitizeFolderName(name: string): string {
 }
 
 function resolveTargetUploadDir(baseUploadsDir: string, reqBody: any, reqQuery: any): { targetDir: string; relPrefix: string } {
-  const seriesTitle = (reqBody?.seriesTitle || reqQuery?.seriesTitle || reqBody?.seriesId || reqQuery?.seriesId || "").toString().trim();
+  const seriesTitle = (reqBody?.seriesTitle || reqQuery?.seriesTitle || reqBody?.seriesId || reqQuery?.seriesId || reqBody?.series || reqQuery?.series || "").toString().trim();
   const chapterNumber = (reqBody?.chapterNumber || reqQuery?.chapterNumber || reqBody?.chapter || reqQuery?.chapter || "").toString().trim();
   const folderType = (reqBody?.folderType || reqQuery?.folderType || reqBody?.type || reqQuery?.type || "").toString().trim();
 
@@ -2053,10 +2063,10 @@ function resolveTargetUploadDir(baseUploadsDir: string, reqBody: any, reqQuery: 
     if (safeSeries) {
       parts.push("series", safeSeries);
 
-      if (chapterNumber) {
+      if (chapterNumber !== "") {
         const safeChapter = sanitizeFolderName(`chapter-${chapterNumber}`);
         parts.push(safeChapter);
-        if (folderType && folderType !== "chapters") {
+        if (folderType && folderType !== "chapters" && folderType !== "chapter") {
           const safeFolder = sanitizeFolderName(folderType);
           parts.push(safeFolder);
         }
@@ -2067,7 +2077,11 @@ function resolveTargetUploadDir(baseUploadsDir: string, reqBody: any, reqQuery: 
     }
   } else if (folderType) {
     const safeFolder = sanitizeFolderName(folderType);
-    parts.push(safeFolder);
+    if (safeFolder === "cover" || safeFolder === "banner" || safeFolder === "logo") {
+      parts.push("site", safeFolder);
+    } else {
+      parts.push(safeFolder);
+    }
   }
 
   if (parts.length === 0) {
@@ -2102,6 +2116,15 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
 }
 
   const upload = multer({ storage: multer.memoryStorage() });
+
+  app.post("/api/admin/organize-files", requireAdmin, async (req, res) => {
+    try {
+      const result = await organizeAllFiles();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: `خطا در سازماندهی فایل‌ها: ${err.message}` });
+    }
+  });
 
   app.post("/api/admin/test-ftp", requireAdmin, async (req, res) => {
     try {

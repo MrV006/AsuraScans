@@ -40,6 +40,7 @@ export async function uploadFileToFtp(
     });
 
     // Remote path structure
+    await client.cd("/");
     const remoteDir = path.dirname(remoteRelPath).replace(/\\/g, "/");
     const filename = path.basename(remoteRelPath);
 
@@ -57,6 +58,57 @@ export async function uploadFileToFtp(
     }
   } catch (err) {
     console.error("FTP upload error:", err);
+    return null;
+  } finally {
+    client.close();
+  }
+}
+
+export async function uploadLocalFileToFtp(
+  localFilePath: string,
+  remoteRelPath: string,
+  config?: FtpConfig
+): Promise<string | null> {
+  const ftpHost = config?.host || process.env.FTP_HOST;
+  const ftpUser = config?.user || process.env.FTP_USER;
+  const ftpPass = config?.password || process.env.FTP_PASS;
+  const ftpPort = config?.port || Number(process.env.FTP_PORT || 21);
+  const ftpSecure = config?.secure ?? (process.env.FTP_SECURE === "true");
+  const baseUrl = (config?.baseUrl || process.env.STORAGE_BASE_URL || "").replace(/\/$/, "");
+
+  if (!ftpHost || !ftpUser || !ftpPass) {
+    return null;
+  }
+
+  const client = new ftp.Client();
+  client.ftp.verbose = false;
+
+  try {
+    await client.access({
+      host: ftpHost,
+      port: ftpPort,
+      user: ftpUser,
+      password: ftpPass,
+      secure: ftpSecure
+    });
+
+    await client.cd("/");
+    const remoteDir = path.dirname(remoteRelPath).replace(/\\/g, "/");
+    const filename = path.basename(remoteRelPath);
+
+    if (remoteDir && remoteDir !== ".") {
+      await client.ensureDir(remoteDir);
+    }
+
+    await client.uploadFrom(localFilePath, filename);
+
+    if (baseUrl) {
+      return `${baseUrl}/${remoteRelPath.replace(/\\/g, "/")}`;
+    } else {
+      return `ftp://${ftpHost}/${remoteRelPath.replace(/\\/g, "/")}`;
+    }
+  } catch (err) {
+    console.error("FTP local file upload error:", err);
     return null;
   } finally {
     client.close();
@@ -91,16 +143,15 @@ export async function uploadBatchFilesToFtp(
     });
 
     const results: (string | null)[] = [];
-    const dirCache = new Set<string>();
 
     for (const f of files) {
       try {
+        await client.cd("/");
         const remoteDir = path.dirname(f.remoteRelPath).replace(/\\/g, "/");
         const filename = path.basename(f.remoteRelPath);
 
-        if (remoteDir && remoteDir !== "." && !dirCache.has(remoteDir)) {
+        if (remoteDir && remoteDir !== ".") {
           await client.ensureDir(remoteDir);
-          dirCache.add(remoteDir);
         }
 
         const stream = Readable.Readable.from(f.buffer);

@@ -40,6 +40,36 @@ export default function DownloadHostTab({ isSuperAdmin }: DownloadHostTabProps) 
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  const [organizing, setOrganizing] = useState(false);
+  const [organizeResult, setOrganizeResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleOrganizeFiles = async () => {
+    setOrganizing(true);
+    setOrganizeResult(null);
+    try {
+      const adminUid = getAdminUid();
+      const res = await fetch(`/api/admin/organize-files?adminUid=${encodeURIComponent(adminUid)}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-uid": adminUid
+        }
+      });
+      const data = await res.json();
+      setOrganizeResult({
+        success: data.success,
+        message: data.message || (data.success ? "سازماندهی فایل‌ها با موفقیت انجام شد." : "خطا در سازماندهی فایل‌ها.")
+      });
+    } catch (err: any) {
+      setOrganizeResult({
+        success: false,
+        message: err.message || "خطا در سازماندهی و مرتب‌سازی فایل‌ها."
+      });
+    } finally {
+      setOrganizing(false);
+    }
+  };
+
   useEffect(() => {
     fetchSettings();
   }, []);
@@ -353,6 +383,42 @@ export default function DownloadHostTab({ isSuperAdmin }: DownloadHostTabProps) 
           </button>
         </div>
       </form>
+
+      {/* Organize Existing Files Section */}
+      <div className="bg-indigo-950/40 rounded-3xl p-6 md:p-8 border border-indigo-500/20 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="font-black text-base text-white flex items-center gap-2">
+              <FolderTree className="w-5 h-5 text-indigo-400" />
+              سازماندهی و مرتب‌سازی فایل‌های قبلی در هاست
+            </h3>
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              با فشردن این دکمه، تمام کاورها، بنرها و تصویرهای چپترهایی که قبلاً بدون پوشه‌بندی یا به صورت پراکنده آپلود شده‌اند، بر اساس نام اثر و شماره چپتر به صورت خودکار دسته‌بندی، انتقال و لینک‌های آن‌ها در دیتابیس بروزرسانی می‌شوند.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleOrganizeFiles}
+            disabled={organizing}
+            className="shrink-0 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <Zap className={`w-4 h-4 ${organizing ? "animate-spin" : ""}`} />
+            {organizing ? "در حال مرتب‌سازی و انتقال فایل‌ها..." : "سازماندهی فایل‌های قبلی"}
+          </button>
+        </div>
+
+        {organizeResult && (
+          <div className={`p-4 rounded-2xl border text-xs font-bold flex items-center gap-3 ${
+            organizeResult.success
+              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+              : "bg-rose-500/10 border-rose-500/30 text-rose-400"
+          }`}>
+            {organizeResult.success ? <CheckCircle className="w-5 h-5 shrink-0" /> : <AlertCircle className="w-5 h-5 shrink-0" />}
+            <span>{organizeResult.message}</span>
+          </div>
+        )}
+      </div>
 
       {/* Structure & Architecture Info Box */}
       <div className="bg-zinc-900/60 rounded-3xl p-6 md:p-8 border border-zinc-800/80 space-y-6">
