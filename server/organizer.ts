@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { dbManager } from "./db";
-import { uploadLocalFileToFtp } from "./ftpStorage";
+import { uploadLocalFileToFtp, moveFtpFile } from "./ftpStorage";
 
 export function sanitizeFolderName(name: string): string {
   if (!name) return "";
@@ -23,8 +23,30 @@ export function extractFilename(urlOrPath: string): string {
 
 export function isAlreadyOrganized(urlOrPath: string, expectedFolder: string): boolean {
   if (!urlOrPath) return true;
-  const normalized = urlOrPath.replace(/\\/g, "/");
-  return normalized.includes(`/uploads/${expectedFolder}/`);
+  try {
+    const decoded = decodeURIComponent(urlOrPath).replace(/\\/g, "/");
+    const raw = urlOrPath.replace(/\\/g, "/");
+    const cleanExpected = expectedFolder.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    
+    return decoded.includes(cleanExpected) || raw.includes(cleanExpected) || raw.includes(encodeURIComponent(cleanExpected));
+  } catch (e) {
+    return urlOrPath.includes(expectedFolder);
+  }
+}
+
+export function isUploadedFileUrl(urlOrPath: string, baseUrl: string): boolean {
+  if (!urlOrPath) return false;
+  
+  // Exclude external image hostings/CDNs that aren't user's own upload host
+  if (/^(https?:)?\/\/(imgur\.com|postimg\.cc|i\.ibb\.co|cdn\.discordapp\.com|res\.cloudinary\.com)/i.test(urlOrPath)) {
+    return false;
+  }
+
+  if (urlOrPath.includes("/uploads/") || urlOrPath.startsWith("uploads/")) return true;
+  if (baseUrl && urlOrPath.startsWith(baseUrl)) return true;
+  
+  // Check if it's a media/document file
+  return /\.(webp|png|jpe?g|gif|bmp|svg|zip|pdf|docx?|txt)$/i.test(urlOrPath);
 }
 
 export function findLocalFile(baseUploadsDir: string, filename: string): string | null {
@@ -56,6 +78,92 @@ export function findLocalFile(baseUploadsDir: string, filename: string): string 
   }
 
   return searchDir(baseUploadsDir);
+}
+
+export async function organizeSingleFileUrl(
+  rawUrl: string,
+  expectedRelDir: string,
+  uploadsDir: string,
+  isFtpEnabled: boolean,
+  dbFtpConfig: any,
+  baseUrl: string
+): Promise<{ newUrl: string; moved: boolean }> {
+  if (!rawUrl || typeof rawUrl !== "string") {
+    return { newUrl: rawUrl, moved: false };
+  }
+
+  if (!isUploadedFileUrl(rawUrl, baseUrl)) {
+    return { newUrl: rawUrl, moved: false };
+  }
+
+  if (isAlreadyOrganized(rawUrl, expectedRelDir)) {
+    return { newUrl: rawUrl, moved: false };
+  }
+
+  const filename = extractFilename(rawUrl);
+  if (!filename) {
+    return { newUrl: rawUrl, moved: false };
+  }
+
+  const cleanExpected = expectedRelDir.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const targetRelPath = `${cleanExpected}/${filename}`;
+  const targetAbsDir = path.join(uploadsDir, ...cleanExpected.split("/"));
+  const targetAbsPath = path.join(targetAbsDir, filename);
+
+  let moved = false;
+  let finalUrl = rawUrl;
+
+  // 1. Check local file system
+  const existingLocalPath = findLocalFile(uploadsDir, filename);
+  if (existingLocalPath) {
+    if (existingLocalPath !== targetAbsPath) {
+      fs.mkdirSync(targetAbsDir, { recursive: true });
+      try {
+        fs.renameSync(existingLocalPath, targetAbsPath);
+      } catch (e) {
+        fs.copyFileSync(existingLocalPath, targetAbsPath);
+        fs.unlinkSync(existingLocalPath);
+      }
+      moved = true;
+    }
+
+    if (isFtpEnabled && fs.existsSync(targetAbsPath)) {
+      const ftpUrl = await uploadLocalFileToFtp(targetAbsPath, `uploads/${targetRelPath}`, dbFtpConfig);
+      if (ftpUrl) {
+        finalUrl = ftpUrl;
+      } else if (baseUrl) {
+        finalUrl = `${baseUrl}/uploads/${targetRelPath}`;
+      } else {
+        finalUrl = `/uploads/${targetRelPath}`;
+      }
+    } else if (baseUrl) {
+      finalUrl = `${baseUrl}/uploads/${targetRelPath}`;
+    } else {
+      finalUrl = `/uploads/${targetRelPath}`;
+    }
+
+    return { newUrl: finalUrl, moved };
+  }
+
+  // 2. Local file not found, but FTP enabled -> organize remote FTP file
+  if (isFtpEnabled) {
+    let oldRemotePath = rawUrl.replace(/^https?:\/\/[^\/]+/, "").replace(/^\/+/, "");
+    if (!oldRemotePath) oldRemotePath = filename;
+
+    const ftpUrl = await moveFtpFile(oldRemotePath, `uploads/${targetRelPath}`, dbFtpConfig);
+    if (ftpUrl) {
+      return { newUrl: ftpUrl, moved: true };
+    }
+  }
+
+  // 3. Fallback: update URL format if local/FTP move wasn't necessary or possible
+  if (baseUrl) {
+    finalUrl = `${baseUrl}/uploads/${targetRelPath}`;
+  } else {
+    finalUrl = `/uploads/${targetRelPath}`;
+  }
+
+  return { newUrl: finalUrl, moved: finalUrl !== rawUrl };
 }
 
 export async function organizeAllFiles(): Promise<{
@@ -93,78 +201,24 @@ export async function organizeAllFiles(): Promise<{
       let seriesChanged = false;
 
       // 1. Organize Series Cover
-      if (series.cover && series.cover.includes("/uploads/")) {
+      if (series.cover) {
         const expectedRelDir = `series/${safeSeries}/cover`;
-        if (!isAlreadyOrganized(series.cover, expectedRelDir)) {
-          const filename = extractFilename(series.cover);
-          if (filename) {
-            const targetRelPath = `series/${safeSeries}/cover/${filename}`;
-            const targetAbsDir = path.join(uploadsDir, "series", safeSeries, "cover");
-            const targetAbsPath = path.join(targetAbsDir, filename);
-
-            const existingLocalPath = findLocalFile(uploadsDir, filename);
-            if (existingLocalPath && existingLocalPath !== targetAbsPath) {
-              fs.mkdirSync(targetAbsDir, { recursive: true });
-              try {
-                fs.renameSync(existingLocalPath, targetAbsPath);
-              } catch (e) {
-                fs.copyFileSync(existingLocalPath, targetAbsPath);
-                fs.unlinkSync(existingLocalPath);
-              }
-              movedFilesCount++;
-            }
-
-            let newUrl = `/uploads/${targetRelPath}`;
-            if (isFtpEnabled && fs.existsSync(targetAbsPath)) {
-              const ftpUrl = await uploadLocalFileToFtp(targetAbsPath, `uploads/${targetRelPath}`, dbFtpConfig);
-              if (ftpUrl) newUrl = ftpUrl;
-            } else if (baseUrl) {
-              newUrl = `${baseUrl}/uploads/${targetRelPath}`;
-            }
-
-            if (series.cover !== newUrl) {
-              series.cover = newUrl;
-              seriesChanged = true;
-            }
-          }
+        const res = await organizeSingleFileUrl(series.cover, expectedRelDir, uploadsDir, isFtpEnabled, dbFtpConfig, baseUrl);
+        if (res.moved || res.newUrl !== series.cover) {
+          series.cover = res.newUrl;
+          seriesChanged = true;
+          if (res.moved) movedFilesCount++;
         }
       }
 
       // 2. Organize Series Banner
-      if (series.banner && series.banner.includes("/uploads/")) {
+      if (series.banner) {
         const expectedRelDir = `series/${safeSeries}/banner`;
-        if (!isAlreadyOrganized(series.banner, expectedRelDir)) {
-          const filename = extractFilename(series.banner);
-          if (filename) {
-            const targetRelPath = `series/${safeSeries}/banner/${filename}`;
-            const targetAbsDir = path.join(uploadsDir, "series", safeSeries, "banner");
-            const targetAbsPath = path.join(targetAbsDir, filename);
-
-            const existingLocalPath = findLocalFile(uploadsDir, filename);
-            if (existingLocalPath && existingLocalPath !== targetAbsPath) {
-              fs.mkdirSync(targetAbsDir, { recursive: true });
-              try {
-                fs.renameSync(existingLocalPath, targetAbsPath);
-              } catch (e) {
-                fs.copyFileSync(existingLocalPath, targetAbsPath);
-                fs.unlinkSync(existingLocalPath);
-              }
-              movedFilesCount++;
-            }
-
-            let newUrl = `/uploads/${targetRelPath}`;
-            if (isFtpEnabled && fs.existsSync(targetAbsPath)) {
-              const ftpUrl = await uploadLocalFileToFtp(targetAbsPath, `uploads/${targetRelPath}`, dbFtpConfig);
-              if (ftpUrl) newUrl = ftpUrl;
-            } else if (baseUrl) {
-              newUrl = `${baseUrl}/uploads/${targetRelPath}`;
-            }
-
-            if (series.banner !== newUrl) {
-              series.banner = newUrl;
-              seriesChanged = true;
-            }
-          }
+        const res = await organizeSingleFileUrl(series.banner, expectedRelDir, uploadsDir, isFtpEnabled, dbFtpConfig, baseUrl);
+        if (res.moved || res.newUrl !== series.banner) {
+          series.banner = res.newUrl;
+          seriesChanged = true;
+          if (res.moved) movedFilesCount++;
         }
       }
 
@@ -185,44 +239,13 @@ export async function organizeAllFiles(): Promise<{
           const updatedImages: string[] = [];
 
           for (const imgUrl of chapter.images) {
-            if (typeof imgUrl === "string" && imgUrl.includes("/uploads/")) {
-              if (!isAlreadyOrganized(imgUrl, chapterRelDir)) {
-                const filename = extractFilename(imgUrl);
-                if (filename) {
-                  const targetRelPath = `series/${safeSeries}/${safeChapter}/${filename}`;
-                  const targetAbsDir = path.join(uploadsDir, "series", safeSeries, safeChapter);
-                  const targetAbsPath = path.join(targetAbsDir, filename);
-
-                  const existingLocalPath = findLocalFile(uploadsDir, filename);
-                  if (existingLocalPath && existingLocalPath !== targetAbsPath) {
-                    fs.mkdirSync(targetAbsDir, { recursive: true });
-                    try {
-                      fs.renameSync(existingLocalPath, targetAbsPath);
-                    } catch (e) {
-                      fs.copyFileSync(existingLocalPath, targetAbsPath);
-                      fs.unlinkSync(existingLocalPath);
-                    }
-                    movedFilesCount++;
-                  }
-
-                  let newUrl = `/uploads/${targetRelPath}`;
-                  if (isFtpEnabled && fs.existsSync(targetAbsPath)) {
-                    const ftpUrl = await uploadLocalFileToFtp(targetAbsPath, `uploads/${targetRelPath}`, dbFtpConfig);
-                    if (ftpUrl) newUrl = ftpUrl;
-                  } else if (baseUrl) {
-                    newUrl = `${baseUrl}/uploads/${targetRelPath}`;
-                  }
-
-                  if (imgUrl !== newUrl) {
-                    chapterChanged = true;
-                  }
-                  updatedImages.push(newUrl);
-                } else {
-                  updatedImages.push(imgUrl);
-                }
-              } else {
-                updatedImages.push(imgUrl);
+            if (typeof imgUrl === "string") {
+              const res = await organizeSingleFileUrl(imgUrl, chapterRelDir, uploadsDir, isFtpEnabled, dbFtpConfig, baseUrl);
+              if (res.moved || res.newUrl !== imgUrl) {
+                chapterChanged = true;
+                if (res.moved) movedFilesCount++;
               }
+              updatedImages.push(res.newUrl);
             } else {
               updatedImages.push(imgUrl);
             }
@@ -235,41 +258,14 @@ export async function organizeAllFiles(): Promise<{
 
         // Organize Submissions if present
         if (Array.isArray(chapter.submissions) && chapter.submissions.length > 0) {
+          const subRelDir = `series/${safeSeries}/${safeChapter}/submissions`;
           for (const sub of chapter.submissions) {
-            if (sub.fileUrl && sub.fileUrl.includes("/uploads/")) {
-              const subRelDir = `series/${safeSeries}/${safeChapter}/submissions`;
-              if (!isAlreadyOrganized(sub.fileUrl, subRelDir)) {
-                const filename = extractFilename(sub.fileUrl);
-                if (filename) {
-                  const targetRelPath = `series/${safeSeries}/${safeChapter}/submissions/${filename}`;
-                  const targetAbsDir = path.join(uploadsDir, "series", safeSeries, safeChapter, "submissions");
-                  const targetAbsPath = path.join(targetAbsDir, filename);
-
-                  const existingLocalPath = findLocalFile(uploadsDir, filename);
-                  if (existingLocalPath && existingLocalPath !== targetAbsPath) {
-                    fs.mkdirSync(targetAbsDir, { recursive: true });
-                    try {
-                      fs.renameSync(existingLocalPath, targetAbsPath);
-                    } catch (e) {
-                      fs.copyFileSync(existingLocalPath, targetAbsPath);
-                      fs.unlinkSync(existingLocalPath);
-                    }
-                    movedFilesCount++;
-                  }
-
-                  let newUrl = `/uploads/${targetRelPath}`;
-                  if (isFtpEnabled && fs.existsSync(targetAbsPath)) {
-                    const ftpUrl = await uploadLocalFileToFtp(targetAbsPath, `uploads/${targetRelPath}`, dbFtpConfig);
-                    if (ftpUrl) newUrl = ftpUrl;
-                  } else if (baseUrl) {
-                    newUrl = `${baseUrl}/uploads/${targetRelPath}`;
-                  }
-
-                  if (sub.fileUrl !== newUrl) {
-                    sub.fileUrl = newUrl;
-                    chapterChanged = true;
-                  }
-                }
+            if (sub.fileUrl && typeof sub.fileUrl === "string") {
+              const res = await organizeSingleFileUrl(sub.fileUrl, subRelDir, uploadsDir, isFtpEnabled, dbFtpConfig, baseUrl);
+              if (res.moved || res.newUrl !== sub.fileUrl) {
+                sub.fileUrl = res.newUrl;
+                chapterChanged = true;
+                if (res.moved) movedFilesCount++;
               }
             }
           }

@@ -198,3 +198,75 @@ export async function testFtpConnection(config: FtpConfig): Promise<{ success: b
     client.close();
   }
 }
+
+export async function moveFtpFile(
+  oldRemotePath: string,
+  newRemotePath: string,
+  config?: FtpConfig
+): Promise<string | null> {
+  const ftpHost = config?.host || process.env.FTP_HOST;
+  const ftpUser = config?.user || process.env.FTP_USER;
+  const ftpPass = config?.password || process.env.FTP_PASS;
+  const ftpPort = config?.port || Number(process.env.FTP_PORT || 21);
+  const ftpSecure = config?.secure ?? (process.env.FTP_SECURE === "true");
+  const rawBaseUrl = (config?.baseUrl || process.env.STORAGE_BASE_URL || "").replace(/\/$/, "");
+
+  if (!ftpHost || !ftpUser || !ftpPass) {
+    return null;
+  }
+
+  const client = new ftp.Client();
+  client.ftp.verbose = false;
+
+  try {
+    await client.access({
+      host: ftpHost,
+      port: ftpPort,
+      user: ftpUser,
+      password: ftpPass,
+      secure: ftpSecure
+    });
+
+    const cleanOld = oldRemotePath.replace(/^\/+/, "").replace(/\\/g, "/");
+    const cleanNew = newRemotePath.replace(/^\/+/, "").replace(/\\/g, "/");
+
+    if (cleanOld === cleanNew) {
+      const baseUrl = rawBaseUrl || `ftp://${ftpHost}`;
+      return `${baseUrl}/${cleanNew}`;
+    }
+
+    const targetDir = path.dirname(cleanNew).replace(/\\/g, "/");
+    if (targetDir && targetDir !== ".") {
+      await client.cd("/");
+      await client.ensureDir(targetDir);
+    }
+
+    await client.cd("/");
+
+    let moveSuccess = false;
+    try {
+      await client.rename(cleanOld, cleanNew);
+      moveSuccess = true;
+    } catch (e) {
+      try {
+        await client.rename("/" + cleanOld, "/" + cleanNew);
+        moveSuccess = true;
+      } catch (e2) {
+        moveSuccess = false;
+      }
+    }
+
+    if (moveSuccess) {
+      const baseUrl = rawBaseUrl || `ftp://${ftpHost}`;
+      return `${baseUrl}/${cleanNew}`;
+    }
+
+    return null;
+  } catch (err) {
+    console.error("FTP move file error:", err);
+    return null;
+  } finally {
+    client.close();
+  }
+}
+

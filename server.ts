@@ -2196,14 +2196,6 @@ async function startServer() {
     }
   });
 
-function sanitizeFolderName(name: string): string {
-  if (!name) return "";
-  let safe = name.replace(/[/\\:*?"<>|]/g, "-").trim();
-  safe = safe.replace(/[\x00-\x1F\x7F]/g, "");
-  safe = safe.replace(/\s+/g, " ");
-  return safe;
-}
-
 function resolveTargetUploadDir(baseUploadsDir: string, reqBody: any, reqQuery: any): { targetDir: string; relPrefix: string } {
   const seriesTitle = (reqBody?.seriesTitle || reqQuery?.seriesTitle || reqBody?.seriesId || reqQuery?.seriesId || reqBody?.series || reqQuery?.series || "").toString().trim();
   const chapterNumber = (reqBody?.chapterNumber || reqQuery?.chapterNumber || reqBody?.chapter || reqQuery?.chapter || "").toString().trim();
