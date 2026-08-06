@@ -50,7 +50,10 @@ DB_PORT=3306
 اگر هاست شما اجازه ساخت خودکار جداول را از خارج به دیتابیس ندهد، کافیست کدهای SQL زیر را در بخش **phpMyAdmin** دیتابیس خود کپی و اجرا (Run query) کنید:
 
 ```sql
--- 1. جدول کاربران
+-- 1. دستور تغییر انکودینگ کل دیتابیس به utf8mb4 (جهت پشتیبانی کامل از زبان فارسی و تمام زبان‌ها)
+ALTER DATABASE CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 2. جدول کاربران
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(100) PRIMARY KEY,
   email VARCHAR(255) NOT NULL,
@@ -58,10 +61,20 @@ CREATE TABLE IF NOT EXISTS users (
   avatarUrl TEXT,
   banned TINYINT(1) DEFAULT 0,
   role VARCHAR(20) DEFAULT 'user',
+  melliCode VARCHAR(20),
+  firstName VARCHAR(100),
+  lastName VARCHAR(100),
+  phoneNumber VARCHAR(100),
+  canCreateSeries TINYINT(1) DEFAULT 0,
+  rolesText TEXT,
+  permissionsText TEXT,
+  password VARCHAR(255),
+  walletBalance INT DEFAULT 0,
+  hasCompletedSetup TINYINT(1) DEFAULT 0,
   createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 2. جدول کمیک‌ها و مانهواها
+-- 3. جدول کمیک‌ها و مانهواها
 CREATE TABLE IF NOT EXISTS series (
   id VARCHAR(100) PRIMARY KEY,
   title VARCHAR(255) NOT NULL,
@@ -77,11 +90,13 @@ CREATE TABLE IF NOT EXISTS series (
   rating DOUBLE DEFAULT 0.0,
   type VARCHAR(50) DEFAULT 'Manhwa',
   views INT DEFAULT 0,
+  isHero TINYINT(1) DEFAULT 0,
+  contributors TEXT,
   createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
   updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 3. جدول چپترها
+-- 4. جدول چپترها
 CREATE TABLE IF NOT EXISTS chapters (
   id VARCHAR(100) PRIMARY KEY,
   seriesId VARCHAR(100) NOT NULL,
@@ -89,12 +104,14 @@ CREATE TABLE IF NOT EXISTS chapters (
   title VARCHAR(255) DEFAULT '',
   images TEXT,
   views INT DEFAULT 0,
+  isPending TINYINT(1) DEFAULT 0,
+  submissions TEXT,
   createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
   updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (seriesId) REFERENCES series(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 4. جدول کامنت‌ها
+-- 5. جدول کامنت‌ها
 CREATE TABLE IF NOT EXISTS comments (
   id VARCHAR(100) PRIMARY KEY,
   chapterId VARCHAR(100) NOT NULL,
@@ -105,18 +122,18 @@ CREATE TABLE IF NOT EXISTS comments (
   likes TEXT,
   dislikes TEXT,
   createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 5. جدول نشان‌شده‌ها (بوک‌مارک)
+-- 6. جدول نشان‌شده‌ها (بوک‌مارک)
 CREATE TABLE IF NOT EXISTS bookmarks (
   userId VARCHAR(100) NOT NULL,
   seriesId VARCHAR(100) NOT NULL,
   createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (userId, seriesId),
   FOREIGN KEY (seriesId) REFERENCES series(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 6. جدول تاریخچه خواندن
+-- 7. جدول تاریخچه خواندن
 CREATE TABLE IF NOT EXISTS history (
   userId VARCHAR(100) NOT NULL,
   seriesId VARCHAR(100) NOT NULL,
@@ -124,9 +141,9 @@ CREATE TABLE IF NOT EXISTS history (
   chapterNumber DOUBLE NOT NULL,
   updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (userId, seriesId)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 7. جدول امتیازات
+-- 8. جدول امتیازات
 CREATE TABLE IF NOT EXISTS ratings (
   userId VARCHAR(100) NOT NULL,
   seriesId VARCHAR(100) NOT NULL,
@@ -134,11 +151,26 @@ CREATE TABLE IF NOT EXISTS ratings (
   createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (userId, seriesId),
   FOREIGN KEY (seriesId) REFERENCES series(id) ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 8. جدول تنظیمات سایت
+-- 9. جدول تنظیمات سایت
 CREATE TABLE IF NOT EXISTS settings (
   id VARCHAR(50) PRIMARY KEY,
   val TEXT NOT NULL
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 10. ارتقای تمام جداول موجود به انکودینگ utf8mb4 (حل مشکل علائم سوال ??? در کاراکترهای فارسی)
+ALTER TABLE users CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE series CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE chapters CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE comments CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE bookmarks CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE history CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE ratings CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE settings CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE reports CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE notifications CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE wallet_transactions CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE purchased_chapters CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE settlement_requests CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```

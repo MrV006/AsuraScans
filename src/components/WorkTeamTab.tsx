@@ -576,6 +576,7 @@ export default function WorkTeamTab({
                 <input 
                   type="file" 
                   multiple 
+                  accept="image/*,.zip,.rar,.7z,.docx,.doc,.pdf,.txt,.rtf"
                   onChange={handleFileUpload} 
                   className="hidden" 
                 />

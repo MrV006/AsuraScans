@@ -92,7 +92,7 @@ export function ImageUploader({ onUpload, multiple = false, seriesTitle, chapter
         <input 
           type="file" 
           multiple={multiple} 
-          accept="image/*,.zip"
+          accept="image/*,.zip,.rar,.7z,.docx,.doc,.pdf,.txt,.rtf"
           onChange={handleFileSelect}
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
         />

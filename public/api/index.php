@@ -31,6 +31,8 @@ try {
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
     ]);
+    $pdo->exec("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+    $pdo->exec("SET CHARACTER SET utf8mb4");
 } catch (PDOException $e) {
     echo json_encode(["error" => "Database connection failed: " . $e->getMessage()]);
     exit();
@@ -135,6 +137,10 @@ function requireStaffOrAdmin($pdo) {
 
 // Ensure database tables exist
 function ensureSchema($pdo) {
+    try {
+        $pdo->exec("ALTER DATABASE CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
+    } catch (Exception $e) {}
+
     $queries = [
         "CREATE TABLE IF NOT EXISTS users (
             id VARCHAR(100) PRIMARY KEY,
@@ -154,7 +160,7 @@ function ensureSchema($pdo) {
             walletBalance INT DEFAULT 0,
             hasCompletedSetup TINYINT(1) DEFAULT 0,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        )",
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS series (
             id VARCHAR(100) PRIMARY KEY,
             title VARCHAR(255) NOT NULL,
@@ -174,7 +180,7 @@ function ensureSchema($pdo) {
             contributors TEXT,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )",
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS chapters (
             id VARCHAR(100) PRIMARY KEY,
             seriesId VARCHAR(100) NOT NULL,
@@ -186,7 +192,7 @@ function ensureSchema($pdo) {
             submissions TEXT,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )",
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS comments (
             id VARCHAR(100) PRIMARY KEY,
             chapterId VARCHAR(100) NOT NULL,
@@ -197,13 +203,13 @@ function ensureSchema($pdo) {
             likes TEXT,
             dislikes TEXT,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        )",
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS bookmarks (
             userId VARCHAR(100) NOT NULL,
             seriesId VARCHAR(100) NOT NULL,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (userId, seriesId)
-        )",
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS history (
             userId VARCHAR(100) NOT NULL,
             seriesId VARCHAR(100) NOT NULL,
@@ -211,18 +217,18 @@ function ensureSchema($pdo) {
             chapterNumber DOUBLE NOT NULL,
             updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (userId, seriesId)
-        )",
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS ratings (
             userId VARCHAR(100) NOT NULL,
             seriesId VARCHAR(100) NOT NULL,
             score DOUBLE NOT NULL,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (userId, seriesId)
-        )",
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS settings (
             id VARCHAR(50) PRIMARY KEY,
             val TEXT NOT NULL
-        )",
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS reports (
             id VARCHAR(100) PRIMARY KEY,
             userId VARCHAR(100) NOT NULL,
@@ -231,7 +237,7 @@ function ensureSchema($pdo) {
             content TEXT NOT NULL,
             status VARCHAR(20) DEFAULT 'pending',
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        )",
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS notifications (
             id VARCHAR(100) PRIMARY KEY,
             userId VARCHAR(100) NOT NULL,
@@ -241,7 +247,7 @@ function ensureSchema($pdo) {
             link VARCHAR(255),
             isRead TINYINT(1) DEFAULT 0,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        )",
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS wallet_transactions (
             id VARCHAR(100) PRIMARY KEY,
             userId VARCHAR(100) NOT NULL,
@@ -252,7 +258,7 @@ function ensureSchema($pdo) {
             creatorId VARCHAR(100) NOT NULL,
             creatorName VARCHAR(100) NOT NULL,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-        )",
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS purchased_chapters (
             id VARCHAR(100) PRIMARY KEY,
             userId VARCHAR(100) NOT NULL,
@@ -260,11 +266,37 @@ function ensureSchema($pdo) {
             chapterId VARCHAR(100) NOT NULL,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_user_chap (userId, seriesId, chapterId)
-        )"
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+        "CREATE TABLE IF NOT EXISTS settlement_requests (
+            id VARCHAR(100) PRIMARY KEY,
+            userId VARCHAR(100) NOT NULL,
+            userName VARCHAR(100),
+            userEmail VARCHAR(255),
+            amount INT NOT NULL,
+            cardOrSheba VARCHAR(100) NOT NULL,
+            accountHolder VARCHAR(100) NOT NULL,
+            status VARCHAR(20) DEFAULT 'pending',
+            rejectionNote TEXT,
+            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+            processedAt DATETIME NULL,
+            processedBy VARCHAR(100) NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     ];
 
     foreach ($queries as $q) {
         $pdo->exec($q);
+    }
+
+    // Auto convert all tables to utf8mb4_unicode_ci
+    $tablesToConvert = [
+        'users', 'series', 'chapters', 'comments', 'bookmarks', 
+        'history', 'ratings', 'settings', 'reports', 'notifications', 
+        'wallet_transactions', 'purchased_chapters', 'settlement_requests'
+    ];
+    foreach ($tablesToConvert as $t) {
+        try {
+            $pdo->exec("ALTER TABLE `$t` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        } catch (Exception $e) {}
     }
 
     // Migrate existing users' melliCode to 8-digit random unique codes if empty or not 8 digits
@@ -1815,12 +1847,20 @@ if ($method === 'POST' && $sub_path === '/admin/upload') {
         $normalized_files[] = $files;
     }
     
+    $allowedExts = ['webp', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'zip', 'rar', '7z', 'docx', 'doc', 'pdf', 'txt', 'rtf'];
+
     foreach ($normalized_files as $file) {
         if ($file['error'] !== UPLOAD_ERR_OK) {
             continue;
         }
         
         $orig_name = strtolower($file['name']);
+        $ext = strtolower(pathinfo($orig_name, PATHINFO_EXTENSION));
+
+        if (!in_array($ext, $allowedExts)) {
+            sendResponse(["error" => "پسوند فایل '" . htmlspecialchars($file['name']) . "' مجاز نیست."], 400);
+        }
+
         $isZip = (str_ends_with($orig_name, '.zip') || $file['type'] === 'application/zip' || $file['type'] === 'application/x-zip-compressed');
         
         if ($isZip && class_exists('ZipArchive')) {

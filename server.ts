@@ -2320,9 +2320,16 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
 
       const itemsToUpload: { buffer: Buffer; fileName: string }[] = [];
 
+      const allowedExtensions = [".webp", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".zip", ".rar", ".7z", ".docx", ".doc", ".pdf", ".txt", ".rtf"];
+
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const ext = path.extname(file.originalname).toLowerCase();
+        
+        if (!allowedExtensions.includes(ext)) {
+          return res.status(400).json({ error: `پسوند فایل '${file.originalname}' مجاز نیست. پسوندهای مجاز: ${allowedExtensions.join(", ")}` });
+        }
+
         const isDoc = [".doc", ".docx", ".pdf", ".txt", ".rtf"].includes(ext) || 
                       file.mimetype.includes("word") || 
                       file.mimetype.includes("document") || 

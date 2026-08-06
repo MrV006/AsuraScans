@@ -526,11 +526,11 @@ class DatabaseManager {
       const tablesToConvert = [
         'users', 'series', 'chapters', 'comments', 'bookmarks', 
         'history', 'ratings', 'settings', 'reports', 'notifications', 
-        'wallet_transactions', 'purchased_chapters'
+        'wallet_transactions', 'purchased_chapters', 'settlement_requests'
       ];
       for (const table of tablesToConvert) {
         try {
-          await this.pool.execute(`ALTER TABLE ${table} CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+          await this.pool.execute(`ALTER TABLE \`${table}\` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
         } catch (err) {
           console.warn(`Could not convert table ${table} to utf8mb4:`, err);
         }
