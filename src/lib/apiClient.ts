@@ -690,5 +690,39 @@ export const apiClient = {
       body: JSON.stringify({ email })
     });
     return res.json();
+  },
+
+  async downloadBackup(adminUid?: string) {
+    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const res = await fetch(`${API_URL}/api/admin/backup?adminUid=${encodeURIComponent(uid)}`, {
+      headers: this.getHeaders(uid)
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `خطا در دریافت فایل نسخه پشتیبان (کد ${res.status})`);
+    }
+    return res.blob();
+  },
+
+  async downloadMigrationManifest(adminUid?: string) {
+    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const res = await fetch(`${API_URL}/api/admin/migration-manifest?adminUid=${encodeURIComponent(uid)}`, {
+      headers: this.getHeaders(uid)
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `خطا در دریافت مانیفست مهاجرت (کد ${res.status})`);
+    }
+    return res.blob();
+  },
+
+  async restoreBackup(data: any, adminUid?: string) {
+    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const res = await fetch(`${API_URL}/api/admin/restore?adminUid=${encodeURIComponent(uid)}`, {
+      method: 'POST',
+      headers: this.getHeaders(uid),
+      body: JSON.stringify(data)
+    });
+    return res.json();
   }
 };

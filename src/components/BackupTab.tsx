@@ -53,16 +53,7 @@ export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
   const handleDownloadManifest = async () => {
     setDownloadingManifest(true);
     try {
-      const adminUid = getAdminUid();
-      const res = await fetch(`/api/admin/migration-manifest?adminUid=${encodeURIComponent(adminUid)}`, {
-        headers: {
-          "x-admin-uid": adminUid
-        }
-      });
-      if (!res.ok) {
-        throw new Error("خطا در دریافت مانیفست مهاجرت");
-      }
-      const blob = await res.blob();
+      const blob = await apiClient.downloadMigrationManifest(getAdminUid());
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -180,19 +171,7 @@ export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
     setIsExporting(true);
     setMessage(null);
     try {
-      const adminUid = getAdminUid();
-      const res = await fetch(`/api/admin/backup?adminUid=${encodeURIComponent(adminUid)}`, {
-        headers: {
-          "x-admin-uid": adminUid
-        }
-      });
-      
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `خطا در دریافت فایل نسخه پشتیبان (کد ${res.status})`);
-      }
-
-      const blob = await res.blob();
+      const blob = await apiClient.downloadBackup(getAdminUid());
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -236,19 +215,9 @@ export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
       fileReader.onload = async (event) => {
         try {
           const jsonContent = JSON.parse(event.target?.result as string);
-          const adminUid = getAdminUid();
+          const data = await apiClient.restoreBackup(jsonContent, getAdminUid());
           
-          const res = await fetch(`/api/admin/restore?adminUid=${encodeURIComponent(adminUid)}`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-admin-uid": adminUid
-            },
-            body: JSON.stringify(jsonContent)
-          });
-
-          const data = await res.json();
-          if (res.ok) {
+          if (data.success) {
             setMessage({ type: "success", text: "دیتابیس با موفقیت بازگردانی شد! تمامی اطلاعات کاربران، خریدها، کیف پول و آثار جایگزین شدند." });
             setImportFile(null);
             setConfirmText("");

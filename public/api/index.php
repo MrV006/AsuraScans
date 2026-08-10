@@ -1648,6 +1648,80 @@ if ($method === 'POST' && $sub_path === '/admin/run-backup-now') {
     ]);
 }
 
+// 40e. DOWNLOAD BACKUP (PHP)
+if ($method === 'GET' && $sub_path === '/admin/backup') {
+    requireAdmin($pdo);
+    $backupData = [
+        "series" => $pdo->query("SELECT * FROM series")->fetchAll(PDO::FETCH_ASSOC),
+        "chapters" => $pdo->query("SELECT * FROM chapters")->fetchAll(PDO::FETCH_ASSOC),
+        "users" => $pdo->query("SELECT * FROM users")->fetchAll(PDO::FETCH_ASSOC),
+        "comments" => $pdo->query("SELECT * FROM comments")->fetchAll(PDO::FETCH_ASSOC),
+        "bookmarks" => $pdo->query("SELECT * FROM bookmarks")->fetchAll(PDO::FETCH_ASSOC),
+        "history" => $pdo->query("SELECT * FROM history")->fetchAll(PDO::FETCH_ASSOC),
+        "ratings" => $pdo->query("SELECT * FROM ratings")->fetchAll(PDO::FETCH_ASSOC),
+        "purchases" => $pdo->query("SELECT * FROM purchases")->fetchAll(PDO::FETCH_ASSOC),
+        "wallet_transactions" => $pdo->query("SELECT * FROM wallet_transactions")->fetchAll(PDO::FETCH_ASSOC),
+        "settlement_requests" => $pdo->query("SELECT * FROM settlement_requests")->fetchAll(PDO::FETCH_ASSOC),
+        "reports" => $pdo->query("SELECT * FROM reports")->fetchAll(PDO::FETCH_ASSOC)
+    ];
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Disposition: attachment; filename=asura-clone-backup.json');
+    echo json_encode($backupData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// 40f. RESTORE BACKUP (PHP)
+if ($method === 'POST' && $sub_path === '/admin/restore') {
+    requireAdmin($pdo);
+    $input = getJsonInput();
+    if (!$input || !is_array($input)) {
+        sendResponse(["error" => "فرمت فایل نسخه پشتیبان نامعتبر است."], 400);
+    }
+    try {
+        if (!empty($input['series']) && is_array($input['series'])) {
+            $pdo->exec("TRUNCATE TABLE series");
+            $stmt = $pdo->prepare("INSERT INTO series (id, title, english_title, slug, cover, banner, summary, status, type, release_year, author, artist, translation_team, is_vip, is_recommended, is_editor_pick, rating, rating_count, views, bookmarks_count, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            foreach ($input['series'] as $s) {
+                $stmt->execute([
+                    $s['id'], $s['title'], $s['english_title'] ?? null, $s['slug'] ?? null, $s['cover'] ?? null, $s['banner'] ?? null, $s['summary'] ?? null, $s['status'] ?? 'ongoing', $s['type'] ?? 'manhwa', $s['release_year'] ?? null, $s['author'] ?? null, $s['artist'] ?? null, $s['translation_team'] ?? null, $s['is_vip'] ?? 0, $s['is_recommended'] ?? 0, $s['is_editor_pick'] ?? 0, $s['rating'] ?? 0, $s['rating_count'] ?? 0, $s['views'] ?? 0, $s['bookmarks_count'] ?? 0, $s['updated_at'] ?? date('Y-m-d H:i:s'), $s['created_at'] ?? date('Y-m-d H:i:s')
+                ]);
+            }
+        }
+        if (!empty($input['chapters']) && is_array($input['chapters'])) {
+            $pdo->exec("TRUNCATE TABLE chapters");
+            $stmt = $pdo->prepare("INSERT INTO chapters (id, series_id, number, title, images, release_date, is_vip, coin_price, is_free, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            foreach ($input['chapters'] as $c) {
+                $imgs = is_array($c['images']) ? json_encode($c['images']) : ($c['images'] ?? '[]');
+                $stmt->execute([
+                    $c['id'], $c['series_id'], $c['number'], $c['title'] ?? null, $imgs, $c['release_date'] ?? date('Y-m-d H:i:s'), $c['is_vip'] ?? 0, $c['coin_price'] ?? 0, $c['is_free'] ?? 1, $c['created_at'] ?? date('Y-m-d H:i:s')
+                ]);
+            }
+        }
+        sendResponse(["success" => true, "message" => "اطلاعات با موفقیت بازگردانی شد."]);
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
+    }
+}
+
+// 40g. MIGRATION MANIFEST (PHP)
+if ($method === 'GET' && $sub_path === '/admin/migration-manifest') {
+    requireAdmin($pdo);
+    $seriesList = $pdo->query("SELECT * FROM series")->fetchAll(PDO::FETCH_ASSOC);
+    $manifest = [
+        "generatedAt" => date('c'),
+        "databaseType" => "MySQL (PHP)",
+        "summary" => [
+            "totalSeries" => count($seriesList),
+            "totalChapters" => (int)$pdo->query("SELECT COUNT(*) FROM chapters")->fetchColumn()
+        ],
+        "series" => $seriesList
+    ];
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Disposition: attachment; filename=asura-migration-manifest.json');
+    echo json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 // 41. GET ADMIN STATS (ADMIN)
 if ($method === 'GET' && $sub_path === '/admin/stats') {
     requireAdmin($pdo);
