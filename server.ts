@@ -10,6 +10,7 @@ import sharp from "sharp";
 import JSZip from "jszip";
 import fs from "fs";
 import crypto from "crypto";
+import nodemailer from "nodemailer";
 import { generateSeoHtml } from "./server/seo";
 import { uploadFileToFtp, uploadBatchFilesToFtp, testFtpConnection } from "./server/ftpStorage";
 import { organizeAllFiles, sanitizeFolderName } from "./server/organizer";
@@ -23,6 +24,132 @@ async function startServer() {
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
+
+  const backupsDir = path.join(process.cwd(), "backups");
+  if (!fs.existsSync(backupsDir)) {
+    fs.mkdirSync(backupsDir, { recursive: true });
+  }
+
+  interface BackupSettings {
+    email: string;
+    autoBackupEnabled: boolean;
+    scheduleFrequency: 'daily' | 'weekly' | 'hourly';
+    smtpHost?: string;
+    smtpPort?: number;
+    smtpUser?: string;
+    smtpPass?: string;
+    smtpSecure?: boolean;
+    lastBackupTime?: string;
+    lastBackupStatus?: string;
+    lastBackupFile?: string;
+  }
+
+  async function performBackupAndEmail(): Promise<{ success: boolean; filePath: string; emailed: boolean; error?: string }> {
+    try {
+      const backupData = await dbManager.backupAllData();
+      const dateStr = new Date().toISOString().replace(/[:.]/g, '-');
+      const fileName = `asura-backup-${dateStr}.json`;
+      const filePath = path.join(backupsDir, fileName);
+      const jsonStr = JSON.stringify(backupData, null, 2);
+
+      // 1. Save file locally on host
+      await fs.promises.writeFile(filePath, jsonStr, 'utf-8');
+
+      // Load backup settings
+      let settings: BackupSettings = await dbManager.getSettings("backup_settings") || {
+        email: "",
+        autoBackupEnabled: false,
+        scheduleFrequency: "daily"
+      };
+
+      let emailed = false;
+      let emailError = "";
+
+      // 2. Email if email is configured
+      if (settings.email && settings.email.trim() !== "") {
+        try {
+          let transporter;
+          if (settings.smtpHost && settings.smtpUser) {
+            transporter = nodemailer.createTransport({
+              host: settings.smtpHost,
+              port: settings.smtpPort || 587,
+              secure: settings.smtpSecure || false,
+              auth: {
+                user: settings.smtpUser,
+                pass: settings.smtpPass || ""
+              }
+            });
+          } else {
+            // Default transport fallback
+            transporter = nodemailer.createTransport({
+              jsonTransport: true
+            });
+          }
+
+          await transporter.sendMail({
+            from: `"Asura Backup Manager" <${settings.smtpUser || settings.email}>`,
+            to: settings.email,
+            subject: `📦 نسخه پشتیبان خودکار - ${new Date().toLocaleDateString('fa-IR')}`,
+            text: `سلام مدیریت محترم،\n\nنسخه پشتیبان کامل اطلاعات سایت با موفقیت در هاست ذخیره گردید و به این ایمیل پیوست شد.\n\nتاریخ ایجاد: ${new Date().toLocaleString('fa-IR')}\nنام فایل: ${fileName}\nتعداد آثار: ${backupData.series?.length || 0}\nتعداد کاربران: ${backupData.users?.length || 0}\n\nآدرس ذخیره‌سازی در هاست: /backups/${fileName}\n\nبا احترام،\nسیستم پشتیبان‌گیری خودکار`,
+            attachments: [
+              {
+                filename: fileName,
+                content: jsonStr,
+                contentType: 'application/json'
+              }
+            ]
+          });
+          emailed = true;
+        } catch (e: any) {
+          console.error("Failed to send backup email:", e);
+          emailError = e.message;
+        }
+      }
+
+      // Update settings with last backup execution record
+      const updatedSettings: BackupSettings = {
+        ...settings,
+        lastBackupTime: new Date().toISOString(),
+        lastBackupStatus: emailed ? "موفق و ایمیل شد" : (emailError ? `ذخیره در هاست (خطای ارسال ایمیل: ${emailError})` : "ذخیره شد در هاست"),
+        lastBackupFile: fileName
+      };
+      await dbManager.saveSettings("backup_settings", updatedSettings);
+
+      return {
+        success: true,
+        filePath,
+        emailed,
+        error: emailError || undefined
+      };
+    } catch (err: any) {
+      console.error("Backup creation error:", err);
+      return {
+        success: false,
+        filePath: "",
+        emailed: false,
+        error: err.message
+      };
+    }
+  }
+
+  // Automated scheduled backup background worker (runs every 30 minutes)
+  setInterval(async () => {
+    try {
+      const settings: BackupSettings = await dbManager.getSettings("backup_settings");
+      if (!settings || !settings.autoBackupEnabled) return;
+
+      const lastTime = settings.lastBackupTime ? new Date(settings.lastBackupTime).getTime() : 0;
+      const now = Date.now();
+      const intervalMs = settings.scheduleFrequency === "weekly" ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+
+      if (now - lastTime >= intervalMs) {
+        console.log("Running scheduled automated backup...");
+        await performBackupAndEmail();
+      }
+    } catch (e) {
+      console.error("Automated backup interval error:", e);
+    }
+  }, 30 * 60 * 1000);
 
   // Automatically organize legacy and unorganized files in background on startup
   setTimeout(() => {
@@ -1548,6 +1675,66 @@ async function startServer() {
       res.setHeader('Content-disposition', 'attachment; filename=asura-clone-backup.json');
       res.setHeader('Content-type', 'application/json');
       res.send(JSON.stringify(backupData, null, 2));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/backup-settings", requireAdmin, async (req, res) => {
+    try {
+      const adminUid = req.headers['x-admin-uid'] as string;
+      const user = await dbManager.getUser(adminUid);
+      if (!user || !isSuperAdminUser(user)) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به این بخش می‌باشد." });
+      }
+      const settings = await dbManager.getSettings("backup_settings") || {
+        email: "",
+        autoBackupEnabled: false,
+        scheduleFrequency: "daily"
+      };
+      res.json(settings);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/backup-settings", requireAdmin, async (req, res) => {
+    try {
+      const adminUid = req.headers['x-admin-uid'] as string;
+      const user = await dbManager.getUser(adminUid);
+      if (!user || !isSuperAdminUser(user)) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به ذخیره تنظیمات بک‌آ‌پ است." });
+      }
+      const existing = await dbManager.getSettings("backup_settings") || {};
+      const updated = {
+        ...existing,
+        ...req.body
+      };
+      await dbManager.saveSettings("backup_settings", updated);
+      res.json({ success: true, settings: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/run-backup-now", requireAdmin, async (req, res) => {
+    try {
+      const adminUid = req.headers['x-admin-uid'] as string;
+      const user = await dbManager.getUser(adminUid);
+      if (!user || !isSuperAdminUser(user)) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به اجرای فوراً بک‌آ‌پ است." });
+      }
+
+      if (req.body?.email) {
+        const existing = await dbManager.getSettings("backup_settings") || {};
+        await dbManager.saveSettings("backup_settings", { ...existing, email: req.body.email });
+      }
+
+      const result = await performBackupAndEmail();
+      if (!result.success) {
+        return res.status(500).json({ error: result.error || "خطا در ایجاد بک‌آ‌پ" });
+      }
+      res.json({ success: true, ...result });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

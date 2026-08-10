@@ -1527,6 +1527,127 @@ if ($method === 'POST' && matchRoute('/settings/:id', $sub_path, $params)) {
     sendResponse(["success" => true]);
 }
 
+// 40b. GET BACKUP SETTINGS
+if ($method === 'GET' && $sub_path === '/admin/backup-settings') {
+    requireAdmin($pdo);
+    $stmt = $pdo->prepare("SELECT val FROM settings WHERE id = 'backup_settings'");
+    $stmt->execute();
+    $row = $stmt->fetch();
+    $data = $row && isset($row['val']) ? json_decode($row['val'], true) : [
+        "email" => "",
+        "autoBackupEnabled" => false,
+        "scheduleFrequency" => "daily"
+    ];
+    sendResponse($data);
+}
+
+// 40c. SAVE BACKUP SETTINGS
+if ($method === 'POST' && $sub_path === '/admin/backup-settings') {
+    requireAdmin($pdo);
+    $input = getJsonInput();
+    
+    $stmt = $pdo->prepare("SELECT val FROM settings WHERE id = 'backup_settings'");
+    $stmt->execute();
+    $row = $stmt->fetch();
+    $existing = $row && isset($row['val']) ? json_decode($row['val'], true) : [];
+    
+    $updated = array_merge($existing, $input);
+    $stmtUp = $pdo->prepare("INSERT INTO settings (id, val) VALUES ('backup_settings', ?) ON DUPLICATE KEY UPDATE val=VALUES(val)");
+    $stmtUp->execute([json_encode($updated)]);
+    
+    sendResponse(["success" => true, "settings" => $updated]);
+}
+
+// 40d. RUN BACKUP NOW (PHP)
+if ($method === 'POST' && $sub_path === '/admin/run-backup-now') {
+    requireAdmin($pdo);
+    $input = getJsonInput();
+    
+    // Save email if sent
+    if (!empty($input['email'])) {
+        $stmt = $pdo->prepare("SELECT val FROM settings WHERE id = 'backup_settings'");
+        $stmt->execute();
+        $row = $stmt->fetch();
+        $existing = $row && isset($row['val']) ? json_decode($row['val'], true) : [];
+        $existing['email'] = $input['email'];
+        $stmtUp = $pdo->prepare("INSERT INTO settings (id, val) VALUES ('backup_settings', ?) ON DUPLICATE KEY UPDATE val=VALUES(val)");
+        $stmtUp->execute([json_encode($existing)]);
+    }
+
+    // Build backup json data
+    $backupData = [
+        "series" => $pdo->query("SELECT * FROM series")->fetchAll(),
+        "chapters" => $pdo->query("SELECT * FROM chapters")->fetchAll(),
+        "users" => $pdo->query("SELECT * FROM users")->fetchAll(),
+        "comments" => $pdo->query("SELECT * FROM comments")->fetchAll(),
+        "bookmarks" => $pdo->query("SELECT * FROM bookmarks")->fetchAll(),
+        "history" => $pdo->query("SELECT * FROM history")->fetchAll(),
+        "ratings" => $pdo->query("SELECT * FROM ratings")->fetchAll(),
+        "purchases" => $pdo->query("SELECT * FROM purchases")->fetchAll(),
+        "wallet_transactions" => $pdo->query("SELECT * FROM wallet_transactions")->fetchAll(),
+        "settlement_requests" => $pdo->query("SELECT * FROM settlement_requests")->fetchAll(),
+        "reports" => $pdo->query("SELECT * FROM reports")->fetchAll()
+    ];
+    
+    $jsonStr = json_encode($backupData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    $dateStr = date('Y-m-d-H-i-s');
+    $fileName = "asura-backup-{$dateStr}.json";
+    
+    $backupsDir = __DIR__ . '/../../backups';
+    if (!file_exists($backupsDir)) {
+        @mkdir($backupsDir, 0755, true);
+    }
+    
+    $filePath = $backupsDir . '/' . $fileName;
+    @file_put_contents($filePath, $jsonStr);
+    
+    // Check if email send requested
+    $stmtB = $pdo->prepare("SELECT val FROM settings WHERE id = 'backup_settings'");
+    $stmtB->execute();
+    $rowB = $stmtB->fetch();
+    $bSettings = $rowB && isset($rowB['val']) ? json_decode($rowB['val'], true) : [];
+    
+    $email = isset($bSettings['email']) ? trim($bSettings['email']) : '';
+    $emailed = false;
+    
+    if (!empty($email)) {
+        $subject = "📦 نسخه پشتیبان خودکار دیتابیس - " . date('Y-m-d');
+        $headers = "From: no-reply@" . $_SERVER['HTTP_HOST'] . "\r\n";
+        $headers .= "MIME-Version: 1.0\r\n";
+        
+        $boundary = md5(time());
+        $headers .= "Content-Type: multipart/mixed; boundary=\"" . $boundary . "\"\r\n";
+        
+        $body = "--" . $boundary . "\r\n";
+        $body .= "Content-Type: text/plain; charset=UTF-8\r\n";
+        $body .= "Content-Transfer-Encoding: base64\r\n\r\n";
+        $body .= chunk_split(base64_encode("سلام مدیریت محترم،\n\nفایل نسخه پشتیبان با موفقیت در هاست ذخیره گردید و پیوست شد.\nنام فایل: {$fileName}\nمسیر: /backups/{$fileName}")) . "\r\n";
+        
+        $body .= "--" . $boundary . "\r\n";
+        $body .= "Content-Type: application/json; name=\"" . $fileName . "\"\r\n";
+        $body .= "Content-Disposition: attachment; filename=\"" . $fileName . "\"\r\n";
+        $body .= "Content-Transfer-Encoding: base64\r\n\r\n";
+        $body .= chunk_split(base64_encode($jsonStr)) . "\r\n";
+        $body .= "--" . $boundary . "--";
+        
+        $emailed = @mail($email, $subject, $body, $headers);
+    }
+    
+    // Update last execution time
+    $bSettings['lastBackupTime'] = date('c');
+    $bSettings['lastBackupStatus'] = $emailed ? "موفق و ایمیل شد" : "ذخیره شد در هاست";
+    $bSettings['lastBackupFile'] = $fileName;
+    
+    $stmtUp2 = $pdo->prepare("INSERT INTO settings (id, val) VALUES ('backup_settings', ?) ON DUPLICATE KEY UPDATE val=VALUES(val)");
+    $stmtUp2->execute([json_encode($bSettings)]);
+    
+    sendResponse([
+        "success" => true,
+        "fileName" => $fileName,
+        "emailed" => $emailed
+    ]);
+}
+
 // 41. GET ADMIN STATS (ADMIN)
 if ($method === 'GET' && $sub_path === '/admin/stats') {
     requireAdmin($pdo);

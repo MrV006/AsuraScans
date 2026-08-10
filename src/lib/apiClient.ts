@@ -662,5 +662,33 @@ export const apiClient = {
       headers: this.getHeaders(adminUid)
     });
     return res.json();
+  },
+
+  async getBackupSettings(adminUid?: string) {
+    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const res = await fetch(`${API_URL}/api/admin/backup-settings`, {
+      headers: this.getHeaders(uid)
+    });
+    return res.json();
+  },
+
+  async saveBackupSettings(settings: any, adminUid?: string) {
+    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const res = await fetch(`${API_URL}/api/admin/backup-settings`, {
+      method: 'POST',
+      headers: this.getHeaders(uid),
+      body: JSON.stringify(settings)
+    });
+    return res.json();
+  },
+
+  async runBackupNow(email?: string, adminUid?: string) {
+    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const res = await fetch(`${API_URL}/api/admin/run-backup-now`, {
+      method: 'POST',
+      headers: this.getHeaders(uid),
+      body: JSON.stringify({ email })
+    });
+    return res.json();
   }
 };

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { apiClient } from "../lib/apiClient";
 import { 
   Download, 
   Upload, 
@@ -11,7 +12,12 @@ import {
   FileText, 
   Terminal, 
   Image, 
-  HelpCircle 
+  HelpCircle,
+  Mail,
+  Clock,
+  ShieldCheck,
+  Send,
+  Save
 } from "lucide-react";
 
 interface BackupTabProps {
@@ -35,6 +41,14 @@ export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
     walletTransactionsCount: number;
   } | null>(null);
   const [downloadingManifest, setDownloadingManifest] = useState(false);
+
+  // Automated Backup States
+  const [backupEmail, setBackupEmail] = useState("");
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(false);
+  const [scheduleFrequency, setScheduleFrequency] = useState<"daily" | "weekly">("daily");
+  const [lastBackupInfo, setLastBackupInfo] = useState<{ time?: string; status?: string; file?: string } | null>(null);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isTestingBackup, setIsTestingBackup] = useState(false);
 
   const handleDownloadManifest = async () => {
     setDownloadingManifest(true);
@@ -75,8 +89,68 @@ export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
   useEffect(() => {
     if (user?.uid) {
       fetchStats();
+      fetchBackupSettings();
     }
   }, [user]);
+
+  const fetchBackupSettings = async () => {
+    try {
+      const data = await apiClient.getBackupSettings(getAdminUid());
+      if (data) {
+        setBackupEmail(data.email || "");
+        setAutoBackupEnabled(!!data.autoBackupEnabled);
+        setScheduleFrequency(data.scheduleFrequency || "daily");
+        setLastBackupInfo({
+          time: data.lastBackupTime,
+          status: data.lastBackupStatus,
+          file: data.lastBackupFile
+        });
+      }
+    } catch (e) {
+      console.error("Failed to load backup settings:", e);
+    }
+  };
+
+  const handleSaveBackupSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingSettings(true);
+    setMessage(null);
+    try {
+      await apiClient.saveBackupSettings({
+        email: backupEmail,
+        autoBackupEnabled,
+        scheduleFrequency
+      }, getAdminUid());
+      setMessage({ type: "success", text: "تنظیمات پشتیبان‌گیری خودکار و ایمیل ذخیره شد و دیگر نیاز به وارد کردن مجدد ندارد." });
+    } catch (err: any) {
+      setMessage({ type: "error", text: err.message || "خطا در ذخیره تنظیمات" });
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
+  const handleRunBackupNow = async () => {
+    setIsTestingBackup(true);
+    setMessage(null);
+    try {
+      const res = await apiClient.runBackupNow(backupEmail, getAdminUid());
+      if (res.success) {
+        setMessage({
+          type: "success",
+          text: res.emailed 
+            ? `پشتیبان‌گیری انجام شد، در هاست ذخیره گردید و یک نسخه کامل به ایمیل ${backupEmail} ارسال شد.`
+            : `پشتیبان‌گیری انجام شد و فایل به صورت خودکار در مسیر هاست (/backups) ذخیره شد.`
+        });
+        fetchBackupSettings();
+      } else {
+        throw new Error(res.error || "خطا در ایجاد پشتیبان");
+      }
+    } catch (err: any) {
+      setMessage({ type: "error", text: err.message || "خطا در ایجاد پشتیبان" });
+    } finally {
+      setIsTestingBackup(false);
+    }
+  };
 
   const fetchStats = async () => {
     try {
@@ -285,6 +359,119 @@ export default function BackupTab({ isSuperAdmin }: BackupTabProps) {
           </div>
         </div>
       )}
+
+      {/* Automated Scheduled Backup & Email Card */}
+      <div className="bg-gradient-to-br from-zinc-900/90 to-[#12131a] border border-amber-500/20 rounded-2xl p-6 shadow-xl space-y-6">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-white/10">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
+              <Clock size={22} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                پشتیبان‌گیری خودکار زمان‌بندی‌شده و ارسال ایمیل
+              </h3>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                ذخیره خودکار بک‌آ‌پ روی هاست + ارسال نسخه کامل به ایمیل مدیریت کل (ذخیره‌سازی همیشگی ایمیل)
+              </p>
+            </div>
+          </div>
+
+          {lastBackupInfo?.time && (
+            <div className="bg-white/5 border border-white/10 px-3 py-2 rounded-xl text-xs text-zinc-300 flex flex-col items-end">
+              <span className="text-[11px] text-zinc-400">آخرین پشتیبان‌گیری:</span>
+              <strong className="text-amber-300 font-sans dir-ltr">{new Date(lastBackupInfo.time).toLocaleString('fa-IR')}</strong>
+              {lastBackupInfo.status && (
+                <span className="text-[10px] text-emerald-400 mt-0.5">{lastBackupInfo.status}</span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={handleSaveBackupSettings} className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+          <div className="md:col-span-1">
+            <label className="block text-xs font-bold text-zinc-300 mb-2 flex items-center gap-1.5">
+              <Mail size={15} className="text-amber-400" />
+              ایمیل دریافت‌کننده بک‌آ‌پ مدیریت کل:
+            </label>
+            <input
+              type="email"
+              placeholder="مثلا: admin@domain.com"
+              value={backupEmail}
+              onChange={e => setBackupEmail(e.target.value)}
+              className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono placeholder:font-sans focus:outline-none focus:border-amber-500/50"
+            />
+            <p className="text-[10px] text-zinc-500 mt-1">این ایمیل ذخیره شده و دیگر هر بار از شما پرسیده نمی‌شود.</p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-zinc-300 mb-2 flex items-center gap-1.5">
+              <Clock size={15} className="text-amber-400" />
+              زمان‌بندی اجرای خودکار:
+            </label>
+            <select
+              value={scheduleFrequency}
+              onChange={e => setScheduleFrequency(e.target.value as 'daily' | 'weekly')}
+              className="w-full bg-black/50 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:border-amber-500/50"
+            >
+              <option value="daily">روزانه (هر ۲۴ ساعت)</option>
+              <option value="weekly">هفتگی (هر ۷ روز)</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <label className="flex items-center gap-2 cursor-pointer bg-white/5 hover:bg-white/10 p-2.5 rounded-xl border border-white/10 transition-colors">
+              <input
+                type="checkbox"
+                checked={autoBackupEnabled}
+                onChange={e => setAutoBackupEnabled(e.target.checked)}
+                className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+              />
+              <span className="text-xs font-bold text-zinc-200">فعال‌سازی پشتیبان‌گیری خودکار</span>
+            </label>
+          </div>
+
+          <div className="md:col-span-3 flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-white/10">
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <ShieldCheck size={16} className="text-emerald-400" />
+              <span>فایل‌ها به صورت ایمن در مسیر <code className="text-amber-300 bg-black/40 px-1.5 py-0.5 rounded font-mono">/backups/</code> هاست ذخیره می‌گردند.</span>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleRunBackupNow}
+                disabled={isTestingBackup}
+                className="px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isTestingBackup ? (
+                  <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Send size={14} />
+                    <span>ایجاد و ارسال فوراً بک‌آ‌پ</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="submit"
+                disabled={isSavingSettings}
+                className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-black rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-amber-500/20 disabled:opacity-50"
+              >
+                {isSavingSettings ? (
+                  <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Save size={14} />
+                    <span>ذخیره تنظیمات</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
 
       {/* Grid: Export and Import */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

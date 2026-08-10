@@ -2,7 +2,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSeriesOverview } from '../hooks/useSeries';
 import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../hooks/useUserActivity';
-import { ChevronLeft, ChevronRight, Menu, Home, ArrowUp, Settings as SettingsIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Menu, Home, ArrowUp, Settings as SettingsIcon, Flag, AlertTriangle, X, Check, Send } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { Comments } from '../components/Comments';
 import { apiClient, getSocketInstance } from '../lib/apiClient';
@@ -91,6 +91,15 @@ export default function Reader() {
   const [loadedIndices, setLoadedIndices] = useState<Set<number>>(new Set());
   const [visibleIndices, setVisibleIndices] = useState<Set<number>>(new Set());
   const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
+  const [failedIndices, setFailedIndices] = useState<Set<number>>(new Set());
+
+  // Report Modal state
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportIssueType, setReportIssueType] = useState('عدم بارگذاری تصویر / تصویر خراب');
+  const [reportPageNum, setReportPageNum] = useState('');
+  const [reportDetails, setReportDetails] = useState('');
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [reportMsg, setReportMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const chapterIdx = series?.chapters ? series.chapters.findIndex(c => {
     if (c.id === chapterId) return true;
@@ -275,12 +284,46 @@ export default function Reader() {
   };
 
   const handleImageError = (idx: number) => {
+    // Track failed indices for inline report prompt
+    setFailedIndices(prev => new Set(prev).add(idx));
     // Prevent stuck queue in case of transient error
     setLoadedIndices(prev => {
       const next = new Set(prev);
       next.add(idx);
       return next;
     });
+  };
+
+  const handleReportSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmittingReport(true);
+    setReportMsg(null);
+    try {
+      const uid = user?.uid || localStorage.getItem('asura_user_id') || 'guest';
+      const userName = dbUser?.displayName || user?.displayName || 'کاربر میهمان';
+      const title = `[خرابی تصویر] ${series?.title || 'عنوان مانهوا'} - چپتر ${chapter?.number || ''}`;
+      const content = `مجموعه: ${series?.title || ''}\nچپتر: ${chapter?.number || ''}\nنوع مشکل: ${reportIssueType}\nشماره صفحات: ${reportPageNum || 'نامشخص'}\nتوضیحات: ${reportDetails || 'بدون توضیح'}`;
+
+      await apiClient.submitReport({
+        id: `report-${Date.now()}`,
+        userId: uid,
+        userName,
+        title,
+        content
+      });
+
+      setReportMsg({ type: 'success', text: 'گزارش شما با موفقیت به ادمین و تیم تحریریه ارسال شد.' });
+      setTimeout(() => {
+        setShowReportModal(false);
+        setReportMsg(null);
+        setReportDetails('');
+        setReportPageNum('');
+      }, 2000);
+    } catch (err: any) {
+      setReportMsg({ type: 'error', text: err.message || 'خطا در ارسال گزارش' });
+    } finally {
+      setIsSubmittingReport(false);
+    }
   };
 
   useEffect(() => {
@@ -556,7 +599,16 @@ export default function Reader() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => setShowReportModal(true)}
+              className="flex items-center gap-1 px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg text-xs font-bold transition-colors"
+              title="گزارش خراب بودن تصاویر"
+            >
+              <Flag size={14} />
+              <span className="hidden md:inline">گزارش خرابی</span>
+            </button>
+
             <button 
               onClick={() => setShowSettings(!showSettings)}
               className="text-zinc-500 hover:text-white transition-colors relative"
@@ -641,6 +693,18 @@ export default function Reader() {
               دو صفحه‌ای
             </button>
           </div>
+
+          <button
+            onClick={() => {
+              setReportPageNum(readingMode !== 'vertical' ? `صفحه ${activePageIndex + 1}` : '');
+              setShowReportModal(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-black transition-all shrink-0 hover:scale-105 active:scale-95 mr-auto md:mr-0"
+            title="گزارش خراب بودن تصاویر یا اشکال در چپتر"
+          >
+            <Flag size={14} />
+            <span>گزارش خرابی تصویر</span>
+          </button>
         </div>
 
         {readingMode !== 'vertical' && sortedImages && sortedImages.length > 0 && (
@@ -937,6 +1001,116 @@ export default function Reader() {
           <ArrowUp size={18} />
         </button>
       </div>
+
+      {/* Report Broken Images Modal */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in" dir="rtl">
+          <div className="bg-[#14151b] border border-white/10 rounded-2xl p-6 w-full max-w-lg shadow-2xl relative text-right">
+            <button
+              onClick={() => { setShowReportModal(false); setReportMsg(null); }}
+              className="absolute top-4 left-4 p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="flex items-center gap-2.5 mb-4 border-b border-white/10 pb-3">
+              <div className="p-2 bg-red-500/10 rounded-xl text-red-400">
+                <Flag size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white">گزارش خرابی تصویر یا چپتر</h3>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  اطلاع‌رسانی سریع به مدیریت و ادیتورهای پروژه
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-white/5 border border-white/5 rounded-xl p-3 mb-4 text-xs font-medium text-zinc-300">
+              <span className="text-zinc-400">عنوان اثر: </span>
+              <strong className="text-white ml-2">{series?.title}</strong>
+              <span className="text-zinc-500 mx-1">|</span>
+              <span className="text-zinc-400">چپتر: </span>
+              <strong className="text-amber-400">{chapter?.number}</strong>
+            </div>
+
+            {reportMsg && (
+              <div className={`p-3 rounded-xl text-xs font-bold mb-4 flex items-center gap-2 ${reportMsg.type === 'success' ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border border-red-500/30 text-red-400'}`}>
+                {reportMsg.type === 'success' ? <Check size={16} /> : <AlertTriangle size={16} />}
+                <span>{reportMsg.text}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleReportSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1.5">
+                  نوع مشکل:
+                </label>
+                <select
+                  value={reportIssueType}
+                  onChange={e => setReportIssueType(e.target.value)}
+                  className="w-full bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
+                >
+                  <option value="عدم بارگذاری تصویر / تصویر خراب">عدم بارگذاری تصویر / تصویر خراب</option>
+                  <option value="ترتیب اشتباه یا جابه‌جا بودن صفحات">ترتیب اشتباه یا جابه‌جا بودن صفحات</option>
+                  <option value="کیفیت پایین یا واترمارک ناخوانا">کیفیت پایین یا واترمارک ناخوانا</option>
+                  <option value="صفحه تکراری یا چپتر اشتباهی">صفحه تکراری یا چپتر اشتباهی</option>
+                  <option value="سایر موارد">سایر موارد</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1.5">
+                  شماره صفحه / صفحات دارای مشکل (اختیاری):
+                </label>
+                <input
+                  type="text"
+                  placeholder="مثلا: صفحه ۵ یا صفحات ۳ تا ۷"
+                  value={reportPageNum}
+                  onChange={e => setReportPageNum(e.target.value)}
+                  className="w-full bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-300 mb-1.5">
+                  توضیحات تکمیلی (اختیاری):
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="در صورت نیاز توضیحات بیشتری بنویسید..."
+                  value={reportDetails}
+                  onChange={e => setReportDetails(e.target.value)}
+                  className="w-full bg-black/50 border border-white/10 rounded-xl p-3 text-xs font-medium text-white focus:outline-none focus:border-[var(--color-asura-accent)] resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setShowReportModal(false)}
+                  className="px-4 py-2 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-xl text-xs font-bold transition-colors"
+                >
+                  انصراف
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingReport}
+                  className="px-5 py-2 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-[var(--color-asura-accent)]/20 disabled:opacity-50"
+                >
+                  {isSubmittingReport ? (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <Send size={14} />
+                      <span>ارسال گزارش</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );
