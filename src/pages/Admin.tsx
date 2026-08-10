@@ -1021,7 +1021,7 @@ export default function Admin() {
             </button>
           )}
 
-          {isSuperAdmin && (
+          {(isSuperAdmin || hasFrontendPermission('create_series') || hasFrontendPermission('edit_series') || hasFrontendPermission('manage_settings')) && (
             <button
               onClick={() => setActiveTab("seo")}
               className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "seo" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
@@ -3411,7 +3411,7 @@ export default function Admin() {
             </div>
           )}
 
-          {activeTab === "seo" && isSuperAdmin && (
+          {activeTab === "seo" && (isSuperAdmin || hasFrontendPermission('create_series') || hasFrontendPermission('edit_series') || hasFrontendPermission('manage_settings')) && (
             <SeoTab
               seriesList={seriesList}
               fetchSeries={fetchSeries}

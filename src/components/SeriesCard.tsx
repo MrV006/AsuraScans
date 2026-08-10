@@ -10,7 +10,7 @@ interface SeriesCardProps {
   key?: React.Key;
 }
 
-export function SeriesCard({ series, className = '', widthClass = '' }: SeriesCardProps) {
+export const SeriesCard = React.memo(function SeriesCard({ series, className = '', widthClass = '' }: SeriesCardProps) {
   const navigate = useNavigate();
   const [isTouched, setIsTouched] = useState(false);
 
@@ -28,10 +28,6 @@ export function SeriesCard({ series, className = '', widthClass = '' }: SeriesCa
     setIsTouched(true);
   };
 
-  const handlePosterTouchEnd = (e: React.TouchEvent) => {
-    // Keeps touched active for 3 seconds or toggles
-  };
-
   const totalChaps = series.totalChapters !== undefined ? series.totalChapters : (series.chaptersCount !== undefined ? series.chaptersCount : (series.chapters ? series.chapters.length : 0));
   const latestChapter = series.chapters && series.chapters.length > 0 ? series.chapters[0] : null;
 
@@ -43,30 +39,31 @@ export function SeriesCard({ series, className = '', widthClass = '' }: SeriesCa
     <div
       onClick={handleCardClick}
       onTouchStart={handlePosterTouchStart}
-      className={`bg-zinc-900/80 border border-white/5 rounded-2xl overflow-hidden group flex flex-col hover:border-[var(--color-asura-accent)]/50 transition-all duration-300 hover:-translate-y-1.5 shadow-xl relative cursor-pointer select-none ${widthClass} ${className}`}
-      style={{ WebkitUserSelect: 'none', userSelect: 'none' }}
+      className={`bg-zinc-900/80 border border-white/5 rounded-2xl overflow-hidden group flex flex-col hover:border-[var(--color-asura-accent)]/50 transition-all duration-300 hover:-translate-y-1 shadow-xl relative cursor-pointer select-none ${widthClass} ${className}`}
+      style={{ WebkitUserSelect: 'none', userSelect: 'none', transform: 'translateZ(0)' }}
     >
       {/* Poster Container */}
       <div className="relative aspect-[3/4] overflow-hidden bg-zinc-950 select-none">
         <img
           src={series.cover}
           alt={series.title}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 pointer-events-none select-none"
+          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105 pointer-events-none select-none"
           referrerPolicy="no-referrer"
           loading="lazy"
+          decoding="async"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent pointer-events-none"></div>
 
         {/* Top Badges */}
         <div className="absolute top-2.5 left-2.5 right-2.5 flex justify-between items-center z-10 pointer-events-none">
           {/* Total Chapters Badge */}
-          <div className="bg-black/75 backdrop-blur-md border border-white/10 text-amber-300 text-[10px] font-black px-2 py-0.5 rounded-lg flex items-center gap-1 shadow-md">
+          <div className="bg-black/85 border border-white/10 text-amber-300 text-[10px] font-black px-2 py-0.5 rounded-lg flex items-center gap-1 shadow-md">
             <BookOpen size={11} className="text-amber-400" />
             <span>{totalChaps} چپتر</span>
           </div>
 
           {/* Rating Badge */}
-          <div className="bg-black/75 backdrop-blur-md border border-white/10 text-white text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 shadow-md">
+          <div className="bg-black/85 border border-white/10 text-white text-[10px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 shadow-md">
             <Star size={10} className="text-yellow-400 fill-yellow-400" />
             <span className="font-sans">{displayRating}</span>
           </div>
@@ -74,8 +71,8 @@ export function SeriesCard({ series, className = '', widthClass = '' }: SeriesCa
 
         {/* HOVER & TOUCH OVERLAY (Synopsis & Details) */}
         <div 
-          className={`absolute inset-0 z-20 p-3.5 bg-gradient-to-b from-zinc-950/95 via-zinc-950/90 to-black/95 backdrop-blur-md transition-all duration-300 ease-out flex flex-col justify-between text-right select-none ${
-            isTouched ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-2 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto'
+          className={`absolute inset-0 z-20 p-3.5 bg-zinc-950/95 transition-all duration-200 ease-out flex flex-col justify-between text-right select-none ${
+            isTouched ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-1 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto'
           }`} 
           dir="rtl"
         >
@@ -157,4 +154,4 @@ export function SeriesCard({ series, className = '', widthClass = '' }: SeriesCa
       </div>
     </div>
   );
-}
+});

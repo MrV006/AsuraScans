@@ -14,6 +14,7 @@ import { SeriesDetailSkeleton } from '../components/Skeletons';
 import { apiClient } from '../lib/apiClient';
 import { ImageUploader } from '../components/ImageUploader';
 import { useSettings } from '../contexts/SettingsContext';
+import { SEOHead } from '../components/SEOHead';
 
 export default function Series() {
   const { id } = useParams();
@@ -381,6 +382,27 @@ export default function Series() {
 
   return (
     <Layout>
+      <SEOHead 
+        title={series.seoTitle || `${series.type === 'Manga' ? 'مانگا' : series.type === 'Manhua' ? 'مانها' : 'مانهوا'} ${series.title}${series.alternativeTitles?.length ? ' (' + series.alternativeTitles.slice(0, 2).join(', ') + ')' : ''} با ترجمه فارسی | ${settings?.siteName || 'مانگاتا'}`}
+        description={series.seoDescription || `دانلود و خواندن آنلاین ${series.type === 'Manga' ? 'مانگا' : series.type === 'Manhua' ? 'مانها' : 'مانهوا'} ${series.title} با کیفیت عالی و ترجمه فارسی اختصاصی. ${series.synopsis ? series.synopsis.slice(0, 160) + '...' : ''} مرجع اصلی مانهوا در ${settings?.siteName || 'مانگاتا'}.`}
+        keywords={series.seoKeywords || `${series.title}, دانلود مانهوا ${series.title}, خواندن آنلاین ${series.title}, ${series.genres?.join(', ')}, ${series.tags?.join(', ')}, مانهوا, مانگا, مانها, کمیک, ${settings?.siteName || 'مانگاتا'}`}
+        image={series.banner || series.cover}
+        jsonLd={{
+          "@context": "https://schema.org",
+          "@type": "ComicSeries",
+          "name": series.title,
+          "alternateName": series.alternativeTitles || [],
+          "description": series.synopsis,
+          "image": series.cover,
+          "genre": series.genres || [],
+          "author": series.author ? { "@type": "Person", "name": series.author } : undefined,
+          "publisher": {
+            "@type": "Organization",
+            "name": settings?.siteName || "مانگاتا",
+            "url": window.location.origin
+          }
+        }}
+      />
       {/* Banner Area */}
       <div className="relative w-full h-[300px] md:h-[400px] overflow-hidden bg-[var(--color-asura-dark)]">
         <img 

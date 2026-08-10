@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Globe, Sparkles, Search, Check, AlertCircle, RefreshCw } from "lucide-react";
+import { Globe, Sparkles, Search, Check, AlertCircle, RefreshCw, Layers, BookOpen, ExternalLink, Copy } from "lucide-react";
 import { apiClient } from "../lib/apiClient";
-import { Series } from "../lib/types";
+import { Series, Chapter } from "../lib/types";
 
 interface SeoTabProps {
   seriesList: Series[];
@@ -23,13 +23,26 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
   // Series SEO States
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSeries, setSelectedSeries] = useState<Series | null>(null);
-  
+  const [activeTab, setActiveTab] = useState<'series' | 'chapters'>('series');
+
   // Custom Override States for the selected series
   const [customTitle, setCustomTitle] = useState("");
   const [customDescription, setCustomDescription] = useState("");
   const [customKeywords, setCustomKeywords] = useState("");
   const [seriesSaving, setSeriesSaving] = useState(false);
   const [seriesSuccess, setSeriesSuccess] = useState(false);
+
+  // Chapters SEO States
+  const [chaptersList, setChaptersList] = useState<Chapter[]>([]);
+  const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
+  const [chapterSeoTitle, setChapterSeoTitle] = useState("");
+  const [chapterSeoDescription, setChapterSeoDescription] = useState("");
+  const [chapterSeoKeywords, setChapterSeoKeywords] = useState("");
+  const [chapterSaving, setChapterSaving] = useState(false);
+  const [chapterSuccess, setChapterSuccess] = useState(false);
+  const [loadingChapters, setLoadingChapters] = useState(false);
+
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
   // Fetch Global SEO Settings on mount
   useEffect(() => {
@@ -58,13 +71,41 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
       setCustomDescription(selectedSeries.seoDescription || "");
       setCustomKeywords(selectedSeries.seoKeywords || "");
       setSeriesSuccess(false);
+
+      // Fetch chapters for this series
+      setLoadingChapters(true);
+      apiClient.getChapters(selectedSeries.id)
+        .then((chs) => {
+          const list = Array.isArray(chs) ? chs : [];
+          setChaptersList(list);
+          if (list.length > 0) {
+            const firstCh = list[0];
+            setSelectedChapter(firstCh);
+            setChapterSeoTitle(firstCh.seoTitle || "");
+            setChapterSeoDescription(firstCh.seoDescription || "");
+            setChapterSeoKeywords(firstCh.seoKeywords || "");
+          } else {
+            setSelectedChapter(null);
+          }
+        })
+        .catch(console.error)
+        .finally(() => setLoadingChapters(false));
     }
   }, [selectedSeries]);
+
+  // Update chapter states when selected chapter changes
+  useEffect(() => {
+    if (selectedChapter) {
+      setChapterSeoTitle(selectedChapter.seoTitle || "");
+      setChapterSeoDescription(selectedChapter.seoDescription || "");
+      setChapterSeoKeywords(selectedChapter.seoKeywords || "");
+      setChapterSuccess(false);
+    }
+  }, [selectedChapter]);
 
   // Save Global SEO Settings
   const handleSaveGlobalSeo = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isSuperAdmin) return;
     setGlobalLoading(true);
     setGlobalSuccess(false);
 
@@ -89,7 +130,7 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
   // Save Series SEO Override
   const handleSaveSeriesSeo = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isSuperAdmin || !selectedSeries) return;
+    if (!selectedSeries) return;
     setSeriesSaving(true);
     setSeriesSuccess(false);
 
@@ -112,20 +153,41 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
     }
   };
 
-  // Smart AI/Auto-Generator Logic
-  const handleAutoGenerate = () => {
+  // Save Chapter SEO Override
+  const handleSaveChapterSeo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSeries || !selectedChapter) return;
+    setChapterSaving(true);
+    setChapterSuccess(false);
+
+    try {
+      await apiClient.saveChapter(selectedSeries.id, {
+        ...selectedChapter,
+        seoTitle: chapterSeoTitle,
+        seoDescription: chapterSeoDescription,
+        seoKeywords: chapterSeoKeywords,
+      });
+      setChapterSuccess(true);
+      setTimeout(() => setChapterSuccess(false), 3000);
+    } catch (err: any) {
+      alert("خطا در ذخیره سئو چپتر: " + err.message);
+    } finally {
+      setChapterSaving(false);
+    }
+  };
+
+  // Smart AI/Auto-Generator Logic for Series
+  const handleAutoGenerateSeries = () => {
     if (!selectedSeries) return;
 
     const title = selectedSeries.title;
     const typeLabel = selectedSeries.type === "Manga" ? "مانگا" : selectedSeries.type === "Manhua" ? "مانها" : "مانهوا";
     
-    // 1. Generate optimized title
     const altTitlesPart = selectedSeries.alternativeTitles && selectedSeries.alternativeTitles.length > 0
       ? ` (${selectedSeries.alternativeTitles[0]})`
       : "";
     const generatedTitle = `${typeLabel} ${title}${altTitlesPart} با ترجمه فارسی اختصاصی | ${siteName}`;
 
-    // 2. Generate optimized description
     let synopsisBrief = selectedSeries.synopsis || "";
     if (synopsisBrief.length > 150) {
       synopsisBrief = synopsisBrief.slice(0, 150) + "...";
@@ -141,7 +203,6 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
 
     const generatedDesc = `خواندن آنلاین و دانلود ${typeLabel} ${title}${altTitlesPart}.${authorArtistPart} خلاصه داستان: ${synopsisBrief}${tagsPart} بهترین کیفیت و ترجمه فارسی در وبسایت ${siteName}. مانهوا، مانگا، مانها، کمیک، کمیک بوک، انیمه.`;
 
-    // 3. Generate optimized keywords
     const altTitlesStr = selectedSeries.alternativeTitles ? selectedSeries.alternativeTitles.join(", ") : "";
     const genresStr = selectedSeries.genres ? selectedSeries.genres.join(", ") : "";
     const tagsStr = selectedSeries.tags ? selectedSeries.tags.join(", ") : "";
@@ -158,8 +219,6 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
       "مانگا",
       "مانها",
       "کمیک",
-      "کمیک بوک",
-      "انیمه",
       siteName
     ].filter(Boolean).join(", ");
 
@@ -168,11 +227,52 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
     setCustomKeywords(generatedKeywords);
   };
 
+  // Smart AI/Auto-Generator Logic for Chapter
+  const handleAutoGenerateChapter = () => {
+    if (!selectedSeries || !selectedChapter) return;
+
+    const title = selectedSeries.title;
+    const chapNum = selectedChapter.number;
+    const chapTitle = selectedChapter.title ? ` - ${selectedChapter.title}` : "";
+    const typeLabel = selectedSeries.type === "Manga" ? "مانگا" : selectedSeries.type === "Manhua" ? "مانها" : "مانهوا";
+
+    const generatedTitle = `چپتر ${chapNum}${chapTitle} از ${typeLabel} ${title} با ترجمه فارسی | ${siteName}`;
+
+    let synopsisBrief = selectedSeries.synopsis || "";
+    if (synopsisBrief.length > 120) {
+      synopsisBrief = synopsisBrief.slice(0, 120) + "...";
+    }
+
+    const generatedDesc = `مطالعه آنلاین و دانلود چپتر ${chapNum} از ${typeLabel} ${title}${chapTitle} با کیفیت عالی HD و ترجمه اختصاصی. ${synopsisBrief} مطالعه کامل در رسانه ${siteName}.`;
+
+    const generatedKeywords = [
+      `چپتر ${chapNum} ${title}`,
+      `دانلود چپتر ${chapNum} ${title}`,
+      `خواندن آنلاین ${title} چپتر ${chapNum}`,
+      `${title} چپتر ${chapNum} فارسی`,
+      `مانهوا`,
+      `مانگا`,
+      siteName
+    ].join(", ");
+
+    setChapterSeoTitle(generatedTitle.slice(0, 70));
+    setChapterSeoDescription(generatedDesc.slice(0, 200));
+    setChapterSeoKeywords(generatedKeywords);
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedLink(label);
+    setTimeout(() => setCopiedLink(null), 2000);
+  };
+
   // Filter series based on search
   const filteredSeries = seriesList.filter(s =>
     s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (s.alternativeTitles && s.alternativeTitles.some(t => t.toLowerCase().includes(searchQuery.toLowerCase())))
   );
+
+  const siteOrigin = window.location.origin;
 
   return (
     <div className="space-y-10" dir="rtl">
@@ -186,6 +286,61 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
           <p className="text-zinc-400 text-xs mt-1 leading-relaxed">
             مدیریت تگ‌های متا، نقشه سایت، کلمات کلیدی هدف نظیر <span className="text-[var(--color-asura-accent)] font-bold">مانهوا، مانگا، مانها، کمیک، کمیک بوک، انیمه</span> و پیکربندی سئو هوشمند خودکار وبسایت جهت کسب رتبه اول گوگل.
           </p>
+        </div>
+      </div>
+
+      {/* Google Search Console & Sitemap Quick Access Bar */}
+      <div className="bg-gradient-to-r from-emerald-950/40 via-zinc-900/60 to-black/40 border border-emerald-500/20 rounded-2xl p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-black text-emerald-400 text-sm flex items-center gap-2">
+            <Sparkles size={16} />
+            لینک‌های ثبت در گوگل سرچ کنسول (Google Search Console)
+          </h3>
+          <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded-full font-bold">خودکار و زنده</span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-black/40 border border-white/5 rounded-xl p-3 flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] text-zinc-400 font-bold block mb-0.5">نقشه XML سایت (Sitemap)</span>
+              <a href={`${siteOrigin}/sitemap.xml`} target="_blank" rel="noreferrer" className="text-xs text-emerald-300 font-mono underline truncate block">
+                {siteOrigin}/sitemap.xml
+              </a>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => copyToClipboard(`${siteOrigin}/sitemap.xml`, 'sitemap')}
+                className="p-2 bg-white/5 hover:bg-white/10 rounded-lg text-zinc-300 text-xs font-bold flex items-center gap-1.5 transition-colors"
+              >
+                {copiedLink === 'sitemap' ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                {copiedLink === 'sitemap' ? 'کپی شد' : 'کپی'}
+              </button>
+              <a href={`${siteOrigin}/sitemap.xml`} target="_blank" rel="noreferrer" className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg">
+                <ExternalLink size={14} />
+              </a>
+            </div>
+          </div>
+
+          <div className="bg-black/40 border border-white/5 rounded-xl p-3 flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] text-zinc-400 font-bold block mb-0.5">فایل دستورالعمل ربات‌ها (Robots.txt)</span>
+              <a href={`${siteOrigin}/robots.txt`} target="_blank" rel="noreferrer" className="text-xs text-emerald-300 font-mono underline truncate block">
+                {siteOrigin}/robots.txt
+              </a>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => copyToClipboard(`${siteOrigin}/robots.txt`, 'robots')}
+                className="p-2 bg-white/5 hover:bg-white/10 rounded-lg text-zinc-300 text-xs font-bold flex items-center gap-1.5 transition-colors"
+              >
+                {copiedLink === 'robots' ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                {copiedLink === 'robots' ? 'کپی شد' : 'کپی'}
+              </button>
+              <a href={`${siteOrigin}/robots.txt`} target="_blank" rel="noreferrer" className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg">
+                <ExternalLink size={14} />
+              </a>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -309,8 +464,8 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
                 <Check size={12} />
               </div>
               <p className="text-xs text-zinc-300 leading-relaxed">
-                <strong className="text-white block mb-0.5">سئو اتوماتیک بر اساس ژانر و خلاصه:</strong>
-                خلاصه داستان مانهوا، نام نویسنده و طراح به صورت ساختاریافته در تگ توضیحات قرار می‌گیرند.
+                <strong className="text-white block mb-0.5">سئو اتوماتیک چپترها بر اساس شماره و عنوان:</strong>
+                هر چپتر جدیدی که آپلود می‌شود به طور خودکار عنوان، متاتگ، کلمات کلیدی و داده‌های اسکیما (Schema.org) دریافت می‌کند.
               </p>
             </div>
 
@@ -319,8 +474,8 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
                 <Check size={12} />
               </div>
               <p className="text-xs text-zinc-300 leading-relaxed">
-                <strong className="text-white block mb-0.5">تزریق کامنت‌های اخیر کاربران:</strong>
-                نظرات و بررسی‌های کاربران به عنوان محتوای متنی غنی به توضیحات صفحه اضافه می‌شود تا گوگل صفحات مانهوا را فعال و زنده تشخیص دهد.
+                <strong className="text-white block mb-0.5">قابلیت ویرایش و تغییر توسط ادمین مربوطه:</strong>
+                اگر ادمین خواست می‌تواند سئوی اختصاصی برای هر مانهوا یا چپتر وارد کند تا سئوی اتوماتیک اورراید (جایگزین) شود.
               </p>
             </div>
 
@@ -329,20 +484,20 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
                 <Check size={12} />
               </div>
               <p className="text-xs text-zinc-300 leading-relaxed">
-                <strong className="text-white block mb-0.5">مخفی‌سازی هوشمند کلمات کلیدی:</strong>
-                کلمات طلایی <span className="text-amber-400">مانهوا، مانگا، مانها، کمیک، کمیک بوک، انیمه</span> به همراه اسم سایت در کدهای پایه صفحات کارها جاسازی شده اما از دید کاربر مخفی هستند تا بدون ایجاد شلوغی بصری، رتبه ۱ گوگل را دریافت کنید.
+                <strong className="text-white block mb-0.5">داده‌های ساختاریافته JSON-LD:</strong>
+                ربات گوگل صفحات کارها را به عنوان ComicSeries و چپترها را به عنوان ComicIssue تشخیص می‌دهد و ستاره و مشخصات کامل آن را در نتایج گوگل قرار می‌دهد.
               </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Series Management Panel */}
+      {/* Series & Chapter Management Panel */}
       <div className="bg-black/25 border border-white/5 rounded-2xl p-6 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-white/5 pb-4">
           <div>
-            <h3 className="font-black text-white text-base">مدیریت سئو کارها و مانهواها به صورت مجزا</h3>
-            <p className="text-zinc-500 text-[10px] mt-1">تغییر تگ‌های اختصاصی و ایجاد اورراید برای تک‌تک مانهواها و مانگاها</p>
+            <h3 className="font-black text-white text-base">مدیریت سئو مانهواها و چپترها به صورت مجزا</h3>
+            <p className="text-zinc-500 text-[10px] mt-1">امکان بهینه‌سازی و تنظیم متاتگ‌های سفارشی برای هر کار و چپترهای آن</p>
           </div>
 
           {/* Search Box */}
@@ -362,7 +517,7 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
 
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
           {/* Series Selection List */}
-          <div className="xl:col-span-4 border border-white/5 rounded-xl max-h-[480px] overflow-y-auto divide-y divide-white/5 bg-zinc-900/10 custom-scrollbar">
+          <div className="xl:col-span-4 border border-white/5 rounded-xl max-h-[520px] overflow-y-auto divide-y divide-white/5 bg-zinc-900/10 custom-scrollbar">
             {filteredSeries.length === 0 ? (
               <div className="p-8 text-center text-zinc-500 text-xs">موردی یافت نشد.</div>
             ) : (
@@ -391,12 +546,12 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
             )}
           </div>
 
-          {/* Series SEO Details Editor */}
-          <div className="xl:col-span-8 bg-zinc-900/15 border border-white/5 rounded-xl p-5 md:p-6 min-h-[480px] flex flex-col justify-between">
+          {/* Details Editor */}
+          <div className="xl:col-span-8 bg-zinc-900/15 border border-white/5 rounded-xl p-5 md:p-6 min-h-[520px] flex flex-col justify-between">
             {selectedSeries ? (
               <div className="space-y-6">
-                {/* Series Banner header */}
-                <div className="flex items-center justify-between border-b border-white/5 pb-4">
+                {/* Series Banner header & Tabs */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
                   <div className="flex items-center gap-4">
                     <img src={selectedSeries.cover} alt={selectedSeries.title} className="w-12 h-16 object-cover rounded-xl border border-white/10" />
                     <div>
@@ -405,96 +560,192 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
                     </div>
                   </div>
 
-                  <button
-                    onClick={handleAutoGenerate}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-black rounded-lg font-black text-[10px] transition-colors shadow-lg shadow-amber-500/10"
-                  >
-                    <Sparkles size={11} />
-                    تولید هوشمند سئو
-                  </button>
+                  <div className="flex items-center bg-black/40 border border-white/5 p-1 rounded-xl gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('series')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'series' ? 'bg-[var(--color-asura-accent)] text-white' : 'text-zinc-400 hover:text-white'}`}
+                    >
+                      <Layers size={13} />
+                      سئوی کل اثر
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('chapters')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'chapters' ? 'bg-[var(--color-asura-accent)] text-white' : 'text-zinc-400 hover:text-white'}`}
+                    >
+                      <BookOpen size={13} />
+                      سئوی تک‌تک چپترها ({chaptersList.length})
+                    </button>
+                  </div>
                 </div>
 
-                {/* Overrides form */}
-                <form onSubmit={handleSaveSeriesSeo} className="space-y-4">
-                  <div>
-                    <label className="block text-zinc-400 text-xs font-bold mb-1.5">عنوان سئو سفارشی (Title Override)</label>
-                    <input
-                      type="text"
-                      value={customTitle}
-                      onChange={(e) => setCustomTitle(e.target.value)}
-                      placeholder="عنوان سفارشی برای نتایج گوگل"
-                      className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-lg px-3 py-2 text-xs text-white outline-none transition-all"
-                    />
-                    <div className="flex justify-between text-[10px] text-zinc-500 mt-1">
-                      <span>طول ایده‌آل زیر ۶۰ کاراکتر است تا در نتایج گوگل کوتاه نشود.</span>
-                      <span className={customTitle.length > 60 ? "text-amber-500 font-mono" : "text-zinc-500 font-mono"}>
-                        {customTitle.length} کاراکتر
-                      </span>
+                {/* TAB 1: SERIES SEO */}
+                {activeTab === 'series' && (
+                  <form onSubmit={handleSaveSeriesSeo} className="space-y-4">
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleAutoGenerateSeries}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-black rounded-lg font-black text-[10px] transition-colors shadow-lg shadow-amber-500/10"
+                      >
+                        <Sparkles size={11} />
+                        تولید هوشمند سئوی اثر
+                      </button>
                     </div>
-                  </div>
 
-                  <div>
-                    <label className="block text-zinc-400 text-xs font-bold mb-1.5">توضیحات متای سفارشی (Description Override)</label>
-                    <textarea
-                      value={customDescription}
-                      onChange={(e) => setCustomDescription(e.target.value)}
-                      rows={3}
-                      placeholder="توضیحات سفارشی کوتاه جهت جلب توجه کاربر در نتایج جستجو"
-                      className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-lg px-3 py-2 text-xs text-white outline-none transition-all resize-none leading-relaxed"
-                    />
-                    <div className="flex justify-between text-[10px] text-zinc-500 mt-1">
-                      <span>طول ایده‌آل زیر ۱۵۵ کاراکتر است تا تماماً نمایش داده شود.</span>
-                      <span className={customDescription.length > 155 ? "text-amber-500 font-mono" : "text-zinc-500 font-mono"}>
-                        {customDescription.length} کاراکتر
-                      </span>
+                    <div>
+                      <label className="block text-zinc-400 text-xs font-bold mb-1.5">عنوان سئو سفارشی (Title Override)</label>
+                      <input
+                        type="text"
+                        value={customTitle}
+                        onChange={(e) => setCustomTitle(e.target.value)}
+                        placeholder="عنوان سفارشی برای نتایج گوگل"
+                        className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-lg px-3 py-2 text-xs text-white outline-none transition-all"
+                      />
                     </div>
-                  </div>
 
-                  <div>
-                    <label className="block text-zinc-400 text-xs font-bold mb-1.5">برچسب‌های کلمات کلیدی (Keywords Override)</label>
-                    <input
-                      type="text"
-                      value={customKeywords}
-                      onChange={(e) => setCustomKeywords(e.target.value)}
-                      placeholder="برچسب‌های هدف این کار..."
-                      className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-lg px-3 py-2 text-xs text-white outline-none transition-all"
-                    />
-                    <p className="text-[9px] text-zinc-500 mt-1">با کاما انگلیسی (,) از هم جدا کنید.</p>
-                  </div>
+                    <div>
+                      <label className="block text-zinc-400 text-xs font-bold mb-1.5">توضیحات متای سفارشی (Description Override)</label>
+                      <textarea
+                        value={customDescription}
+                        onChange={(e) => setCustomDescription(e.target.value)}
+                        rows={3}
+                        placeholder="توضیحات سفارشی کوتاه جهت جلب توجه کاربر در نتایج جستجو"
+                        className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-lg px-3 py-2 text-xs text-white outline-none transition-all resize-none leading-relaxed"
+                      />
+                    </div>
 
-                  {/* Real-time Google SERP Preview Mockup */}
-                  <div className="mt-6 border border-zinc-800/60 bg-black/40 rounded-xl p-4 space-y-2">
-                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block">پیش‌نمایش زنده در گوگل</span>
-                    
-                    <div className="font-sans text-right" dir="ltr">
-                      <div className="flex items-center gap-1 text-[11px] text-[#202124] dark:text-[#dadce0] truncate mb-0.5">
-                        <span className="bg-[#202124]/5 dark:bg-white/5 p-1 rounded-full text-[9px] text-zinc-500">G</span>
-                        <span>{window.location.hostname || "mangata.com"} &rsaquo; series &rsaquo; {selectedSeries.id}</span>
+                    <div>
+                      <label className="block text-zinc-400 text-xs font-bold mb-1.5">برچسب‌های کلمات کلیدی (Keywords Override)</label>
+                      <input
+                        type="text"
+                        value={customKeywords}
+                        onChange={(e) => setCustomKeywords(e.target.value)}
+                        placeholder="برچسب‌های هدف این کار..."
+                        className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-lg px-3 py-2 text-xs text-white outline-none transition-all"
+                      />
+                    </div>
+
+                    {/* Real-time Google SERP Preview Mockup */}
+                    <div className="mt-4 border border-zinc-800/60 bg-black/40 rounded-xl p-4 space-y-2">
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest block">پیش‌نمایش زنده در گوگل</span>
+                      <div className="font-sans text-right" dir="ltr">
+                        <div className="text-[11px] text-zinc-400 truncate mb-0.5">
+                          {siteOrigin} &rsaquo; series &rsaquo; {selectedSeries.id}
+                        </div>
+                        <h5 className="text-[15px] text-[#8ab4f8] hover:underline cursor-pointer font-sans truncate font-medium">
+                          {customTitle || `${selectedSeries.type === "Manga" ? "مانگا" : selectedSeries.type === "Manhua" ? "مانها" : "مانهوا"} ${selectedSeries.title} با ترجمه فارسی | ${siteName}`}
+                        </h5>
+                        <p className="text-[12px] text-zinc-400 font-sans leading-relaxed line-clamp-2">
+                          {customDescription || `دانلود و خواندن آنلاین ${selectedSeries.type === "Manga" ? "مانگا" : selectedSeries.type === "Manhua" ? "مانها" : "مانهوا"} ${selectedSeries.title} با بهترین کیفیت و لینک مستقیم در وبسایت ${siteName}.`}
+                        </p>
                       </div>
-                      
-                      <h5 className="text-[16px] text-[#1a0dab] dark:text-[#8ab4f8] hover:underline cursor-pointer font-sans truncate font-medium">
-                        {customTitle || `${selectedSeries.type === "Manga" ? "مانگا" : selectedSeries.type === "Manhua" ? "مانها" : "مانهوا"} ${selectedSeries.title} با ترجمه فارسی | ${siteName}`}
-                      </h5>
-                      
-                      <p className="text-[13px] text-[#4d5156] dark:text-[#bdc1c6] font-sans leading-relaxed line-clamp-2">
-                        {customDescription || `دانلود و خواندن آنلاین ${selectedSeries.type === "Manga" ? "مانگا" : selectedSeries.type === "Manhua" ? "مانها" : "مانهوا"} ${selectedSeries.title} با بهترین کیفیت و لینک مستقیم در وبسایت ${siteName}.`}
-                      </p>
                     </div>
-                  </div>
 
-                  <button
-                    type="submit"
-                    disabled={seriesSaving}
-                    className="w-full mt-4 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent)]/90 disabled:opacity-50 text-white font-black py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2"
-                  >
-                    {seriesSaving ? (
-                      <RefreshCw size={12} className="animate-spin" />
-                    ) : seriesSuccess ? (
-                      <Check size={12} />
-                    ) : null}
-                    {seriesSuccess ? "ذخیره موفقیت‌آمیز بود" : "ثبت و نهایی‌سازی سئو کار"}
-                  </button>
-                </form>
+                    <button
+                      type="submit"
+                      disabled={seriesSaving}
+                      className="w-full mt-4 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent)]/90 disabled:opacity-50 text-white font-black py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2"
+                    >
+                      {seriesSaving ? <RefreshCw size={12} className="animate-spin" /> : seriesSuccess ? <Check size={12} /> : null}
+                      {seriesSuccess ? "ذخیره موفقیت‌آمیز بود" : "ثبت و نهایی‌سازی سئو اثر"}
+                    </button>
+                  </form>
+                )}
+
+                {/* TAB 2: CHAPTERS SEO */}
+                {activeTab === 'chapters' && (
+                  <div className="space-y-4">
+                    {loadingChapters ? (
+                      <div className="py-12 text-center text-zinc-500 text-xs flex items-center justify-center gap-2">
+                        <RefreshCw size={16} className="animate-spin text-[var(--color-asura-accent)]" />
+                        در حال بارگذاری لیست چپترها...
+                      </div>
+                    ) : chaptersList.length === 0 ? (
+                      <div className="py-12 text-center text-zinc-500 text-xs bg-black/20 rounded-xl border border-white/5">
+                        هیچ چپتری برای این مانهوا ثبت نشده است.
+                      </div>
+                    ) : (
+                      <form onSubmit={handleSaveChapterSeo} className="space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-black/30 p-3 rounded-xl border border-white/5">
+                          <div className="flex-1">
+                            <label className="block text-zinc-400 text-[11px] font-bold mb-1">انتخاب چپتر جهت سئو</label>
+                            <select
+                              value={selectedChapter?.id || ''}
+                              onChange={(e) => {
+                                const found = chaptersList.find(c => c.id === e.target.value);
+                                setSelectedChapter(found || null);
+                              }}
+                              className="w-full bg-zinc-900 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-lg px-3 py-1.5 text-xs text-white outline-none"
+                            >
+                              {chaptersList.map((ch) => (
+                                <option key={ch.id} value={ch.id}>
+                                  چپتر {ch.number} {ch.title ? `(${ch.title})` : ''} {ch.seoTitle ? '✔ [سئو دارد]' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={handleAutoGenerateChapter}
+                            className="self-end sm:self-center flex items-center gap-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-black rounded-lg font-black text-[10px] transition-colors shrink-0 shadow-lg shadow-amber-500/10"
+                          >
+                            <Sparkles size={11} />
+                            تولید هوشمند سئوی چپتر
+                          </button>
+                        </div>
+
+                        {selectedChapter && (
+                          <>
+                            <div>
+                              <label className="block text-zinc-400 text-xs font-bold mb-1.5">عنوان سئوی چپتر (Title Override)</label>
+                              <input
+                                type="text"
+                                value={chapterSeoTitle}
+                                onChange={(e) => setChapterSeoTitle(e.target.value)}
+                                placeholder={`چپتر ${selectedChapter.number} از ${selectedSeries.title} با ترجمه فارسی | ${siteName}`}
+                                className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-lg px-3 py-2 text-xs text-white outline-none transition-all"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-zinc-400 text-xs font-bold mb-1.5">توضیحات متای چپتر (Description Override)</label>
+                              <textarea
+                                value={chapterSeoDescription}
+                                onChange={(e) => setChapterSeoDescription(e.target.value)}
+                                rows={3}
+                                placeholder="توضیحات اختصاصی کوتاه برای این چپتر در گوگل..."
+                                className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-lg px-3 py-2 text-xs text-white outline-none transition-all resize-none leading-relaxed"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-zinc-400 text-xs font-bold mb-1.5">کلمات کلیدی چپتر (Keywords Override)</label>
+                              <input
+                                type="text"
+                                value={chapterSeoKeywords}
+                                onChange={(e) => setChapterSeoKeywords(e.target.value)}
+                                placeholder={`چپتر ${selectedChapter.number} ${selectedSeries.title}, دانلود چپتر ${selectedChapter.number}...`}
+                                className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-lg px-3 py-2 text-xs text-white outline-none transition-all"
+                              />
+                            </div>
+
+                            <button
+                              type="submit"
+                              disabled={chapterSaving}
+                              className="w-full mt-4 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent)]/90 disabled:opacity-50 text-white font-black py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2"
+                            >
+                              {chapterSaving ? <RefreshCw size={12} className="animate-spin" /> : chapterSuccess ? <Check size={12} /> : null}
+                              {chapterSuccess ? "سئوی چپتر با موفقیت ثبت شد" : `ذخیره سئوی چپتر ${selectedChapter.number}`}
+                            </button>
+                          </>
+                        )}
+                      </form>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-zinc-500 space-y-3">
@@ -502,7 +753,7 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
                   <Globe size={28} />
                 </div>
                 <div className="text-xs font-bold text-zinc-300">انتخاب مانهوا جهت بهینه‌سازی سئو</div>
-                <p className="text-[10px] text-zinc-500 max-w-sm">از لیست سمت راست، یکی از مانهواها را انتخاب نمایید تا بتوانید متاتگ‌های اختصاصی آن را تغییر دهید یا به صورت هوشمند بسازید.</p>
+                <p className="text-[10px] text-zinc-500 max-w-sm">از لیست سمت راست، یکی از مانهواها را انتخاب نمایید تا بتوانید متاتگ‌های اختصاصی اثر یا چپترهای آن را تغییر دهید یا به صورت هوشمند بسازید.</p>
               </div>
             )}
           </div>

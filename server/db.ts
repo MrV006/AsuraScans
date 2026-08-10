@@ -74,6 +74,9 @@ export interface Chapter {
   submissions?: any[];
   contributors?: any;
   publishAt?: any;
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -576,6 +579,9 @@ class DatabaseManager {
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS isPending TINYINT(1) DEFAULT 0`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS submissions TEXT`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS contributors TEXT`,
+        `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS seoTitle TEXT`,
+        `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS seoDescription TEXT`,
+        `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS seoKeywords TEXT`,
         `ALTER TABLE purchased_chapters ADD COLUMN IF NOT EXISTS chapterNumber DOUBLE`
       ];
 
@@ -1568,13 +1574,13 @@ class DatabaseManager {
     if (this.isUsingMySQL && this.pool) {
       if (isEdit) {
         await this.pool.execute(
-          `UPDATE chapters SET number = ?, title = ?, images = ?, isPending = ?, submissions = ?, contributors = ?, updatedAt = ? WHERE seriesId = ? AND id = ?`,
-          [ch.number, ch.title || '', imagesStr, isPendingVal, submissionsStr, contributorsStr, now, ch.seriesId, ch.id]
+          `UPDATE chapters SET number = ?, title = ?, images = ?, isPending = ?, submissions = ?, contributors = ?, seoTitle = ?, seoDescription = ?, seoKeywords = ?, updatedAt = ? WHERE seriesId = ? AND id = ?`,
+          [ch.number, ch.title || '', imagesStr, isPendingVal, submissionsStr, contributorsStr, ch.seoTitle || null, ch.seoDescription || null, ch.seoKeywords || null, now, ch.seriesId, ch.id]
         );
       } else {
         await this.pool.execute(
-          `INSERT INTO chapters (id, seriesId, number, title, images, views, isPending, submissions, contributors, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [ch.id, ch.seriesId, ch.number, ch.title || '', imagesStr, ch.views || 0, isPendingVal, submissionsStr, contributorsStr, now, now]
+          `INSERT INTO chapters (id, seriesId, number, title, images, views, isPending, submissions, contributors, seoTitle, seoDescription, seoKeywords, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [ch.id, ch.seriesId, ch.number, ch.title || '', imagesStr, ch.views || 0, isPendingVal, submissionsStr, contributorsStr, ch.seoTitle || null, ch.seoDescription || null, ch.seoKeywords || null, now, now]
         );
       }
       return (await this.getChapterById(ch.seriesId, ch.id))!;
@@ -1590,6 +1596,9 @@ class DatabaseManager {
       isPending: ch.isPending === true || ch.isPending === 1,
       submissions: ch.submissions || [],
       contributors: ch.contributors || {},
+      seoTitle: ch.seoTitle || '',
+      seoDescription: ch.seoDescription || '',
+      seoKeywords: ch.seoKeywords || '',
       createdAt: ch.createdAt || now,
       updatedAt: now
     };
@@ -3336,7 +3345,9 @@ class DatabaseManager {
       notifications: Array.isArray(data.notifications) ? data.notifications : [],
       wallet_transactions: Array.isArray(data.wallet_transactions) ? data.wallet_transactions : [],
       purchased_chapters: Array.isArray(data.purchased_chapters) ? data.purchased_chapters : [],
-      settlement_requests: Array.isArray(data.settlement_requests) ? data.settlement_requests : []
+      settlement_requests: Array.isArray(data.settlement_requests) ? data.settlement_requests : [],
+      tickets: Array.isArray(data.tickets) ? data.tickets : [],
+      ticket_messages: Array.isArray(data.ticket_messages) ? data.ticket_messages : []
     };
 
     if (this.isUsingMySQL && this.pool) {

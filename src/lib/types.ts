@@ -27,6 +27,9 @@ export interface Chapter {
   submissions?: any[];
   contributors?: any;
   sortMode?: 'natural' | 'input';
+  seoTitle?: string;
+  seoDescription?: string;
+  seoKeywords?: string;
   createdAt: any;
   updatedAt: any;
 }

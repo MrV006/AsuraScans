@@ -18,6 +18,7 @@ import { apiClient } from "../lib/apiClient";
 import { Series } from "../lib/types";
 import { SeriesCardSkeleton, HeroSkeleton } from "../components/Skeletons";
 import { SeriesCard } from "../components/SeriesCard";
+import { SEOHead } from "../components/SEOHead";
 
 export default function Home() {
   // State for homepage lists (initial loads up to 8 items to detect if there are more than 7)
@@ -256,6 +257,22 @@ export default function Home() {
 
   return (
     <Layout>
+      <SEOHead 
+        title="مانگاتا | پلتفرم هوشمند ترجمه، مدیریت و خوانش مانهوا و مانگا"
+        description="مانگاتا (MANGATA) مرجع اصلی و زنده خواندن آنلاین و دانلود مانهوا، مانگا، مانها و کمیک با ترجمه اختصاصی، کیفیت HD و به روزرسانی روزانه."
+        keywords="مانهوا, مانگا, مانها, کمیک, کمیک بوک, انیمه, مانگاتا, خواندن مانهوا, ترجمه مانهوا, mangata"
+        jsonLd={{
+          "@context": "https://schema.org",
+          "@type": "WebSite",
+          "name": "مانگاتا",
+          "url": window.location.origin,
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": `${window.location.origin}/search?q={search_term_string}`,
+            "query-input": "required name=search_term_string"
+          }
+        }}
+      />
       {/* 1. EXPANDED VERTICAL SECTION WITH LAZY LOADING (6 BY 6) */}
       {expandedSection ? (
         <div className="max-w-7xl mx-auto px-4 md:px-8 py-10 text-right" dir="rtl">
@@ -331,12 +348,13 @@ export default function Home() {
                       return (
                         <motion.div
                            key={series.id}
-                           initial={{ opacity: 0, scale: 0.98 }}
-                           animate={{ opacity: 1, scale: 1 }}
-                           exit={{ opacity: 0, scale: 1.02 }}
-                           transition={{ duration: 0.4, ease: "easeOut" }}
+                           initial={{ opacity: 0 }}
+                           animate={{ opacity: 1 }}
+                           exit={{ opacity: 0 }}
+                           transition={{ duration: 0.3, ease: "easeInOut" }}
                            className="absolute inset-0 w-full h-full"
                            dir="rtl"
+                           style={{ transform: 'translateZ(0)' }}
                         >
                           {/* Full-bleed clickable slide background Link */}
                           <Link to={`/series/${seriesSlugOrId}`} className="absolute inset-0 z-25 cursor-pointer" />
@@ -345,8 +363,10 @@ export default function Home() {
                           <img 
                             src={displayImage} 
                             alt={series.title} 
-                            className="absolute inset-0 w-full h-full object-cover object-center opacity-70 transition-transform duration-700 ease-out hover:scale-105" 
+                            className="absolute inset-0 w-full h-full object-cover object-center opacity-70 transition-transform duration-500 ease-out hover:scale-105" 
                             referrerPolicy="no-referrer"
+                            loading="eager"
+                            decoding="async"
                           />
                           
                           {/* Slide details overlay */}
@@ -359,7 +379,7 @@ export default function Home() {
                                   {series.type || "مانهوا"}
                                 </span>
                                 {(Array.isArray(series.genres) ? series.genres : (typeof series.genres === "string" ? series.genres.split(",") : [])).slice(0, 3).map(g => (
-                                  <span key={g} className="bg-black/60 backdrop-blur-md text-zinc-200 text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-white/10">
+                                  <span key={g} className="bg-black/80 text-zinc-200 text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-white/10">
                                     {g.trim()}
                                   </span>
                                 ))}
@@ -379,7 +399,7 @@ export default function Home() {
                                   <span>شروع خواندن</span>
                                   <ChevronLeft size={16} />
                                 </Link>
-                                <span className="text-xs font-bold text-amber-400 bg-black/60 backdrop-blur-md px-3 py-2 rounded-xl border border-white/10 flex items-center gap-1">
+                                <span className="text-xs font-bold text-amber-400 bg-black/80 px-3 py-2 rounded-xl border border-white/10 flex items-center gap-1">
                                   ★ {series.rating || 5.0}
                                 </span>
                               </div>
@@ -395,19 +415,19 @@ export default function Home() {
                 {/* Nav Controls */}
                 <button 
                   onClick={handlePrevSlide}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-black/50 hover:bg-[var(--color-asura-accent)] active:scale-95 text-white rounded-xl flex items-center justify-center transition-all duration-200 border border-white/10 backdrop-blur-md"
+                  className="absolute left-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-black/75 hover:bg-[var(--color-asura-accent)] active:scale-95 text-white rounded-xl flex items-center justify-center transition-all duration-200 border border-white/10"
                 >
                   <ChevronLeft size={20} />
                 </button>
                 <button 
                   onClick={handleNextSlide}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-black/50 hover:bg-[var(--color-asura-accent)] active:scale-95 text-white rounded-xl flex items-center justify-center transition-all duration-200 border border-white/10 backdrop-blur-md"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-black/75 hover:bg-[var(--color-asura-accent)] active:scale-95 text-white rounded-xl flex items-center justify-center transition-all duration-200 border border-white/10"
                 >
                   <ChevronRight size={20} />
                 </button>
 
                 {/* Slide dots */}
-                <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex gap-2 bg-black/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
+                <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex gap-2 bg-black/75 px-3 py-1.5 rounded-full border border-white/10">
                   {sliderItems.map((_, idx) => (
                     <button
                       key={idx}

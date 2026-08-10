@@ -13,7 +13,29 @@ export function useSeriesList() {
       if (!data || !Array.isArray(data)) {
         throw new Error(data?.error || "اطلاعات مانهوا یافت نشد یا ساختار داده نادرست است.");
       }
+      
+      // If series already include attached chapters/chaptersCount, avoid N extra HTTP calls
+      const needsChaptersFetch = data.some((s: any) => !s.chapters || !Array.isArray(s.chapters));
+
+      if (!needsChaptersFetch) {
+        setSeries(data.map((s: any) => ({
+          ...s,
+          totalChapters: (s.chapters && s.chapters.length) || s.chaptersCount || s.totalChapters || 0,
+          chaptersCount: (s.chapters && s.chapters.length) || s.chaptersCount || s.totalChapters || 0,
+        })));
+        setLoading(false);
+        return;
+      }
+
+      // Parallel fetch only if needed
       const fullList = await Promise.all(data.map(async (s: any) => {
+        if (s.chapters && Array.isArray(s.chapters) && s.chapters.length > 0) {
+          return {
+            ...s,
+            totalChapters: s.chapters.length,
+            chaptersCount: s.chapters.length,
+          };
+        }
         try {
           const chapters = await apiClient.getChapters(s.id);
           const validChs = Array.isArray(chapters) ? chapters : [];
@@ -24,7 +46,6 @@ export function useSeriesList() {
             chapters: validChs
           };
         } catch (chapterErr) {
-          console.error(`Error fetching chapters for series ${s.id}:`, chapterErr);
           return {
             ...s,
             totalChapters: s.totalChapters || 0,
@@ -33,6 +54,7 @@ export function useSeriesList() {
           };
         }
       }));
+
       setSeries(fullList);
       setLoading(false);
     } catch (err: any) {
@@ -44,7 +66,6 @@ export function useSeriesList() {
   useEffect(() => {
     fetchSeries();
     
-    // Listen for websocket updates for real-time reactivity
     const socket = getSocketInstance();
     socket.on("series:updated", fetchSeries);
     socket.on("series:deleted", fetchSeries);
@@ -57,7 +78,7 @@ export function useSeriesList() {
     };
   }, []);
 
-  return { series, loading, error };
+  return { series, loading, error, mutate: fetchSeries };
 }
 
 export function useSeriesOverview(id?: string) {
@@ -70,15 +91,19 @@ export function useSeriesOverview(id?: string) {
       return;
     }
     try {
-      const s = await apiClient.getSeriesById(id);
+      // Parallel fetch series details AND chapters
+      const [s, chapters] = await Promise.all([
+        apiClient.getSeriesById(id),
+        apiClient.getChapters(id).catch(() => [])
+      ]);
+
       if (s) {
-        const chapters = await apiClient.getChapters(id);
-        s.chapters = chapters;
+        s.chapters = Array.isArray(chapters) ? chapters : [];
       }
       setSeries(s);
       setLoading(false);
     } catch (err) {
-      console.error(err);
+      console.error("Error fetching series overview:", err);
       setLoading(false);
     }
   };
@@ -88,7 +113,7 @@ export function useSeriesOverview(id?: string) {
 
     const socket = getSocketInstance();
     const handleUpdate = (data: any) => {
-      if (data.seriesId === id) {
+      if (!data || data.seriesId === id || data.id === id) {
         fetchOverview();
       }
     };

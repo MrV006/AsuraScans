@@ -3,11 +3,12 @@ import { useSeriesOverview } from '../hooks/useSeries';
 import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../hooks/useUserActivity';
 import { ChevronLeft, ChevronRight, Menu, Home, ArrowUp, Settings as SettingsIcon, Flag, AlertTriangle, X, Check, Send } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Comments } from '../components/Comments';
 import { apiClient, getSocketInstance } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 import { ReaderSkeleton } from '../components/Skeletons';
+import { SEOHead } from '../components/SEOHead';
 
 
 // Helper for converting Persian digits to English digits
@@ -185,8 +186,8 @@ export default function Reader() {
     
     const observerOptions = {
       root: null,
-      rootMargin: '120px 0px 120px 0px', // detects slightly before entering the screen
-      threshold: 0.05
+      rootMargin: '1200px 0px 1200px 0px', // detects 1200px before entering viewport for instant pre-rendering
+      threshold: 0.01
     };
 
     const observer = new IntersectionObserver((entries) => {
@@ -219,6 +220,26 @@ export default function Reader() {
       observer.disconnect();
     };
   }, [sortedImages, readingMode, chapterId]);
+
+  // Proactive forward preloader: Preloads upcoming 8 pages into browser HTTP cache ahead of user's reading position
+  useEffect(() => {
+    if (!sortedImages || sortedImages.length === 0) return;
+
+    let refIndex = activePageIndex;
+    if (readingMode === 'vertical' && visibleIndices.size > 0) {
+      const visibleArray = Array.from(visibleIndices) as number[];
+      refIndex = Math.max(...visibleArray); // highest scrolled page index
+    }
+
+    // Preload current page + next 8 pages in background
+    const bufferSize = 8;
+    for (let i = Math.max(0, refIndex); i <= refIndex + bufferSize && i < sortedImages.length; i++) {
+      if (sortedImages[i]) {
+        const img = new Image();
+        img.src = sortedImages[i];
+      }
+    }
+  }, [visibleIndices, activePageIndex, readingMode, sortedImages]);
 
   // Progressive prioritized loading scheduler
   useEffect(() => {
@@ -582,6 +603,13 @@ export default function Reader() {
 
   return (
     <div className="bg-[#0a0a0c] min-h-screen text-zinc-300">
+      <SEOHead 
+        title={chapter?.seoTitle || (series?.title && chapter?.number ? `چپتر ${chapter.number}${chapter.title ? ' - ' + chapter.title : ''} از ${series.type === 'Manga' ? 'مانگا' : series.type === 'Manhua' ? 'مانها' : 'مانهوا'} ${series.title} با ترجمه فارسی | ${settings?.siteName || 'مانگاتا'}` : undefined)}
+        description={chapter?.seoDescription || (series?.title ? `مطالعه آنلاین و دانلود چپتر ${chapter?.number} از ${series.type === 'Manga' ? 'مانگا' : series.type === 'Manhua' ? 'مانها' : 'مانهوا'} ${series.title} با کیفیت عالی و ترجمه فارسی اختصاصی.` : undefined)}
+        keywords={chapter?.seoKeywords || (series?.title ? `چپتر ${chapter?.number} ${series.title}, دانلود چپتر ${chapter?.number} ${series.title}, خواندن آنلاین ${series.title} چپتر ${chapter?.number}, ${settings?.siteName || 'مانگاتا'}` : undefined)}
+        image={chapter?.images?.[0] || series?.cover}
+        type="article"
+      />
       {/* Top Navbar */}
       <div className={`fixed top-0 left-0 right-0 bg-[#0f0f12] border-b border-white/5 z-50 transition-transform duration-300 ${showNav ? 'translate-y-0' : '-translate-y-full'}`}>
         <div className="max-w-4xl mx-auto px-4 h-12 flex items-center justify-between">
@@ -764,36 +792,40 @@ export default function Reader() {
                     key={i} 
                     data-index={i} 
                     className="reader-image-wrapper w-full relative flex justify-center items-center"
-                    style={{ minHeight: loadedIndices.has(i) ? 'auto' : '450px' }}
+                    style={{ 
+                      minHeight: loadedIndices.has(i) ? 'auto' : '350px',
+                      contentVisibility: 'auto',
+                      containIntrinsicSize: '800px'
+                    }}
                   >
                     {/* Beautiful Loader Component */}
                     {!loadedIndices.has(i) && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#111217]/65 backdrop-blur-sm z-10 py-16 min-h-[450px] border border-white/5 rounded-2xl animate-fade-in w-full">
-                        <div className="w-12 h-12 border-4 border-zinc-800 border-t-[var(--color-asura-accent)] rounded-full animate-spin mb-4"></div>
-                        <p className="text-zinc-400 text-xs font-black font-sans">در حال بارگذاری صفحه {(i + 1).toLocaleString('fa-IR')}...</p>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#111217]/65 backdrop-blur-sm z-10 py-16 min-h-[350px] border border-white/5 rounded-2xl animate-fade-in w-full">
+                        <div className="w-10 h-10 border-4 border-zinc-800 border-t-[var(--color-asura-accent)] rounded-full animate-spin mb-3"></div>
+                        <p className="text-zinc-400 text-[11px] font-black font-sans">در حال بارگذاری صفحه {(i + 1).toLocaleString('fa-IR')}...</p>
                       </div>
                     )}
 
                     {/* Image rendering */}
-                    {(loadedIndices.has(i) || loadingIndex === i) && (
-                      <div className="relative w-full overflow-hidden select-none">
-                        <img 
-                          src={img} 
-                          alt={`Page ${i + 1}`} 
-                          onLoad={() => handleImageLoad(i)}
-                          onError={() => handleImageError(i)}
-                          className={`object-contain block w-full mx-auto transition-opacity duration-500 select-none pointer-events-none ${loadedIndices.has(i) ? 'opacity-100' : 'opacity-0 h-0 w-0'}`}
-                          referrerPolicy="no-referrer"
-                        />
-                        {/* Perfect transparent protector layer cover */}
-                        <div 
-                          className="absolute inset-0 z-20 cursor-default select-none bg-transparent"
-                          onContextMenu={(e) => e.preventDefault()}
-                          onDragStart={(e) => e.preventDefault()}
-                          style={{ userSelect: 'none', WebkitUserSelect: 'none', pointerEvents: 'auto' }}
-                        />
-                      </div>
-                    )}
+                    <div className="relative w-full overflow-hidden select-none">
+                      <img 
+                        src={img} 
+                        alt={`Page ${i + 1}`} 
+                        loading={i < 3 ? 'eager' : 'lazy'}
+                        decoding="async"
+                        onLoad={() => handleImageLoad(i)}
+                        onError={() => handleImageError(i)}
+                        className={`object-contain block w-full mx-auto transition-opacity duration-300 select-none pointer-events-none ${loadedIndices.has(i) ? 'opacity-100' : 'opacity-0 h-0 w-0'}`}
+                        referrerPolicy="no-referrer"
+                      />
+                      {/* Perfect transparent protector layer cover */}
+                      <div 
+                        className="absolute inset-0 z-20 cursor-default select-none bg-transparent"
+                        onContextMenu={(e) => e.preventDefault()}
+                        onDragStart={(e) => e.preventDefault()}
+                        style={{ userSelect: 'none', WebkitUserSelect: 'none', pointerEvents: 'auto' }}
+                      />
+                    </div>
                   </div>
                 ))}
               </div>

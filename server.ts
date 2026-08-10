@@ -2776,6 +2776,69 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
   });
 
 
+  // Dynamic XML Sitemap Generator for Google Search Console
+  app.get('/sitemap.xml', async (req, res) => {
+    try {
+      const siteUrl = `${req.protocol}://${req.get('host') || 'localhost'}`;
+      const seriesList = await dbManager.getSeries();
+
+      const escapeXml = (unsafe: string) => unsafe.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+      xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n`;
+
+      const staticPages = [
+        { url: '/', priority: '1.0', changefreq: 'daily' },
+        { url: '/search', priority: '0.9', changefreq: 'daily' },
+        { url: '/cooperation', priority: '0.7', changefreq: 'weekly' },
+        { url: '/leaderboard', priority: '0.6', changefreq: 'weekly' },
+        { url: '/support', priority: '0.5', changefreq: 'monthly' },
+        { url: '/terms', priority: '0.3', changefreq: 'yearly' },
+        { url: '/privacy', priority: '0.3', changefreq: 'yearly' },
+      ];
+
+      for (const p of staticPages) {
+        xml += `  <url>\n    <loc>${siteUrl}${p.url}</loc>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>\n`;
+      }
+
+      for (const s of (seriesList || [])) {
+        const seriesLoc = `${siteUrl}/series/${s.id}`;
+        const lastMod = s.updatedAt ? new Date(s.updatedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+        xml += `  <url>\n    <loc>${seriesLoc}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n`;
+        if (s.cover) {
+          const coverUrl = s.cover.startsWith('http') ? s.cover : `${siteUrl}${s.cover.startsWith('/') ? '' : '/'}${s.cover}`;
+          xml += `    <image:image>\n      <image:loc>${escapeXml(coverUrl)}</image:loc>\n      <image:title>${escapeXml(s.title)}</image:title>\n    </image:image>\n`;
+        }
+        xml += `  </url>\n`;
+
+        try {
+          const chapters = await dbManager.getChapters(s.id);
+          for (const ch of (chapters || [])) {
+            if (ch.isPending) continue;
+            const chapLoc = `${siteUrl}/series/${s.id}/chapters/${ch.id}`;
+            const chMod = ch.updatedAt ? new Date(ch.updatedAt).toISOString().split('T')[0] : lastMod;
+            xml += `  <url>\n    <loc>${chapLoc}</loc>\n    <lastmod>${chMod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
+          }
+        } catch (err) {}
+      }
+
+      xml += `</urlset>`;
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.send(xml);
+    } catch (err: any) {
+      console.error('Sitemap generation error:', err);
+      res.status(500).send('Error generating sitemap');
+    }
+  });
+
+  // Robots.txt Generator
+  app.get('/robots.txt', (req, res) => {
+    const siteUrl = `${req.protocol}://${req.get('host') || 'localhost'}`;
+    const txt = `User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\n\nSitemap: ${siteUrl}/sitemap.xml\n`;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(txt);
+  });
+
   const isStaticAssetUrl = (urlPath: string) => {
     return /\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|webp|map)$/i.test(urlPath);
   };
