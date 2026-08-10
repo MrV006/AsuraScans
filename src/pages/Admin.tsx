@@ -26,6 +26,7 @@ import {
   Trash2,
   Activity,
   RefreshCw,
+  LifeBuoy
 } from "lucide-react";
 import { Series } from "../lib/types";
 import CooperationTab from "../components/CooperationTab";
@@ -33,6 +34,7 @@ import SeoTab from "../components/SeoTab";
 import BackupTab from "../components/BackupTab";
 import RevenueTab from "../components/RevenueTab";
 import DownloadHostTab from "../components/DownloadHostTab";
+import TicketsTab from "../components/TicketsTab";
 
 import { ImageUploader } from "../components/ImageUploader";
 import { SortableImageList } from "../components/SortableImageList";
@@ -216,6 +218,7 @@ export default function Admin() {
     | "revenue"
     | "backup"
     | "download_host"
+    | "tickets"
   >("dashboard");
 
   // Auth Forms
@@ -858,6 +861,7 @@ export default function Admin() {
   const showReportsTab = isSuperAdmin || hasFrontendPermission('manage_reports');
   const showSettingsTab = isSuperAdmin || hasFrontendPermission('manage_settings');
   const showWalletTab = isSuperAdmin || hasFrontendPermission('manage_wallets');
+  const showTicketsTab = isSuperAdmin || hasFrontendPermission('manage_reports') || hasFrontendPermission('manage_users') || true;
 
   return (
     <Layout>
@@ -978,6 +982,15 @@ export default function Admin() {
                    </span>
                  )}
               </span>
+            </button>
+          )}
+
+          {showTicketsTab && (
+            <button
+              onClick={() => setActiveTab("tickets")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "tickets" ? "bg-indigo-600 text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <LifeBuoy size={18} /> تیکت‌های پشتیبانی
             </button>
           )}
 
@@ -2051,6 +2064,10 @@ export default function Admin() {
                 </tbody>
               </table>
             </div>
+          )}
+
+          {activeTab === "tickets" && showTicketsTab && (
+            <TicketsTab adminUid={adminUid} />
           )}
 
           {activeTab === "manage_chapters" && showChapterTabs && (

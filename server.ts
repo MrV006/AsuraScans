@@ -1954,6 +1954,160 @@ async function startServer() {
   });
 
   // -----------------------------------------------------------------
+  // SUPPORT TICKETS ROUTES
+  // -----------------------------------------------------------------
+
+  app.get("/api/tickets", async (req, res) => {
+    try {
+      const uid = (req.headers['x-user-uid'] || req.headers['x-admin-uid'] || req.query.uid || req.query.adminUid) as string;
+      if (!uid) {
+        return res.status(401).json({ error: "کاربر احراز هویت نشده است." });
+      }
+      const tickets = await dbManager.getTicketsByUser(uid);
+      res.json(tickets);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/tickets", async (req, res) => {
+    try {
+      const uid = (req.headers['x-user-uid'] || req.headers['x-admin-uid'] || req.body.userId || req.query.uid) as string;
+      if (!uid) {
+        return res.status(401).json({ error: "کاربر شناسه معتبر ندارد." });
+      }
+      const { subject, category, priority, content, attachments } = req.body;
+      if (!subject || !content) {
+        return res.status(400).json({ error: "موضوع و متن تیکت الزامی می‌باشد." });
+      }
+
+      let user = await dbManager.getUser(uid);
+      if (!user) {
+        user = await dbManager.getUserByEmail(uid);
+      }
+
+      const ticket = await dbManager.createTicket({
+        userId: uid,
+        userName: user?.displayName || user?.firstName || req.body.userName || "کاربر",
+        userEmail: user?.email || req.body.userEmail || "",
+        userAvatar: user?.avatarUrl || req.body.userAvatar || "",
+        subject,
+        category: category || "other",
+        priority: priority || "medium",
+        content,
+        attachments: attachments || []
+      });
+
+      io.emit("tickets:updated");
+      res.json(ticket);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/tickets/:id", async (req, res) => {
+    try {
+      const ticket = await dbManager.getTicketById(req.params.id);
+      if (!ticket) {
+        return res.status(404).json({ error: "تیکت یافت نشد." });
+      }
+      res.json(ticket);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/tickets/:id/reply", async (req, res) => {
+    try {
+      const ticketId = req.params.id;
+      const uid = (req.headers['x-user-uid'] || req.headers['x-admin-uid'] || req.body.senderId || req.query.uid) as string;
+      const { content, attachments } = req.body;
+      if (!content) {
+        return res.status(400).json({ error: "متن پاسخ الزامی است." });
+      }
+
+      let user = await dbManager.getUser(uid);
+      if (!user && uid) {
+        user = await dbManager.getUserByEmail(uid);
+      }
+
+      let senderRole: 'user' | 'admin' | 'staff' = 'user';
+      if (user) {
+        const uRoles = user.roles || [user.role || 'user'];
+        if (uRoles.includes('super_admin') || uRoles.includes('admin') || user.role === 'admin' || user.email === 'amirrezaveisi45@gmail.com') {
+          senderRole = 'admin';
+        } else if (uRoles.length > 0 && !uRoles.every(r => r === 'user')) {
+          senderRole = 'staff';
+        }
+      } else if (uid === 'admin' || req.headers['x-admin-uid'] === 'admin') {
+        senderRole = 'admin';
+      }
+
+      const msg = await dbManager.addTicketMessage({
+        ticketId,
+        senderId: uid || "admin",
+        senderName: user?.displayName || (senderRole !== 'user' ? "پشتیبانی" : "کاربر"),
+        senderAvatar: user?.avatarUrl || "",
+        senderRole,
+        content,
+        attachments: attachments || []
+      });
+
+      const updatedTicket = await dbManager.getTicketById(ticketId);
+      io.emit("tickets:updated");
+      res.json({ message: msg, ticket: updatedTicket });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/tickets/:id/close", async (req, res) => {
+    try {
+      const updated = await dbManager.updateTicketStatus(req.params.id, { status: "closed" });
+      io.emit("tickets:updated");
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/tickets", requireAdmin, async (req, res) => {
+    try {
+      const { status, priority, category, search } = req.query as any;
+      const tickets = await dbManager.getAllTicketsAdmin({ status, priority, category, search });
+      res.json(tickets);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/admin/tickets/:id", requireAdmin, async (req, res) => {
+    try {
+      const { status, priority, assignedTo, assignedToName } = req.body;
+      const updated = await dbManager.updateTicketStatus(req.params.id, {
+        status,
+        priority,
+        assignedTo,
+        assignedToName
+      });
+      io.emit("tickets:updated");
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/admin/tickets/:id", requireAdmin, async (req, res) => {
+    try {
+      await dbManager.deleteTicket(req.params.id);
+      io.emit("tickets:updated");
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // -----------------------------------------------------------------
   // REVENUE, ROLE SETTINGS, STAFF MANAGEMENT & ASSIGNMENT ROUTES
   // -----------------------------------------------------------------
   app.get("/api/admin/website-revenue", requireAdmin, async (req, res) => {

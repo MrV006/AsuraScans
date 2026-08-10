@@ -280,6 +280,32 @@ function ensureSchema($pdo) {
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             processedAt DATETIME NULL,
             processedBy VARCHAR(100) NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+        "CREATE TABLE IF NOT EXISTS tickets (
+            id VARCHAR(100) PRIMARY KEY,
+            userId VARCHAR(100) NOT NULL,
+            userName VARCHAR(100) NOT NULL,
+            userEmail VARCHAR(255),
+            userAvatar TEXT,
+            subject VARCHAR(255) NOT NULL,
+            category VARCHAR(50) DEFAULT 'other',
+            priority VARCHAR(20) DEFAULT 'medium',
+            status VARCHAR(20) DEFAULT 'open',
+            assignedTo VARCHAR(100),
+            assignedToName VARCHAR(100),
+            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+            lastUpdated DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+        "CREATE TABLE IF NOT EXISTS ticket_messages (
+            id VARCHAR(100) PRIMARY KEY,
+            ticketId VARCHAR(100) NOT NULL,
+            senderId VARCHAR(100) NOT NULL,
+            senderName VARCHAR(100) NOT NULL,
+            senderAvatar TEXT,
+            senderRole VARCHAR(20) DEFAULT 'user',
+            content TEXT NOT NULL,
+            attachments TEXT,
+            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
     ];
 
@@ -1720,6 +1746,215 @@ if ($method === 'GET' && $sub_path === '/admin/migration-manifest') {
     header('Content-Disposition: attachment; filename=asura-migration-manifest.json');
     echo json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     exit;
+}
+
+// 40h. GET USER TICKETS
+if ($method === 'GET' && $sub_path === '/tickets') {
+    $uid = $_SERVER['HTTP_X_USER_UID'] ?? $_SERVER['HTTP_X_ADMIN_UID'] ?? $_GET['uid'] ?? $_GET['adminUid'] ?? null;
+    if (!$uid) sendResponse(["error" => "شناسه کاربر مشخص نیست."], 401);
+    $stmt = $pdo->prepare("SELECT * FROM tickets WHERE userId = ? ORDER BY lastUpdated DESC");
+    $stmt->execute([$uid]);
+    $tickets = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($tickets as &$t) {
+        $mStmt = $pdo->prepare("SELECT * FROM ticket_messages WHERE ticketId = ? ORDER BY createdAt ASC");
+        $mStmt->execute([$t['id']]);
+        $msgs = $mStmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($msgs as &$m) {
+            $m['attachments'] = !empty($m['attachments']) ? json_decode($m['attachments'], true) : [];
+        }
+        $t['messages'] = $msgs;
+    }
+    sendResponse($tickets);
+}
+
+// 40i. CREATE TICKET
+if ($method === 'POST' && $sub_path === '/tickets') {
+    $uid = $_SERVER['HTTP_X_USER_UID'] ?? $_SERVER['HTTP_X_ADMIN_UID'] ?? $_GET['uid'] ?? null;
+    $input = getJsonInput();
+    if (!$uid && !empty($input['userId'])) $uid = $input['userId'];
+    if (!$uid) sendResponse(["error" => "کاربر شناسه معتبر ندارد."], 401);
+    if (empty($input['subject']) || empty($input['content'])) {
+        sendResponse(["error" => "موضوع و متن تیکت الزامی است."], 400);
+    }
+    $uStmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+    $uStmt->execute([$uid]);
+    $user = $uStmt->fetch(PDO::FETCH_ASSOC);
+
+    $ticketId = 'TCK-' . strtoupper(dechex(time())) . rand(100, 999);
+    $msgId = 'MSG-' . strtoupper(dechex(time())) . rand(100, 999);
+    $now = date('Y-m-d H:i:s');
+    $category = $input['category'] ?? 'other';
+    $priority = $input['priority'] ?? 'medium';
+
+    $stmt = $pdo->prepare("INSERT INTO tickets (id, userId, userName, userEmail, userAvatar, subject, category, priority, status, createdAt, lastUpdated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)");
+    $stmt->execute([
+        $ticketId,
+        $uid,
+        $user['displayName'] ?? $input['userName'] ?? 'کاربر',
+        $user['email'] ?? $input['userEmail'] ?? '',
+        $user['avatarUrl'] ?? $input['userAvatar'] ?? '',
+        $input['subject'],
+        $category,
+        $priority,
+        $now,
+        $now
+    ]);
+
+    $mStmt = $pdo->prepare("INSERT INTO ticket_messages (id, ticketId, senderId, senderName, senderAvatar, senderRole, content, attachments, createdAt) VALUES (?, ?, ?, ?, ?, 'user', ?, ?, ?)");
+    $mStmt->execute([
+        $msgId,
+        $ticketId,
+        $uid,
+        $user['displayName'] ?? $input['userName'] ?? 'کاربر',
+        $user['avatarUrl'] ?? $input['userAvatar'] ?? '',
+        $input['content'],
+        json_encode($input['attachments'] ?? []),
+        $now
+    ]);
+
+    sendResponse([
+        "id" => $ticketId,
+        "userId" => $uid,
+        "subject" => $input['subject'],
+        "status" => "open"
+    ]);
+}
+
+// 40j. GET SINGLE TICKET
+if ($method === 'GET' && preg_match('/^\/tickets\/([^\/]+)$/', $sub_path, $matches)) {
+    $tId = $matches[1];
+    $stmt = $pdo->prepare("SELECT * FROM tickets WHERE id = ?");
+    $stmt->execute([$tId]);
+    $ticket = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$ticket) sendResponse(["error" => "تیکت یافت نشد."], 404);
+
+    $mStmt = $pdo->prepare("SELECT * FROM ticket_messages WHERE ticketId = ? ORDER BY createdAt ASC");
+    $mStmt->execute([$tId]);
+    $msgs = $mStmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($msgs as &$m) {
+        $m['attachments'] = !empty($m['attachments']) ? json_decode($m['attachments'], true) : [];
+    }
+    $ticket['messages'] = $msgs;
+    sendResponse($ticket);
+}
+
+// 40k. REPLY TO TICKET
+if ($method === 'POST' && preg_match('/^\/tickets\/([^\/]+)\/reply$/', $sub_path, $matches)) {
+    $tId = $matches[1];
+    $input = getJsonInput();
+    $uid = $_SERVER['HTTP_X_USER_UID'] ?? $_SERVER['HTTP_X_ADMIN_UID'] ?? $input['senderId'] ?? 'admin';
+    if (empty($input['content'])) sendResponse(["error" => "متن پاسخ الزامی است."], 400);
+
+    $uStmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+    $uStmt->execute([$uid]);
+    $user = $uStmt->fetch(PDO::FETCH_ASSOC);
+
+    $senderRole = 'user';
+    if ($user) {
+        $role = $user['role'] ?? 'user';
+        if ($role === 'admin' || $user['email'] === 'amirrezaveisi45@gmail.com') $senderRole = 'admin';
+    } else if ($uid === 'admin') {
+        $senderRole = 'admin';
+    }
+
+    $msgId = 'MSG-' . strtoupper(dechex(time())) . rand(100, 999);
+    $now = date('Y-m-d H:i:s');
+    $newStatus = $senderRole === 'user' ? 'open' : 'answered';
+
+    $mStmt = $pdo->prepare("INSERT INTO ticket_messages (id, ticketId, senderId, senderName, senderAvatar, senderRole, content, attachments, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $mStmt->execute([
+        $msgId,
+        $tId,
+        $uid,
+        $user['displayName'] ?? ($senderRole !== 'user' ? "پشتیبانی" : "کاربر"),
+        $user['avatarUrl'] ?? '',
+        $senderRole,
+        $input['content'],
+        json_encode($input['attachments'] ?? []),
+        $now
+    ]);
+
+    $upStmt = $pdo->prepare("UPDATE tickets SET status = ?, lastUpdated = ? WHERE id = ?");
+    $upStmt->execute([$newStatus, $now, $tId]);
+
+    sendResponse(["success" => true, "msgId" => $msgId]);
+}
+
+// 40l. CLOSE TICKET
+if ($method === 'PUT' && preg_match('/^\/tickets\/([^\/]+)\/close$/', $sub_path, $matches)) {
+    $tId = $matches[1];
+    $now = date('Y-m-d H:i:s');
+    $upStmt = $pdo->prepare("UPDATE tickets SET status = 'closed', lastUpdated = ? WHERE id = ?");
+    $upStmt->execute([$now, $tId]);
+    sendResponse(["success" => true]);
+}
+
+// 40m. ADMIN GET ALL TICKETS
+if ($method === 'GET' && $sub_path === '/admin/tickets') {
+    requireAdmin($pdo);
+    $status = $_GET['status'] ?? 'all';
+    $priority = $_GET['priority'] ?? 'all';
+    $category = $_GET['category'] ?? 'all';
+    $search = $_GET['search'] ?? '';
+
+    $where = ["1=1"];
+    $params = [];
+
+    if ($status !== 'all') { $where[] = "status = ?"; $params[] = $status; }
+    if ($priority !== 'all') { $where[] = "priority = ?"; $params[] = $priority; }
+    if ($category !== 'all') { $where[] = "category = ?"; $params[] = $category; }
+    if (!empty($search)) {
+        $where[] = "(subject LIKE ? OR userName LIKE ? OR id LIKE ?)";
+        $s = "%{$search}%";
+        $params[] = $s; $params[] = $s; $params[] = $s;
+    }
+
+    $sql = "SELECT * FROM tickets WHERE " . implode(' AND ', $where) . " ORDER BY lastUpdated DESC";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $tickets = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($tickets as &$t) {
+        $mStmt = $pdo->prepare("SELECT * FROM ticket_messages WHERE ticketId = ? ORDER BY createdAt ASC");
+        $mStmt->execute([$t['id']]);
+        $msgs = $mStmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($msgs as &$m) {
+            $m['attachments'] = !empty($m['attachments']) ? json_decode($m['attachments'], true) : [];
+        }
+        $t['messages'] = $msgs;
+    }
+    sendResponse($tickets);
+}
+
+// 40n. ADMIN UPDATE TICKET
+if ($method === 'PUT' && preg_match('/^\/admin\/tickets\/([^\/]+)$/', $sub_path, $matches)) {
+    requireAdmin($pdo);
+    $tId = $matches[1];
+    $input = getJsonInput();
+    $now = date('Y-m-d H:i:s');
+
+    $sets = ["lastUpdated = ?"];
+    $params = [$now];
+
+    if (!empty($input['status'])) { $sets[] = "status = ?"; $params[] = $input['status']; }
+    if (!empty($input['priority'])) { $sets[] = "priority = ?"; $params[] = $input['priority']; }
+    if (isset($input['assignedTo'])) { $sets[] = "assignedTo = ?"; $params[] = $input['assignedTo']; }
+    if (isset($input['assignedToName'])) { $sets[] = "assignedToName = ?"; $params[] = $input['assignedToName']; }
+
+    $params[] = $tId;
+    $stmt = $pdo->prepare("UPDATE tickets SET " . implode(', ', $sets) . " WHERE id = ?");
+    $stmt->execute($params);
+
+    sendResponse(["success" => true]);
+}
+
+// 40o. ADMIN DELETE TICKET
+if ($method === 'DELETE' && preg_match('/^\/admin\/tickets\/([^\/]+)$/', $sub_path, $matches)) {
+    requireAdmin($pdo);
+    $tId = $matches[1];
+    $pdo->prepare("DELETE FROM ticket_messages WHERE ticketId = ?")->execute([$tId]);
+    $pdo->prepare("DELETE FROM tickets WHERE id = ?")->execute([$tId]);
+    sendResponse(["success" => true]);
 }
 
 // 41. GET ADMIN STATS (ADMIN)

@@ -166,6 +166,35 @@ export interface Notification {
   createdAt: string;
 }
 
+export interface TicketMessage {
+  id: string;
+  ticketId: string;
+  senderId: string;
+  senderName: string;
+  senderAvatar?: string;
+  senderRole: 'user' | 'admin' | 'staff';
+  content: string;
+  attachments?: string[];
+  createdAt: string;
+}
+
+export interface Ticket {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail?: string;
+  userAvatar?: string;
+  subject: string;
+  category: string;
+  priority: string;
+  status: 'open' | 'in_progress' | 'answered' | 'closed';
+  assignedTo?: string;
+  assignedToName?: string;
+  messages: TicketMessage[];
+  lastUpdated: string;
+  createdAt: string;
+}
+
 // Global configurations and fallback JSON path
 const LOCAL_DB_PATH = path.join(process.cwd(), 'local-db.json');
 
@@ -187,6 +216,8 @@ class DatabaseManager {
     wallet_transactions: WalletTransaction[];
     purchased_chapters: PurchasedChapter[];
     settlement_requests: any[];
+    tickets: Ticket[];
+    ticket_messages: TicketMessage[];
   } = {
     series: [],
     chapters: [],
@@ -200,6 +231,8 @@ class DatabaseManager {
     wallet_transactions: [],
     purchased_chapters: [],
     settlement_requests: [],
+    tickets: [],
+    ticket_messages: [],
     settings: {
       global: {
         siteName: 'AsuraClone',
@@ -284,6 +317,12 @@ class DatabaseManager {
         }
         if (!this.localData.purchased_chapters) {
           this.localData.purchased_chapters = [];
+        }
+        if (!this.localData.tickets) {
+          this.localData.tickets = [];
+        }
+        if (!this.localData.ticket_messages) {
+          this.localData.ticket_messages = [];
         }
         if (this.localData.users) {
           let migrated = false;
@@ -483,6 +522,32 @@ class DatabaseManager {
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
           processedAt DATETIME NULL,
           processedBy VARCHAR(100) NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+        `CREATE TABLE IF NOT EXISTS tickets (
+          id VARCHAR(100) PRIMARY KEY,
+          userId VARCHAR(100) NOT NULL,
+          userName VARCHAR(100) NOT NULL,
+          userEmail VARCHAR(255),
+          userAvatar TEXT,
+          subject VARCHAR(255) NOT NULL,
+          category VARCHAR(50) DEFAULT 'other',
+          priority VARCHAR(20) DEFAULT 'medium',
+          status VARCHAR(20) DEFAULT 'open',
+          assignedTo VARCHAR(100),
+          assignedToName VARCHAR(100),
+          createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+          lastUpdated DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+        `CREATE TABLE IF NOT EXISTS ticket_messages (
+          id VARCHAR(100) PRIMARY KEY,
+          ticketId VARCHAR(100) NOT NULL,
+          senderId VARCHAR(100) NOT NULL,
+          senderName VARCHAR(100) NOT NULL,
+          senderAvatar TEXT,
+          senderRole VARCHAR(20) DEFAULT 'user',
+          content TEXT NOT NULL,
+          attachments TEXT,
+          createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
       ];
 
@@ -2204,6 +2269,277 @@ class DatabaseManager {
       this.localData.reports = this.localData.reports.filter(r => r.id !== id);
       this.saveLocalData();
     }
+    return true;
+  }
+
+  // -----------------------------------------------------------------
+  // SUPPORT TICKETS METHODS
+  // -----------------------------------------------------------------
+
+  async getTicketsByUser(userId: string): Promise<Ticket[]> {
+    if (this.isUsingMySQL && this.pool) {
+      const [rows] = await this.pool.execute('SELECT * FROM tickets WHERE userId = ? ORDER BY lastUpdated DESC', [userId]);
+      const tickets: Ticket[] = [];
+      for (const row of (rows as any[])) {
+        const [msgRows] = await this.pool.execute('SELECT * FROM ticket_messages WHERE ticketId = ? ORDER BY createdAt ASC', [row.id]);
+        const messages = (msgRows as any[]).map(m => ({
+          ...m,
+          attachments: typeof m.attachments === 'string' ? JSON.parse(m.attachments || '[]') : (m.attachments || [])
+        }));
+        tickets.push({ ...row, messages });
+      }
+      return tickets;
+    }
+    const userTickets = (this.localData.tickets || []).filter(t => t.userId === userId);
+    return userTickets.map(t => {
+      const msgs = (this.localData.ticket_messages || []).filter(m => m.ticketId === t.id);
+      return { ...t, messages: msgs.length > 0 ? msgs : (t.messages || []) };
+    }).sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
+  }
+
+  async getTicketById(ticketId: string): Promise<Ticket | null> {
+    if (this.isUsingMySQL && this.pool) {
+      const [rows] = await this.pool.execute('SELECT * FROM tickets WHERE id = ?', [ticketId]);
+      const row = (rows as any[])[0];
+      if (!row) return null;
+      const [msgRows] = await this.pool.execute('SELECT * FROM ticket_messages WHERE ticketId = ? ORDER BY createdAt ASC', [ticketId]);
+      const messages = (msgRows as any[]).map(m => ({
+        ...m,
+        attachments: typeof m.attachments === 'string' ? JSON.parse(m.attachments || '[]') : (m.attachments || [])
+      }));
+      return { ...row, messages };
+    }
+    const t = (this.localData.tickets || []).find(x => x.id === ticketId);
+    if (!t) return null;
+    const msgs = (this.localData.ticket_messages || []).filter(m => m.ticketId === ticketId);
+    return { ...t, messages: msgs.length > 0 ? msgs : (t.messages || []) };
+  }
+
+  async createTicket(data: {
+    userId: string;
+    userName: string;
+    userEmail?: string;
+    userAvatar?: string;
+    subject: string;
+    category: string;
+    priority?: string;
+    content: string;
+    attachments?: string[];
+  }): Promise<Ticket> {
+    const ticketId = 'TCK-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 5).toUpperCase();
+    const msgId = 'MSG-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 5).toUpperCase();
+    const now = new Date().toISOString();
+    const priority = data.priority || 'medium';
+    const category = data.category || 'other';
+
+    if (this.isUsingMySQL && this.pool) {
+      await this.pool.execute(
+        `INSERT INTO tickets (id, userId, userName, userEmail, userAvatar, subject, category, priority, status, createdAt, lastUpdated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
+        [ticketId, data.userId, data.userName, data.userEmail || '', data.userAvatar || '', data.subject, category, priority, now, now]
+      );
+      await this.pool.execute(
+        `INSERT INTO ticket_messages (id, ticketId, senderId, senderName, senderAvatar, senderRole, content, attachments, createdAt)
+         VALUES (?, ?, ?, ?, ?, 'user', ?, ?, ?)`,
+        [msgId, ticketId, data.userId, data.userName, data.userAvatar || '', data.content, JSON.stringify(data.attachments || []), now]
+      );
+      return (await this.getTicketById(ticketId))!;
+    }
+
+    const initialMsg: TicketMessage = {
+      id: msgId,
+      ticketId,
+      senderId: data.userId,
+      senderName: data.userName,
+      senderAvatar: data.userAvatar,
+      senderRole: 'user',
+      content: data.content,
+      attachments: data.attachments || [],
+      createdAt: now
+    };
+    const newTicket: Ticket = {
+      id: ticketId,
+      userId: data.userId,
+      userName: data.userName,
+      userEmail: data.userEmail,
+      userAvatar: data.userAvatar,
+      subject: data.subject,
+      category,
+      priority,
+      status: 'open',
+      messages: [initialMsg],
+      lastUpdated: now,
+      createdAt: now
+    };
+
+    if (!this.localData.tickets) this.localData.tickets = [];
+    if (!this.localData.ticket_messages) this.localData.ticket_messages = [];
+    this.localData.tickets.unshift(newTicket);
+    this.localData.ticket_messages.push(initialMsg);
+    this.saveLocalData();
+    return newTicket;
+  }
+
+  async addTicketMessage(data: {
+    ticketId: string;
+    senderId: string;
+    senderName: string;
+    senderAvatar?: string;
+    senderRole: 'user' | 'admin' | 'staff';
+    content: string;
+    attachments?: string[];
+  }): Promise<TicketMessage> {
+    const msgId = 'MSG-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 5).toUpperCase();
+    const now = new Date().toISOString();
+    const newStatus = data.senderRole === 'user' ? 'open' : 'answered';
+
+    if (this.isUsingMySQL && this.pool) {
+      await this.pool.execute(
+        `INSERT INTO ticket_messages (id, ticketId, senderId, senderName, senderAvatar, senderRole, content, attachments, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [msgId, data.ticketId, data.senderId, data.senderName, data.senderAvatar || '', data.senderRole, data.content, JSON.stringify(data.attachments || []), now]
+      );
+      await this.pool.execute(
+        `UPDATE tickets SET status = ?, lastUpdated = ? WHERE id = ?`,
+        [newStatus, now, data.ticketId]
+      );
+      return {
+        id: msgId,
+        ticketId: data.ticketId,
+        senderId: data.senderId,
+        senderName: data.senderName,
+        senderAvatar: data.senderAvatar,
+        senderRole: data.senderRole,
+        content: data.content,
+        attachments: data.attachments || [],
+        createdAt: now
+      };
+    }
+
+    const msgObj: TicketMessage = {
+      id: msgId,
+      ticketId: data.ticketId,
+      senderId: data.senderId,
+      senderName: data.senderName,
+      senderAvatar: data.senderAvatar,
+      senderRole: data.senderRole,
+      content: data.content,
+      attachments: data.attachments || [],
+      createdAt: now
+    };
+    if (!this.localData.ticket_messages) this.localData.ticket_messages = [];
+    this.localData.ticket_messages.push(msgObj);
+
+    const t = (this.localData.tickets || []).find(x => x.id === data.ticketId);
+    if (t) {
+      t.status = newStatus as any;
+      t.lastUpdated = now;
+      if (!t.messages) t.messages = [];
+      t.messages.push(msgObj);
+    }
+    this.saveLocalData();
+    return msgObj;
+  }
+
+  async updateTicketStatus(
+    ticketId: string,
+    updates: { status?: string; priority?: string; assignedTo?: string; assignedToName?: string }
+  ): Promise<Ticket | null> {
+    const now = new Date().toISOString();
+    if (this.isUsingMySQL && this.pool) {
+      const fields: string[] = ['lastUpdated = ?'];
+      const values: any[] = [now];
+      if (updates.status) { fields.push('status = ?'); values.push(updates.status); }
+      if (updates.priority) { fields.push('priority = ?'); values.push(updates.priority); }
+      if (updates.assignedTo !== undefined) { fields.push('assignedTo = ?'); values.push(updates.assignedTo); }
+      if (updates.assignedToName !== undefined) { fields.push('assignedToName = ?'); values.push(updates.assignedToName); }
+      values.push(ticketId);
+      await this.pool.execute(`UPDATE tickets SET ${fields.join(', ')} WHERE id = ?`, values);
+      return await this.getTicketById(ticketId);
+    }
+
+    const t = (this.localData.tickets || []).find(x => x.id === ticketId);
+    if (t) {
+      if (updates.status) t.status = updates.status as any;
+      if (updates.priority) t.priority = updates.priority;
+      if (updates.assignedTo !== undefined) t.assignedTo = updates.assignedTo;
+      if (updates.assignedToName !== undefined) t.assignedToName = updates.assignedToName;
+      t.lastUpdated = now;
+      this.saveLocalData();
+      return t;
+    }
+    return null;
+  }
+
+  async getAllTicketsAdmin(filters?: { status?: string; priority?: string; category?: string; search?: string }): Promise<Ticket[]> {
+    if (this.isUsingMySQL && this.pool) {
+      let query = 'SELECT * FROM tickets WHERE 1=1';
+      const params: any[] = [];
+      if (filters?.status && filters.status !== 'all') {
+        query += ' AND status = ?';
+        params.push(filters.status);
+      }
+      if (filters?.priority && filters.priority !== 'all') {
+        query += ' AND priority = ?';
+        params.push(filters.priority);
+      }
+      if (filters?.category && filters.category !== 'all') {
+        query += ' AND category = ?';
+        params.push(filters.category);
+      }
+      if (filters?.search) {
+        query += ' AND (subject LIKE ? OR userName LIKE ? OR id LIKE ?)';
+        const s = `%${filters.search}%`;
+        params.push(s, s, s);
+      }
+      query += ' ORDER BY lastUpdated DESC';
+      const [rows] = await this.pool.execute(query, params);
+      const tickets: Ticket[] = [];
+      for (const row of (rows as any[])) {
+        const [msgRows] = await this.pool.execute('SELECT * FROM ticket_messages WHERE ticketId = ? ORDER BY createdAt ASC', [row.id]);
+        const messages = (msgRows as any[]).map(m => ({
+          ...m,
+          attachments: typeof m.attachments === 'string' ? JSON.parse(m.attachments || '[]') : (m.attachments || [])
+        }));
+        tickets.push({ ...row, messages });
+      }
+      return tickets;
+    }
+
+    let resList = (this.localData.tickets || []).map(t => {
+      const msgs = (this.localData.ticket_messages || []).filter(m => m.ticketId === t.id);
+      return { ...t, messages: msgs.length > 0 ? msgs : (t.messages || []) };
+    });
+
+    if (filters?.status && filters.status !== 'all') {
+      resList = resList.filter(t => t.status === filters.status);
+    }
+    if (filters?.priority && filters.priority !== 'all') {
+      resList = resList.filter(t => t.priority === filters.priority);
+    }
+    if (filters?.category && filters.category !== 'all') {
+      resList = resList.filter(t => t.category === filters.category);
+    }
+    if (filters?.search) {
+      const q = filters.search.toLowerCase();
+      resList = resList.filter(t => t.subject.toLowerCase().includes(q) || t.userName.toLowerCase().includes(q) || t.id.toLowerCase().includes(q));
+    }
+    return resList.sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
+  }
+
+  async deleteTicket(ticketId: string): Promise<boolean> {
+    if (this.isUsingMySQL && this.pool) {
+      await this.pool.execute('DELETE FROM ticket_messages WHERE ticketId = ?', [ticketId]);
+      await this.pool.execute('DELETE FROM tickets WHERE id = ?', [ticketId]);
+      return true;
+    }
+    if (this.localData.tickets) {
+      this.localData.tickets = this.localData.tickets.filter(t => t.id !== ticketId);
+    }
+    if (this.localData.ticket_messages) {
+      this.localData.ticket_messages = this.localData.ticket_messages.filter(m => m.ticketId !== ticketId);
+    }
+    this.saveLocalData();
     return true;
   }
 

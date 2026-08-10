@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Search, User, Menu, X, Library, Bell, ChevronDown, LogOut, Settings, Check, Trophy } from 'lucide-react';
+import { Search, User, Menu, X, Library, Bell, ChevronDown, LogOut, Settings, Check, Trophy, LifeBuoy } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNotifications } from '../hooks/useNotifications';
@@ -123,6 +123,9 @@ export function Navbar() {
           <Link to="/search" className="text-zinc-400 hover:text-white transition-colors pb-1 border-b-2 border-transparent">Comics</Link>
           <Link to="/leaderboard" className="text-amber-500 hover:text-amber-400 flex items-center gap-1 transition-colors pb-1 border-b-2 border-transparent">
             <Trophy size={14} /> Ranking
+          </Link>
+          <Link to="/support" className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors pb-1 border-b-2 border-transparent">
+            <LifeBuoy size={14} /> پشتیبانی
           </Link>
           <Link to="#" className="text-zinc-400 hover:text-white flex items-center gap-1 transition-colors pb-1 border-b-2 border-transparent">
             Bookmarks <ChevronDown size={14} />
@@ -298,6 +301,7 @@ export function Navbar() {
             <Link to="/" onClick={() => setMobileMenuOpen(false)} className="px-4 py-3 bg-white/5 rounded-lg text-white">Home</Link>
             <Link to="/search" onClick={() => setMobileMenuOpen(false)} className="px-4 py-3 bg-white/5 rounded-lg text-white">Comics</Link>
             <Link to="/leaderboard" onClick={() => setMobileMenuOpen(false)} className="px-4 py-3 bg-white/5 rounded-lg text-amber-500 flex items-center gap-2"><Trophy size={16} /> Ranking</Link>
+            <Link to="/support" onClick={() => setMobileMenuOpen(false)} className="px-4 py-3 bg-white/5 rounded-lg text-indigo-400 flex items-center gap-2"><LifeBuoy size={16} /> پشتیبانی و تیکت‌ها</Link>
             {user && (
               <button 
                 onClick={(e) => {

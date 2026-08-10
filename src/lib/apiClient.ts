@@ -724,5 +724,84 @@ export const apiClient = {
       body: JSON.stringify(data)
     });
     return res.json();
+  },
+
+  // SUPPORT TICKETS API
+  async getTickets(userId?: string) {
+    const res = await fetch(`${API_URL}/api/tickets`, {
+      headers: this.getHeaders(userId)
+    });
+    return res.json();
+  },
+
+  async createTicket(data: { subject: string; category?: string; priority?: string; content: string; attachments?: string[] }, userId?: string) {
+    const res = await fetch(`${API_URL}/api/tickets`, {
+      method: 'POST',
+      headers: this.getHeaders(userId),
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'خطا در ثبت تیکت پشتیبانی');
+    }
+    return res.json();
+  },
+
+  async getTicketById(id: string, userId?: string) {
+    const res = await fetch(`${API_URL}/api/tickets/${id}`, {
+      headers: this.getHeaders(userId)
+    });
+    return res.json();
+  },
+
+  async replyTicket(id: string, content: string, attachments?: string[], userId?: string) {
+    const res = await fetch(`${API_URL}/api/tickets/${id}/reply`, {
+      method: 'POST',
+      headers: this.getHeaders(userId),
+      body: JSON.stringify({ content, attachments })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'خطا در ارسال پاسخ');
+    }
+    return res.json();
+  },
+
+  async closeTicket(id: string, userId?: string) {
+    const res = await fetch(`${API_URL}/api/tickets/${id}/close`, {
+      method: 'PUT',
+      headers: this.getHeaders(userId)
+    });
+    return res.json();
+  },
+
+  async getAdminTickets(filters?: { status?: string; priority?: string; category?: string; search?: string }, adminUid?: string) {
+    const params = new URLSearchParams();
+    if (filters?.status) params.append('status', filters.status);
+    if (filters?.priority) params.append('priority', filters.priority);
+    if (filters?.category) params.append('category', filters.category);
+    if (filters?.search) params.append('search', filters.search);
+
+    const res = await fetch(`${API_URL}/api/admin/tickets?${params.toString()}`, {
+      headers: this.getHeaders(adminUid)
+    });
+    return res.json();
+  },
+
+  async updateAdminTicket(id: string, data: { status?: string; priority?: string; assignedTo?: string; assignedToName?: string }, adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/admin/tickets/${id}`, {
+      method: 'PUT',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify(data)
+    });
+    return res.json();
+  },
+
+  async deleteAdminTicket(id: string, adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/admin/tickets/${id}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(adminUid)
+    });
+    return res.json();
   }
 };

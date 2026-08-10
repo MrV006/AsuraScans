@@ -16,6 +16,7 @@ import Admin from './pages/Admin';
 import Leaderboard from './pages/Leaderboard';
 import Terms from './pages/Terms';
 import Privacy from './pages/Privacy';
+import Support from './pages/Support';
 import CompleteProfileModal from './components/CompleteProfileModal';
 import { AppInterceptors } from './components/AppInterceptors';
 import { ScrollToTop } from './components/ScrollToTop';
@@ -36,6 +37,7 @@ export default function App() {
               <Route path="/search" element={<Search />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/leaderboard" element={<Leaderboard />} />
+              <Route path="/support" element={<Support />} />
               <Route path="/terms" element={<Terms />} />
               <Route path="/privacy" element={<Privacy />} />
             </Routes>
