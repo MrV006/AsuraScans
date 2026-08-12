@@ -128,6 +128,8 @@ export default function Admin() {
   const [userSearchQuery, setUserSearchQuery] = useState("");
   const [adminsMap, setAdminsMap] = useState<Record<string, boolean>>({});
   const [commentsList, setCommentsList] = useState<any[]>([]);
+  const [commentStatusFilter, setCommentStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const [selectedCommentIds, setSelectedCommentIds] = useState<string[]>([]);
   const [siteGenres, setSiteGenres] = useState<string[]>([]);
   const [newGenreInput, setNewGenreInput] = useState("");
 
@@ -350,6 +352,21 @@ export default function Admin() {
     }).catch(console.error);
   };
 
+  const fetchCommentsList = (filter?: string) => {
+    const f = filter !== undefined ? filter : commentStatusFilter;
+    if (isSuperAdmin || hasFrontendPermission('delete_comment') || hasFrontendPermission('approve_comment') || hasFrontendPermission('manage_comments')) {
+      apiClient.getAllCommentsAdmin(adminUid, f).then(comments => {
+        if (Array.isArray(comments)) {
+          setCommentsList(comments);
+        } else {
+          setCommentsList([]);
+        }
+      }).catch(console.error);
+    } else {
+      setCommentsList([]);
+    }
+  };
+
   const fetchUsersAndComments = () => {
     apiClient.getUsers().then(users => {
       if (Array.isArray(users)) {
@@ -364,17 +381,7 @@ export default function Admin() {
       }
     }).catch(console.error);
     
-    if (isSuperAdmin || hasFrontendPermission('delete_comment')) {
-      apiClient.getAllCommentsAdmin(adminUid).then(comments => {
-        if (Array.isArray(comments)) {
-          setCommentsList(comments);
-        } else {
-          setCommentsList([]);
-        }
-      }).catch(console.error);
-    } else {
-      setCommentsList([]);
-    }
+    fetchCommentsList();
 
     if (isSuperAdmin || hasFrontendPermission('manage_reports')) {
       apiClient.getReportsAdmin(adminUid).then(reports => {
@@ -510,6 +517,12 @@ export default function Admin() {
       };
     }
   }, [isAdmin, activeTab]);
+
+  useEffect(() => {
+    if (isAdmin) {
+      fetchCommentsList(commentStatusFilter);
+    }
+  }, [isAdmin, commentStatusFilter]);
 
   const fetchChapters = () => {
     if (selectedSeriesForChapters) {
@@ -756,6 +769,50 @@ export default function Admin() {
     }
   };
 
+  const handleUpdateCommentStatus = async (commentId: string, status: 'approved' | 'rejected' | 'pending') => {
+    if (!isSuperAdmin && !hasFrontendPermission('approve_comment') && !hasFrontendPermission('delete_comment') && !hasFrontendPermission('manage_comments')) {
+      alert("خطای عدم دسترسی: شما دسترسی لازم برای تغییر وضعیت نظرات را ندارید.");
+      return;
+    }
+    try {
+      await apiClient.updateCommentStatus(commentId, status, adminUid);
+      fetchCommentsList();
+    } catch (error: any) {
+      alert("خطا در تغییر وضعیت نظر: " + error.message);
+    }
+  };
+
+  const handleBatchUpdateCommentStatus = async (status: 'approved' | 'rejected' | 'pending') => {
+    if (selectedCommentIds.length === 0) return;
+    if (!isSuperAdmin && !hasFrontendPermission('approve_comment') && !hasFrontendPermission('delete_comment') && !hasFrontendPermission('manage_comments')) {
+      alert("خطای عدم دسترسی: شما دسترسی لازم برای تغییر وضعیت نظرات را ندارید.");
+      return;
+    }
+    try {
+      await apiClient.batchUpdateCommentsStatus(selectedCommentIds, status, adminUid);
+      setSelectedCommentIds([]);
+      fetchCommentsList();
+    } catch (error: any) {
+      alert("خطا در تغییر وضعیت گروهی: " + error.message);
+    }
+  };
+
+  const handleBatchDeleteComments = async () => {
+    if (selectedCommentIds.length === 0) return;
+    if (!isSuperAdmin && !hasFrontendPermission('delete_comment')) {
+      alert("خطای عدم دسترسی: شما دسترسی لازم برای حذف نظرات را ندارید.");
+      return;
+    }
+    if (!window.confirm(`آیا از حذف گروهی ${selectedCommentIds.length} دیدگاه انتخابی اطمینان دارید؟`)) return;
+    try {
+      await apiClient.batchDeleteComments(selectedCommentIds, adminUid);
+      setSelectedCommentIds([]);
+      fetchCommentsList();
+    } catch (error: any) {
+      alert("خطا در حذف گروهی دیدگاه‌ها: " + error.message);
+    }
+  };
+
   const handleDeleteComment = async (commentId: string) => {
     if (!isSuperAdmin && !hasFrontendPermission('delete_comment')) {
       alert("خطای عدم دسترسی: شما دسترسی لازم برای حذف نظرات را ندارید.");
@@ -766,7 +823,7 @@ export default function Admin() {
     try {
       await apiClient.deleteComment(commentId);
       alert("Comment deleted successfully!");
-      fetchUsersAndComments();
+      fetchCommentsList();
     } catch (error: any) {
       alert("Failed to delete comment: " + error.message);
     }
@@ -2002,71 +2059,252 @@ export default function Admin() {
           )}
 
           {activeTab === "comments" && showCommentsTab && (
-            <div className="overflow-x-auto">
-              <h2 className="text-xl font-black text-white uppercase border-b border-white/10 pb-4 mb-4">
-                Manage Comments
-              </h2>
-              <table className="w-full text-left border-collapse min-w-[600px]">
-                <thead>
-                  <tr className="border-b border-white/10 text-zinc-500 text-xs font-bold uppercase tracking-wider">
-                    <th className="py-3 px-4">Comment</th>
-                    <th className="py-3 px-4 w-32">Author</th>
-                    <th className="py-3 px-4 w-24">Date</th>
-                    <th className="py-3 px-4 w-24">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="text-sm">
-                  {commentsList.map((c) => {
-                    const author = usersList.find((u) => u.id === c.authorId);
-                    return (
-                      <tr
-                        key={c.id}
-                        className="border-b border-white/5 hover:bg-white/5 transition-colors"
-                      >
-                        <td className="py-3 px-4">
-                          <p className="text-zinc-300 text-sm line-clamp-2">
-                            {c.content}
-                          </p>
-                          <div className="text-[10px] text-zinc-500 mt-1 uppercase font-bold tracking-wider">
-                            Series:{" "}
-                            {seriesList.find((s) => s.id === c.seriesId)
-                              ?.title || c.seriesId}
-                            {c.chapterId && ` | Chapter: ${c.chapterId}`}
-                          </div>
-                        </td>
-                        <td className="py-3 px-4 text-white font-medium">
-                          {author?.displayName || "Unknown"}
-                        </td>
-                        <td className="py-3 px-4 text-zinc-400 text-xs">
-                          {c.createdAt?.toDate
-                            ? new Date(
-                                c.createdAt.toDate(),
-                              ).toLocaleDateString()
-                            : "N/A"}
-                        </td>
-                        <td className="py-3 px-4">
-                          <button
-                            onClick={() => handleDeleteComment(c.id)}
-                            className="text-red-500 hover:text-red-400 font-bold text-xs uppercase tracking-wider transition-colors"
-                          >
-                            Delete
-                          </button>
+            <div className="space-y-6" dir="rtl">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white uppercase tracking-tight">
+                    مدیریت و تایید دیدگاه‌ها
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    بررسی، تایید، رد یا حذف دیدگاه‌های کاربران در تمامی آثار و چپترها
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 bg-black/40 border border-white/10 p-2.5 rounded-2xl">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-zinc-300">
+                    <input 
+                      type="checkbox"
+                      checked={siteSettings.autoApproveComments || false}
+                      onChange={(e) => {
+                        const newVal = e.target.checked;
+                        const updated = { ...siteSettings, autoApproveComments: newVal };
+                        setSiteSettings(updated);
+                        apiClient.saveSettings("global", updated)
+                          .then(() => alert(newVal ? "تایید خودکار کامنت‌ها فعال شد." : "تایید خودکار کامنت‌ها غیرفعال شد."))
+                          .catch((err: any) => alert("خطا در ذخیره تنظیمات: " + err.message));
+                      }}
+                      className="form-checkbox h-4 w-4 text-[var(--color-asura-accent)] rounded border-white/20 bg-black"
+                    />
+                    <span>تایید خودکار دیدگاه‌های جدید</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Status Filter Tabs */}
+              <div className="flex flex-wrap items-center justify-between gap-4 bg-black/30 p-2.5 rounded-2xl border border-white/5">
+                <div className="flex items-center gap-2">
+                  {[
+                    { key: "all", label: "همه دیدگاه‌ها" },
+                    { key: "pending", label: "در انتظار تایید ⏳" },
+                    { key: "approved", label: "تایید شده ✅" },
+                    { key: "rejected", label: "رد شده ❌" },
+                  ].map((tab) => (
+                    <button
+                      key={tab.key}
+                      onClick={() => {
+                        setCommentStatusFilter(tab.key as any);
+                        setSelectedCommentIds([]);
+                      }}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                        commentStatusFilter === tab.key
+                          ? "bg-[var(--color-asura-accent)] text-white shadow-lg"
+                          : "bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Batch Actions Bar */}
+                {selectedCommentIds.length > 0 && (
+                  <div className="flex items-center gap-2 bg-[var(--color-asura-accent)]/10 border border-[var(--color-asura-accent)]/30 px-3 py-1.5 rounded-xl animate-fadeIn">
+                    <span className="text-xs font-bold text-white ml-2">
+                      {selectedCommentIds.length} مورد انتخاب شده:
+                    </span>
+                    <button
+                      onClick={() => handleBatchUpdateCommentStatus("approved")}
+                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-colors"
+                    >
+                      تایید همه
+                    </button>
+                    <button
+                      onClick={() => handleBatchUpdateCommentStatus("rejected")}
+                      className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold transition-colors"
+                    >
+                      رد همه
+                    </button>
+                    <button
+                      onClick={handleBatchDeleteComments}
+                      className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-bold transition-colors"
+                    >
+                      حذف همه
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Comments Table */}
+              <div className="bg-black/20 border border-white/5 rounded-2xl overflow-hidden overflow-x-auto">
+                <table className="w-full text-right border-collapse min-w-[700px]">
+                  <thead>
+                    <tr className="border-b border-white/10 text-zinc-400 text-xs font-bold uppercase bg-black/40">
+                      <th className="py-3.5 px-4 w-10 text-center">
+                        <input
+                          type="checkbox"
+                          checked={
+                            commentsList.length > 0 &&
+                            selectedCommentIds.length === commentsList.length
+                          }
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedCommentIds(commentsList.map((c) => c.id));
+                            } else {
+                              setSelectedCommentIds([]);
+                            }
+                          }}
+                          className="form-checkbox h-4 w-4 text-[var(--color-asura-accent)] rounded border-white/20 bg-black cursor-pointer"
+                        />
+                      </th>
+                      <th className="py-3.5 px-4">متن دیدگاه</th>
+                      <th className="py-3.5 px-4 w-40">نویسنده</th>
+                      <th className="py-3.5 px-4 w-32">اثر / چپتر</th>
+                      <th className="py-3.5 px-4 w-32">تاریخ</th>
+                      <th className="py-3.5 px-4 w-28 text-center">وضعیت</th>
+                      <th className="py-3.5 px-4 w-36 text-center">عملیات</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-xs divide-y divide-white/5">
+                    {commentsList.map((c) => {
+                      const author = usersList.find((u) => u.id === c.userId || u.id === c.authorId);
+                      const isSelected = selectedCommentIds.includes(c.id);
+                      const status = c.status || 'approved';
+                      const seriesName = c.seriesTitle || seriesList.find((s) => s.id === c.seriesId)?.title || c.seriesId || '—';
+                      const chapterNum = c.chapterNumber !== undefined ? c.chapterNumber : (c.chapterId ? c.chapterId.replace('series-', '') : '—');
+
+                      return (
+                        <tr
+                          key={c.id}
+                          className={`hover:bg-white/5 transition-colors ${
+                            isSelected ? "bg-[var(--color-asura-accent)]/10" : ""
+                          }`}
+                        >
+                          <td className="py-3.5 px-4 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedCommentIds((prev) => [...prev, c.id]);
+                                } else {
+                                  setSelectedCommentIds((prev) =>
+                                    prev.filter((id) => id !== c.id)
+                                  );
+                                }
+                              }}
+                              className="form-checkbox h-4 w-4 text-[var(--color-asura-accent)] rounded border-white/20 bg-black cursor-pointer"
+                            />
+                          </td>
+                          <td className="py-3.5 px-4 max-w-xs">
+                            <p className="text-zinc-200 font-medium whitespace-pre-wrap leading-relaxed line-clamp-3">
+                              {c.content}
+                            </p>
+                            {c.parentId && (
+                              <span className="inline-block mt-1 text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                                ↳ پاسخ به دیدگاه
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-2">
+                              {c.userAvatar || author?.avatarUrl ? (
+                                <img
+                                  src={c.userAvatar || author?.avatarUrl}
+                                  alt="avatar"
+                                  className="w-6 h-6 rounded-full object-cover shrink-0"
+                                />
+                              ) : (
+                                <div className="w-6 h-6 rounded-full bg-zinc-800 shrink-0 flex items-center justify-center text-[10px] text-zinc-400">
+                                  👤
+                                </div>
+                              )}
+                              <span className="text-white font-bold truncate max-w-[100px]">
+                                {c.userName || author?.displayName || "کاربر ناشناس"}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4 text-zinc-400">
+                            <div className="font-bold text-zinc-300 truncate max-w-[120px]" title={seriesName}>
+                              {seriesName}
+                            </div>
+                            <div className="text-[10px] text-zinc-500">
+                              {c.chapterId ? `چپتر ${chapterNum}` : "صفحه اثر"}
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4 text-zinc-400 text-[11px] dir-ltr text-right">
+                            {c.createdAt
+                              ? new Date(c.createdAt).toLocaleDateString("fa-IR")
+                              : "—"}
+                          </td>
+                          <td className="py-3.5 px-4 text-center">
+                            {status === "pending" && (
+                              <span className="px-2 py-1 rounded-lg text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                ⏳ در انتظار
+                              </span>
+                            )}
+                            {status === "approved" && (
+                              <span className="px-2 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                ✅ تایید شده
+                              </span>
+                            )}
+                            {status === "rejected" && (
+                              <span className="px-2 py-1 rounded-lg text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/30">
+                                ❌ رد شده
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {status !== "approved" && (
+                                <button
+                                  onClick={() => handleUpdateCommentStatus(c.id, "approved")}
+                                  className="p-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white rounded-lg font-bold text-[10px] transition-colors"
+                                  title="تایید دیدگاه"
+                                >
+                                  تایید
+                                </button>
+                              )}
+                              {status !== "rejected" && (
+                                <button
+                                  onClick={() => handleUpdateCommentStatus(c.id, "rejected")}
+                                  className="p-1.5 bg-amber-600/20 hover:bg-amber-600 text-amber-400 hover:text-white rounded-lg font-bold text-[10px] transition-colors"
+                                  title="رد دیدگاه"
+                                >
+                                  رد
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleDeleteComment(c.id)}
+                                className="p-1.5 bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white rounded-lg font-bold text-[10px] transition-colors"
+                                title="حذف دائم"
+                              >
+                                حذف
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {commentsList.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="py-12 text-center text-zinc-500">
+                          هیچ دیدگاهی برای نمایش یافت نشد.
                         </td>
                       </tr>
-                    );
-                  })}
-                  {commentsList.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={4}
-                        className="py-8 text-center text-zinc-500"
-                      >
-                        No comments found.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

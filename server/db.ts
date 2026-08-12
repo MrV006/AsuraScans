@@ -88,6 +88,8 @@ export interface Comment {
   userName: string;
   userAvatar: string;
   content: string;
+  parentId?: string;
+  status?: 'pending' | 'approved' | 'rejected';
   likes: string[]; // array of userIds
   dislikes: string[]; // array of userIds
   createdAt: string;
@@ -582,7 +584,9 @@ class DatabaseManager {
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS seoTitle TEXT`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS seoDescription TEXT`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS seoKeywords TEXT`,
-        `ALTER TABLE purchased_chapters ADD COLUMN IF NOT EXISTS chapterNumber DOUBLE`
+        `ALTER TABLE purchased_chapters ADD COLUMN IF NOT EXISTS chapterNumber DOUBLE`,
+        `ALTER TABLE comments ADD COLUMN IF NOT EXISTS parentId VARCHAR(100) DEFAULT NULL`,
+        `ALTER TABLE comments ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'pending'`
       ];
 
       for (const aq of alterQueries) {
@@ -591,6 +595,12 @@ class DatabaseManager {
         } catch (err) {
           // ignore error if already exists
         }
+      }
+
+      try {
+        await this.pool.execute(`UPDATE comments SET status = 'approved' WHERE status IS NULL OR status = ''`);
+      } catch (e) {
+        // ignore
       }
 
       // Convert tables and all their columns to utf8mb4 to support Persian properly
@@ -1657,16 +1667,23 @@ class DatabaseManager {
   // -----------------------------------------------------------------
   // COMMENTS METHODS
   // -----------------------------------------------------------------
-  async getComments(chapterId: string): Promise<Comment[]> {
+  async getComments(chapterId: string, currentUserId?: string, isAdminOrModerator: boolean = false): Promise<Comment[]> {
     if (this.isUsingMySQL && this.pool) {
       const [rows] = await this.pool.execute('SELECT * FROM comments WHERE chapterId = ? ORDER BY createdAt DESC', [chapterId]);
-      return (rows as any[]).map(r => ({
+      const mapped = (rows as any[]).map(r => ({
         ...r,
+        status: r.status || 'approved',
+        parentId: r.parentId || '',
         likes: r.likes ? JSON.parse(r.likes) : [],
         dislikes: r.dislikes ? JSON.parse(r.dislikes) : []
       }));
+      if (isAdminOrModerator) return mapped;
+      return mapped.filter(c => c.status === 'approved' || (currentUserId && c.userId === currentUserId));
     }
-    return this.localData.comments.filter(c => c.chapterId === chapterId);
+
+    const allForChapter = (this.localData.comments || []).filter(c => c.chapterId === chapterId);
+    if (isAdminOrModerator) return allForChapter;
+    return allForChapter.filter(c => (c.status || 'approved') === 'approved' || (currentUserId && c.userId === currentUserId));
   }
 
   async getCommentById(id: string): Promise<Comment | null> {
@@ -1676,22 +1693,31 @@ class DatabaseManager {
       if (!r) return null;
       return {
         ...r,
+        status: r.status || 'approved',
+        parentId: r.parentId || '',
         likes: r.likes ? JSON.parse(r.likes) : [],
         dislikes: r.dislikes ? JSON.parse(r.dislikes) : []
       };
     }
-    return this.localData.comments.find(c => c.id === id) || null;
+    const c = (this.localData.comments || []).find(c => c.id === id);
+    if (!c) return null;
+    return {
+      ...c,
+      status: c.status || 'approved'
+    };
   }
 
   async addComment(c: any): Promise<Comment> {
     const now = new Date().toISOString();
     const likesStr = JSON.stringify([]);
     const dislikesStr = JSON.stringify([]);
+    const parentId = c.parentId || '';
+    const status = c.status || 'pending';
 
     if (this.isUsingMySQL && this.pool) {
       await this.pool.execute(
-        `INSERT INTO comments (id, chapterId, userId, userName, userAvatar, content, likes, dislikes, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [c.id, c.chapterId, c.userId, c.userName, c.userAvatar || '', c.content, likesStr, dislikesStr, now]
+        `INSERT INTO comments (id, chapterId, userId, userName, userAvatar, content, parentId, status, likes, dislikes, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [c.id, c.chapterId, c.userId, c.userName, c.userAvatar || '', c.content, parentId, status, likesStr, dislikesStr, now]
       );
       return (await this.getCommentById(c.id))!;
     }
@@ -1703,14 +1729,60 @@ class DatabaseManager {
       userName: c.userName,
       userAvatar: c.userAvatar || '',
       content: c.content,
+      parentId,
+      status,
       likes: [],
       dislikes: [],
       createdAt: now
     };
 
+    if (!this.localData.comments) this.localData.comments = [];
     this.localData.comments.push(commentObj);
     this.saveLocalData();
     return commentObj;
+  }
+
+  async updateCommentStatus(id: string, status: 'pending' | 'approved' | 'rejected'): Promise<Comment | null> {
+    if (this.isUsingMySQL && this.pool) {
+      await this.pool.execute('UPDATE comments SET status = ? WHERE id = ?', [status, id]);
+      return await this.getCommentById(id);
+    }
+    const idx = (this.localData.comments || []).findIndex(c => c.id === id);
+    if (idx >= 0) {
+      this.localData.comments[idx].status = status;
+      this.saveLocalData();
+      return this.localData.comments[idx];
+    }
+    return null;
+  }
+
+  async batchUpdateCommentsStatus(ids: string[], status: 'pending' | 'approved' | 'rejected'): Promise<boolean> {
+    if (!ids || ids.length === 0) return true;
+    if (this.isUsingMySQL && this.pool) {
+      const placeholders = ids.map(() => '?').join(',');
+      await this.pool.execute(`UPDATE comments SET status = ? WHERE id IN (${placeholders})`, [status, ...ids]);
+      return true;
+    }
+    this.localData.comments = (this.localData.comments || []).map(c => {
+      if (ids.includes(c.id)) {
+        return { ...c, status };
+      }
+      return c;
+    });
+    this.saveLocalData();
+    return true;
+  }
+
+  async batchDeleteComments(ids: string[]): Promise<boolean> {
+    if (!ids || ids.length === 0) return true;
+    if (this.isUsingMySQL && this.pool) {
+      const placeholders = ids.map(() => '?').join(',');
+      await this.pool.execute(`DELETE FROM comments WHERE id IN (${placeholders})`, ids);
+      return true;
+    }
+    this.localData.comments = (this.localData.comments || []).filter(c => !ids.includes(c.id));
+    this.saveLocalData();
+    return true;
   }
 
   async toggleCommentReaction(id: string, userId: string, type: 'like' | 'dislike'): Promise<Comment | null> {
@@ -2152,16 +2224,83 @@ class DatabaseManager {
     return { totalSeries, totalChapters, totalUsers, dailyViews };
   }
 
-  async getAllComments(): Promise<Comment[]> {
+  async getAllComments(statusFilter?: string): Promise<any[]> {
+    let rawList: Comment[] = [];
     if (this.isUsingMySQL && this.pool) {
-      const [rows] = await this.pool.execute('SELECT * FROM comments ORDER BY createdAt DESC');
-      return (rows as any[]).map(r => ({
+      let query = 'SELECT * FROM comments';
+      let params: any[] = [];
+      if (statusFilter && statusFilter !== 'all') {
+        query += ' WHERE status = ?';
+        params.push(statusFilter);
+      }
+      query += ' ORDER BY createdAt DESC';
+      const [rows] = await this.pool.execute(query, params);
+      rawList = (rows as any[]).map(r => ({
         ...r,
+        status: r.status || 'approved',
+        parentId: r.parentId || '',
         likes: r.likes ? JSON.parse(r.likes) : [],
         dislikes: r.dislikes ? JSON.parse(r.dislikes) : []
       }));
+    } else {
+      rawList = (this.localData.comments || []).map(r => ({
+        ...r,
+        status: r.status || 'approved'
+      }));
+      if (statusFilter && statusFilter !== 'all') {
+        rawList = rawList.filter(c => (c.status || 'approved') === statusFilter);
+      }
+      rawList = [...rawList].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
-    return this.localData.comments;
+
+    // Enrich with series title and chapter number
+    const seriesList = await this.getSeries();
+    const seriesMap = new Map<string, string>();
+    seriesList.forEach(s => seriesMap.set(s.id, s.title));
+
+    const chapterMap = new Map<string, { number: number; seriesId: string }>();
+    if (this.isUsingMySQL && this.pool) {
+      try {
+        const [chRows] = await this.pool.execute('SELECT id, number, seriesId FROM chapters');
+        (chRows as any[]).forEach(ch => {
+          chapterMap.set(ch.id, { number: ch.number, seriesId: ch.seriesId });
+        });
+      } catch (e) {
+        // ignore
+      }
+    } else {
+      (this.localData.chapters || []).forEach(ch => {
+        chapterMap.set(ch.id, { number: ch.number, seriesId: ch.seriesId });
+      });
+    }
+
+    return rawList.map(c => {
+      let seriesId = '';
+      let seriesTitle = '';
+      let chapterNumber: number | undefined = undefined;
+
+      if (c.chapterId) {
+        if (c.chapterId.startsWith('series-')) {
+          seriesId = c.chapterId.replace('series-', '');
+          seriesTitle = seriesMap.get(seriesId) || seriesId;
+        } else {
+          const chInfo = chapterMap.get(c.chapterId);
+          if (chInfo) {
+            chapterNumber = chInfo.number;
+            seriesId = chInfo.seriesId;
+            seriesTitle = seriesMap.get(seriesId) || seriesId;
+          }
+        }
+      }
+
+      return {
+        ...c,
+        status: c.status || 'approved',
+        seriesId,
+        seriesTitle,
+        chapterNumber
+      };
+    });
   }
 
   async getCommentsForSeries(seriesId: string): Promise<Comment[]> {

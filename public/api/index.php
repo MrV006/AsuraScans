@@ -200,6 +200,8 @@ function ensureSchema($pdo) {
             userName VARCHAR(100) NOT NULL,
             userAvatar TEXT,
             content TEXT NOT NULL,
+            parentId VARCHAR(100),
+            status VARCHAR(20) DEFAULT 'pending',
             likes TEXT,
             dislikes TEXT,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -324,6 +326,16 @@ function ensureSchema($pdo) {
             $pdo->exec("ALTER TABLE `$t` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
         } catch (Exception $e) {}
     }
+
+    try {
+        $pdo->exec("ALTER TABLE comments ADD COLUMN parentId VARCHAR(100) DEFAULT NULL");
+    } catch (Exception $e) {}
+    try {
+        $pdo->exec("ALTER TABLE comments ADD COLUMN status VARCHAR(20) DEFAULT 'pending'");
+    } catch (Exception $e) {}
+    try {
+        $pdo->exec("UPDATE comments SET status = 'approved' WHERE status IS NULL OR status = ''");
+    } catch (Exception $e) {}
 
     // Migrate existing users' melliCode to 8-digit random unique codes if empty or not 8 digits
     $stmt = $pdo->query("SELECT id, melliCode FROM users");
@@ -1287,8 +1299,19 @@ if ($method === 'POST' && matchRoute('/series/:seriesId/chapters/:id/submit', $s
 
 // 28. GET CHAPTER COMMENTS
 if ($method === 'GET' && matchRoute('/chapters/:chapterId/comments', $sub_path, $params)) {
-    $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? ORDER BY createdAt DESC");
-    $stmt->execute([$params['chapterId']]);
+    $user = getUserFromHeaders($pdo);
+    $isAdmin = $user && ($user['role'] === 'admin' || (isset($user['roles']) && in_array('super_admin', json_decode($user['roles'] ?? '[]', true))));
+    
+    if ($isAdmin) {
+        $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? ORDER BY createdAt DESC");
+        $stmt->execute([$params['chapterId']]);
+    } else if ($user) {
+        $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? AND (status = 'approved' OR status IS NULL OR status = '' OR userId = ?) ORDER BY createdAt DESC");
+        $stmt->execute([$params['chapterId'], $user['id']]);
+    } else {
+        $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? AND (status = 'approved' OR status IS NULL OR status = '') ORDER BY createdAt DESC");
+        $stmt->execute([$params['chapterId']]);
+    }
     $comments = $stmt->fetchAll();
     
     foreach ($comments as &$c) {
@@ -1296,6 +1319,7 @@ if ($method === 'GET' && matchRoute('/chapters/:chapterId/comments', $sub_path, 
         if (!is_array($c['likes'])) $c['likes'] = [];
         $c['dislikes'] = $c['dislikes'] ? json_decode($c['dislikes'], true) : [];
         if (!is_array($c['dislikes'])) $c['dislikes'] = [];
+        if (empty($c['status'])) $c['status'] = 'approved';
     }
     
     sendResponse($comments);
@@ -1310,15 +1334,37 @@ if ($method === 'POST' && matchRoute('/chapters/:chapterId/comments', $sub_path,
     $content = isset($input['content']) ? trim($input['content']) : '';
     if (empty($content)) sendResponse(["error" => "محتوای کامنت نمی‌تواند خالی باشد."], 400);
     
+    $parentId = isset($input['parentId']) ? $input['parentId'] : null;
+    $isAdmin = ($user['role'] === 'admin' || (isset($user['roles']) && in_array('super_admin', json_decode($user['roles'] ?? '[]', true))));
+    
+    // Check auto approve setting
+    $autoApprove = false;
+    $stmtSet = $pdo->prepare("SELECT val FROM settings WHERE id = 'global'");
+    $stmtSet->execute();
+    $globalSet = $stmtSet->fetch();
+    if ($globalSet && !empty($globalSet['val'])) {
+        $gVal = json_decode($globalSet['val'], true);
+        if (isset($gVal['autoApproveComments']) && $gVal['autoApproveComments']) {
+            $autoApprove = true;
+        }
+    }
+    
+    $status = ($isAdmin || $autoApprove) ? 'approved' : 'pending';
+    if (isset($input['status']) && in_array($input['status'], ['pending', 'approved', 'rejected'])) {
+        $status = $input['status'];
+    }
+    
     $id = 'comment-' . round(microtime(true) * 1000);
-    $stmt = $pdo->prepare("INSERT INTO comments (id, chapterId, userId, userName, userAvatar, content, likes, dislikes) VALUES (?, ?, ?, ?, ?, ?, '[]', '[]')");
+    $stmt = $pdo->prepare("INSERT INTO comments (id, chapterId, userId, userName, userAvatar, content, parentId, status, likes, dislikes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]')");
     $stmt->execute([
         $id,
         $params['chapterId'],
         $user['id'],
         $user['displayName'],
         $user['avatarUrl'],
-        $content
+        $content,
+        $parentId,
+        $status
     ]);
     
     // Fetch and return
@@ -1327,8 +1373,55 @@ if ($method === 'POST' && matchRoute('/chapters/:chapterId/comments', $sub_path,
     $c = $stmt->fetch();
     $c['likes'] = [];
     $c['dislikes'] = [];
+    $c['status'] = $status;
     
     sendResponse($c);
+}
+
+// UPDATE COMMENT STATUS
+if ($method === 'PUT' && matchRoute('/comments/:id/status', $sub_path, $params)) {
+    requireAdmin($pdo);
+    $input = getJsonInput();
+    $status = isset($input['status']) ? $input['status'] : 'approved';
+    if (!in_array($status, ['pending', 'approved', 'rejected'])) {
+        sendResponse(["error" => "وضعیت نامعتبر."], 400);
+    }
+    
+    $stmt = $pdo->prepare("UPDATE comments SET status = ? WHERE id = ?");
+    $stmt->execute([$status, $params['id']]);
+    
+    sendResponse(["success" => true, "status" => $status]);
+}
+
+// BATCH UPDATE COMMENT STATUS (ADMIN)
+if ($method === 'POST' && $sub_path === '/admin/comments/batch-status') {
+    requireAdmin($pdo);
+    $input = getJsonInput();
+    $ids = isset($input['ids']) && is_array($input['ids']) ? $input['ids'] : [];
+    $status = isset($input['status']) ? $input['status'] : 'approved';
+    
+    if (!empty($ids)) {
+        $in  = str_repeat('?,', count($ids) - 1) . '?';
+        $stmt = $pdo->prepare("UPDATE comments SET status = ? WHERE id IN ($in)");
+        $stmt->execute(array_merge([$status], $ids));
+    }
+    
+    sendResponse(["success" => true]);
+}
+
+// BATCH DELETE COMMENTS (ADMIN)
+if ($method === 'POST' && $sub_path === '/admin/comments/batch-delete') {
+    requireAdmin($pdo);
+    $input = getJsonInput();
+    $ids = isset($input['ids']) && is_array($input['ids']) ? $input['ids'] : [];
+    
+    if (!empty($ids)) {
+        $in  = str_repeat('?,', count($ids) - 1) . '?';
+        $stmt = $pdo->prepare("DELETE FROM comments WHERE id IN ($in)");
+        $stmt->execute($ids);
+    }
+    
+    sendResponse(["success" => true]);
 }
 
 // 30. REACT TO COMMENT (LIKE/DISLIKE)
@@ -2032,11 +2125,56 @@ if ($method === 'GET' && $sub_path === '/admin/stats') {
 // 42. GET ALL COMMENTS (ADMIN)
 if ($method === 'GET' && $sub_path === '/admin/comments') {
     requireAdmin($pdo);
-    $stmt = $pdo->query("SELECT * FROM comments ORDER BY createdAt DESC");
+    $status = isset($_GET['status']) ? $_GET['status'] : 'all';
+    
+    if ($status && $status !== 'all') {
+        $stmt = $pdo->prepare("SELECT * FROM comments WHERE status = ? ORDER BY createdAt DESC");
+        $stmt->execute([$status]);
+    } else {
+        $stmt = $pdo->query("SELECT * FROM comments ORDER BY createdAt DESC");
+    }
     $comments = $stmt->fetchAll();
+
+    // Map series and chapters
+    $seriesStmt = $pdo->query("SELECT id, title FROM series");
+    $seriesMap = [];
+    if ($seriesStmt) {
+        while ($row = $seriesStmt->fetch()) {
+            $seriesMap[$row['id']] = $row['title'];
+        }
+    }
+
+    $chapStmt = $pdo->query("SELECT id, number, seriesId FROM chapters");
+    $chapMap = [];
+    if ($chapStmt) {
+        while ($row = $chapStmt->fetch()) {
+            $chapMap[$row['id']] = ['number' => (float)$row['number'], 'seriesId' => $row['seriesId']];
+        }
+    }
+
     foreach ($comments as &$c) {
         $c['likes'] = $c['likes'] ? json_decode($c['likes'], true) : [];
+        if (!is_array($c['likes'])) $c['likes'] = [];
         $c['dislikes'] = $c['dislikes'] ? json_decode($c['dislikes'], true) : [];
+        if (!is_array($c['dislikes'])) $c['dislikes'] = [];
+        if (empty($c['status'])) $c['status'] = 'approved';
+
+        $c['seriesId'] = '';
+        $c['seriesTitle'] = '';
+        $c['chapterNumber'] = null;
+
+        if (!empty($c['chapterId'])) {
+            if (strpos($c['chapterId'], 'series-') === 0) {
+                $sId = str_replace('series-', '', $c['chapterId']);
+                $c['seriesId'] = $sId;
+                $c['seriesTitle'] = isset($seriesMap[$sId]) ? $seriesMap[$sId] : $sId;
+            } else if (isset($chapMap[$c['chapterId']])) {
+                $chInfo = $chapMap[$c['chapterId']];
+                $c['chapterNumber'] = $chInfo['number'];
+                $c['seriesId'] = $chInfo['seriesId'];
+                $c['seriesTitle'] = isset($seriesMap[$chInfo['seriesId']]) ? $seriesMap[$chInfo['seriesId']] : $chInfo['seriesId'];
+            }
+        }
     }
     sendResponse($comments);
 }

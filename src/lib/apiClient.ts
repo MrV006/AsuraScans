@@ -296,11 +296,50 @@ export const apiClient = {
     return res.json();
   },
 
-  async deleteComment(commentId: string) {
+  async deleteComment(commentId: string, adminUid?: string) {
     const res = await fetch(`${API_URL}/api/comments/${commentId}/delete`, {
       method: 'POST',
-      headers: this.getHeaders()
+      headers: this.getHeaders(adminUid)
     });
+    return res.json();
+  },
+
+  async updateCommentStatus(commentId: string, status: 'approved' | 'rejected' | 'pending', adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/comments/${commentId}/status`, {
+      method: 'PUT',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در تغییر وضعیت نظر.');
+    }
+    return res.json();
+  },
+
+  async batchUpdateCommentsStatus(commentIds: string[], status: 'approved' | 'rejected' | 'pending', adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/admin/comments/batch-status`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify({ ids: commentIds, status })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در تغییر گروهی وضعیت نظرات.');
+    }
+    return res.json();
+  },
+
+  async batchDeleteComments(commentIds: string[], adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/admin/comments/batch-delete`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify({ ids: commentIds })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'خطا در حذف گروهی نظرات.');
+    }
     return res.json();
   },
 
@@ -378,8 +417,11 @@ export const apiClient = {
     return res.json();
   },
 
-  async getAllCommentsAdmin(adminUid: string) {
-    const res = await fetch(`${API_URL}/api/admin/comments`, {
+  async getAllCommentsAdmin(adminUid: string, statusFilter?: string) {
+    const url = statusFilter && statusFilter !== 'all' 
+      ? `${API_URL}/api/admin/comments?status=${encodeURIComponent(statusFilter)}`
+      : `${API_URL}/api/admin/comments`;
+    const res = await fetch(url, {
       headers: this.getHeaders(adminUid)
     });
     return res.json();

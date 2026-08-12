@@ -1457,7 +1457,22 @@ async function startServer() {
   // -----------------------------------------------------------------
   app.get("/api/chapters/:chapterId/comments", async (req, res) => {
     try {
-      const list = await dbManager.getComments(req.params.chapterId);
+      const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.uid) as string;
+      let isAdminOrModerator = false;
+      if (uid) {
+        const user = await dbManager.getUser(uid);
+        if (user) {
+          const userRoles = user.roles || [user.role || 'user'];
+          const userPerms = user.permissions || [];
+          isAdminOrModerator = userRoles.includes('super_admin') || 
+                            userRoles.includes('admin') || 
+                            user.role === 'admin' ||
+                            userPerms.includes('delete_comment') ||
+                            userPerms.includes('approve_comment') ||
+                            userPerms.includes('manage_comments');
+        }
+      }
+      const list = await dbManager.getComments(req.params.chapterId, uid, isAdminOrModerator);
       res.json(list);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1466,9 +1481,85 @@ async function startServer() {
 
   app.post("/api/chapters/:chapterId/comments", async (req, res) => {
     try {
-      const saved = await dbManager.addComment(req.body);
+      const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.body.userId) as string;
+      let initialStatus: 'pending' | 'approved' = 'pending';
+
+      if (uid) {
+        const user = await dbManager.getUser(uid);
+        if (user) {
+          const userRoles = user.roles || [user.role || 'user'];
+          const userPerms = user.permissions || [];
+          const isAdminOrMod = userRoles.includes('super_admin') || 
+                              userRoles.includes('admin') || 
+                              user.role === 'admin' ||
+                              userPerms.includes('delete_comment') ||
+                              userPerms.includes('approve_comment') ||
+                              userPerms.includes('manage_comments');
+          if (isAdminOrMod) {
+            initialStatus = 'approved';
+          }
+        }
+      }
+
+      if (initialStatus !== 'approved') {
+        const settings = await dbManager.getSettings('global');
+        if (settings && settings.autoApproveComments) {
+          initialStatus = 'approved';
+        }
+      }
+
+      const commentData = {
+        ...req.body,
+        chapterId: req.params.chapterId,
+        status: req.body.status || initialStatus
+      };
+
+      const saved = await dbManager.addComment(commentData);
       io.emit("comments:updated", { chapterId: req.params.chapterId });
       res.json(saved);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/comments/:id/status", requireAdmin, async (req, res) => {
+    try {
+      const { status } = req.body;
+      if (!['pending', 'approved', 'rejected'].includes(status)) {
+        return res.status(400).json({ error: "Invalid status value" });
+      }
+      const updated = await dbManager.updateCommentStatus(req.params.id, status);
+      if (!updated) return res.status(404).json({ error: "Comment not found" });
+      io.emit("comments:updated", { chapterId: updated.chapterId });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/comments/batch-status", requireAdmin, async (req, res) => {
+    try {
+      const { ids, status } = req.body;
+      if (!Array.isArray(ids) || !['pending', 'approved', 'rejected'].includes(status)) {
+        return res.status(400).json({ error: "Invalid request payload" });
+      }
+      await dbManager.batchUpdateCommentsStatus(ids, status);
+      io.emit("comments:updated", {});
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/comments/batch-delete", requireAdmin, async (req, res) => {
+    try {
+      const { ids } = req.body;
+      if (!Array.isArray(ids)) {
+        return res.status(400).json({ error: "Invalid request payload" });
+      }
+      await dbManager.batchDeleteComments(ids);
+      io.emit("comments:updated", {});
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1854,7 +1945,8 @@ async function startServer() {
 
   app.get("/api/admin/comments", requireAdmin, async (req, res) => {
     try {
-      const list = await dbManager.getAllComments();
+      const statusFilter = req.query.status as string;
+      const list = await dbManager.getAllComments(statusFilter);
       res.json(list);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

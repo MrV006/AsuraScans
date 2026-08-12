@@ -11,6 +11,7 @@ interface Comment {
   parentId?: string;
   authorId: string;
   content: string;
+  status?: 'pending' | 'approved' | 'rejected';
   createdAt: any;
   updatedAt: any;
   likes?: string[];
@@ -53,10 +54,11 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
 
   const commentScopeId = chapterId || `series-${seriesId}`;
 
+  const [pendingNotice, setPendingNotice] = useState<string | null>(null);
+
   const fetchComments = async () => {
     try {
       const data = await apiClient.getComments(commentScopeId);
-      // Adapt comments data
       const mappedComments: Comment[] = data.map((c: any) => ({
         id: c.id,
         seriesId,
@@ -64,6 +66,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
         parentId: c.parentId || '',
         authorId: c.userId,
         content: c.content,
+        status: c.status || 'approved',
         createdAt: c.createdAt ? { toDate: () => new Date(c.createdAt) } : null,
         likes: c.likes || [],
         dislikes: c.dislikes || [],
@@ -111,7 +114,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
 
     try {
       const randomId = 'comment_' + Math.random().toString(36).substr(2, 9);
-      await apiClient.addComment(commentScopeId, {
+      const res = await apiClient.addComment(commentScopeId, {
         id: randomId,
         userId: user.uid,
         userName: profile?.displayName || 'User',
@@ -119,6 +122,13 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
         content: finalContent,
         parentId: parentId
       });
+
+      if (res && res.status === 'pending') {
+        setPendingNotice('دیدگاه شما با موفقیت ثبت شد و پس از بررسی و تایید توسط مدیریت در وبسایت منتشر خواهد شد.');
+      } else {
+        setPendingNotice(null);
+      }
+
       if (isReply) {
         setReplyText('');
         setReplyingTo(null);
@@ -127,6 +137,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
         setNewComment('');
         setIsMainSpoiler(false);
       }
+      fetchComments();
     } catch (error) {
       console.error("Error adding comment:", error);
     }
@@ -136,6 +147,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
     if (!window.confirm("Are you sure you want to delete this comment?")) return;
     try {
       await apiClient.deleteComment(commentId);
+      fetchComments();
     } catch (error) {
       console.error("Error deleting comment:", error);
     }
@@ -144,7 +156,6 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
   const handleVote = async (comment: Comment, type: 'up' | 'down') => {
     if (!user) return alert("Log in to vote!");
     
-    // Optimistic Update
     setComments(prevComments => {
       return prevComments.map(c => {
         if (c.id === comment.id) {
@@ -272,6 +283,13 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
         Discussion {comments.length > 0 && `(${comments.length})`}
       </h3>
 
+      {pendingNotice && (
+        <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center gap-3 text-amber-300 text-xs font-bold" dir="rtl">
+          <AlertTriangle size={18} className="shrink-0 text-amber-400" />
+          <span className="leading-relaxed">{pendingNotice}</span>
+        </div>
+      )}
+
       {user ? (
         profile?.hasCompletedSetup ? (
           !replyingTo && renderCommentForm()
@@ -295,6 +313,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
       <div className="space-y-6">
         {topLevelComments.map((comment) => {
           const replies = comments.filter(c => c.parentId === comment.id);
+          const isPending = comment.status === 'pending';
           return (
             <div key={comment.id} className="flex gap-4">
               <div className="w-10 h-10 rounded-full bg-[var(--color-asura-dark)] flex items-center justify-center shrink-0 overflow-hidden border border-white/5">
@@ -304,15 +323,20 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
                    <UserIcon size={20} className="text-zinc-500" />
                  )}
               </div>
-              <div className="flex-1 bg-white/5 border border-white/5 rounded-2xl p-4 relative group">
+              <div className={`flex-1 border rounded-2xl p-4 relative group ${isPending ? 'bg-amber-500/5 border-amber-500/30' : 'bg-white/5 border-white/5'}`}>
                 <div className="flex justify-between items-center mb-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="font-bold text-white text-sm">
                       {comment.authorProfile?.displayName || 'Anonymous User'}
                     </span>
                     <span className="text-[10px] text-zinc-500">
                       {comment.createdAt?.toDate ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : 'Just now'}
                     </span>
+                    {isPending && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1" dir="rtl">
+                        ⏳ در انتظار تایید مدیریت
+                      </span>
+                    )}
                   </div>
                   {(isAdmin || user?.uid === comment.authorId) && (
                     <button 
@@ -343,7 +367,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
                          } else {
                            setShowSetupModal(true);
                          }
-                       }} 
+                       }}
                        className="flex items-center gap-1 text-xs font-bold text-zinc-500 hover:text-white transition-colors ml-auto"
                      >
                        <MessageSquare size={14} /> Reply
@@ -359,7 +383,9 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
 
                 {replies.length > 0 && (
                   <div className="mt-4 space-y-4 pt-4 border-t border-white/5 pl-4 ml-2 border-l-2 border-white/10">
-                     {replies.map(reply => (
+                    {replies.map(reply => {
+                      const isReplyPending = reply.status === 'pending';
+                      return (
                         <div key={reply.id} className="flex gap-3">
                            <div className="w-8 h-8 rounded-full bg-black/40 flex items-center justify-center shrink-0 overflow-hidden border border-white/5">
                              {reply.authorProfile?.avatarUrl ? (
@@ -368,7 +394,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
                                <UserIcon size={16} className="text-zinc-500" />
                              )}
                            </div>
-                           <div className="flex-1 bg-black/20 rounded-xl p-3 relative group">
+                           <div className={`flex-1 rounded-xl p-3 relative group border ${isReplyPending ? 'bg-amber-500/5 border-amber-500/30' : 'bg-black/20 border-white/5'}`}>
                               <div className="flex justify-between items-center mb-1">
                                 <div className="flex items-center gap-2">
                                   <span className="font-bold text-white text-xs">
@@ -377,6 +403,11 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
                                   <span className="text-[9px] text-zinc-500">
                                     {reply.createdAt?.toDate ? formatDistanceToNow(reply.createdAt.toDate(), { addSuffix: true }) : 'Just now'}
                                   </span>
+                                  {isReplyPending && (
+                                    <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-500/20 text-amber-400 border border-amber-500/30" dir="rtl">
+                                      ⏳ در انتظار تایید
+                                    </span>
+                                  )}
                                 </div>
                                 {(isAdmin || user?.uid === reply.authorId) && (
                                   <button 
@@ -402,7 +433,8 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
                               </div>
                            </div>
                         </div>
-                     ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
