@@ -3216,10 +3216,19 @@ class DatabaseManager {
     const now = new Date().toISOString();
 
     if (this.isUsingMySQL && this.pool) {
+      const safeQuery = async (query: string): Promise<any[]> => {
+        try {
+          const [rows] = await this.pool!.execute(query);
+          return rows as any[];
+        } catch (e) {
+          return [];
+        }
+      };
+
       try {
         // 1. Users
-        const [userRows] = await this.pool.execute('SELECT * FROM users');
-        backup.users = (userRows as any[]).map(r => ({
+        const userRows = await safeQuery('SELECT * FROM users');
+        backup.users = userRows.map(r => ({
           ...r,
           banned: r.banned === 1,
           canCreateSeries: r.canCreateSeries === 1,
@@ -3229,8 +3238,8 @@ class DatabaseManager {
         }));
 
         // 2. Series
-        const [seriesRows] = await this.pool.execute('SELECT * FROM series');
-        backup.series = (seriesRows as any[]).map(r => ({
+        const seriesRows = await safeQuery('SELECT * FROM series');
+        backup.series = seriesRows.map(r => ({
           ...r,
           alternativeTitles: r.alternativeTitles ? r.alternativeTitles.split(',') : [],
           genres: r.genres ? r.genres.split(',') : [],
@@ -3240,8 +3249,8 @@ class DatabaseManager {
         }));
 
         // 3. Chapters
-        const [chapterRows] = await this.pool.execute('SELECT * FROM chapters');
-        backup.chapters = (chapterRows as any[]).map(r => ({
+        const chapterRows = await safeQuery('SELECT * FROM chapters');
+        backup.chapters = chapterRows.map(r => ({
           ...r,
           images: r.images ? r.images.split(',') : [],
           isPending: r.isPending === 1,
@@ -3249,29 +3258,26 @@ class DatabaseManager {
         }));
 
         // 4. Comments
-        const [commentRows] = await this.pool.execute('SELECT * FROM comments');
-        backup.comments = (commentRows as any[]).map(r => ({
+        const commentRows = await safeQuery('SELECT * FROM comments');
+        backup.comments = commentRows.map(r => ({
           ...r,
           likes: r.likes ? JSON.parse(r.likes) : [],
           dislikes: r.dislikes ? JSON.parse(r.dislikes) : []
         }));
 
         // 5. Bookmarks
-        const [bookmarkRows] = await this.pool.execute('SELECT * FROM bookmarks');
-        backup.bookmarks = bookmarkRows;
+        backup.bookmarks = await safeQuery('SELECT * FROM bookmarks');
 
         // 6. History
-        const [historyRows] = await this.pool.execute('SELECT * FROM history');
-        backup.history = historyRows;
+        backup.history = await safeQuery('SELECT * FROM history');
 
         // 7. Ratings
-        const [ratingRows] = await this.pool.execute('SELECT * FROM ratings');
-        backup.ratings = ratingRows;
+        backup.ratings = await safeQuery('SELECT * FROM ratings');
 
         // 8. Settings
-        const [settingRows] = await this.pool.execute('SELECT * FROM settings');
+        const settingRows = await safeQuery('SELECT * FROM settings');
         const settingsRecord: Record<string, any> = {};
-        for (const s of (settingRows as any[])) {
+        for (const s of settingRows) {
           try {
             settingsRecord[s.id] = JSON.parse(s.val);
           } catch (e) {
@@ -3281,23 +3287,32 @@ class DatabaseManager {
         backup.settings = settingsRecord;
 
         // 9. Reports
-        const [reportRows] = await this.pool.execute('SELECT * FROM reports');
-        backup.reports = reportRows;
+        backup.reports = await safeQuery('SELECT * FROM reports');
 
         // 10. Notifications
-        const [notifRows] = await this.pool.execute('SELECT * FROM notifications');
-        backup.notifications = (notifRows as any[]).map(r => ({
+        const notifRows = await safeQuery('SELECT * FROM notifications');
+        backup.notifications = notifRows.map(r => ({
           ...r,
           isRead: r.isRead === 1
         }));
 
         // 11. Wallet Transactions
-        const [transRows] = await this.pool.execute('SELECT * FROM wallet_transactions');
-        backup.wallet_transactions = transRows;
+        backup.wallet_transactions = await safeQuery('SELECT * FROM wallet_transactions');
 
         // 12. Purchased Chapters
-        const [purchasedRows] = await this.pool.execute('SELECT * FROM purchased_chapters');
+        let purchasedRows = await safeQuery('SELECT * FROM purchased_chapters');
+        if (purchasedRows.length === 0) {
+          purchasedRows = await safeQuery('SELECT * FROM purchases');
+        }
         backup.purchased_chapters = purchasedRows;
+        backup.purchases = purchasedRows;
+
+        // 13. Settlement Requests
+        backup.settlement_requests = await safeQuery('SELECT * FROM settlement_requests');
+
+        // 14. Tickets & Messages
+        backup.tickets = await safeQuery('SELECT * FROM tickets');
+        backup.ticket_messages = await safeQuery('SELECT * FROM ticket_messages');
 
       } catch (err) {
         console.error("MySQL Backup error, falling back to localData", err);

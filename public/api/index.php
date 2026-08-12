@@ -1584,6 +1584,44 @@ if ($method === 'POST' && $sub_path === '/admin/backup-settings') {
     sendResponse(["success" => true, "settings" => $updated]);
 }
 
+// Helper function for safe backup data extraction
+if (!function_exists('getSafeTableBackupData')) {
+    function getSafeTableBackupData($pdo) {
+        $safeFetchTable = function($tableName) use ($pdo) {
+            try {
+                $stmt = $pdo->query("SELECT * FROM `{$tableName}`");
+                return $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+            } catch (Exception $e) {
+                return [];
+            }
+        };
+
+        $purchasedChapters = $safeFetchTable("purchased_chapters");
+        if (empty($purchasedChapters)) {
+            $purchasedChapters = $safeFetchTable("purchases");
+        }
+
+        return [
+            "series" => $safeFetchTable("series"),
+            "chapters" => $safeFetchTable("chapters"),
+            "users" => $safeFetchTable("users"),
+            "comments" => $safeFetchTable("comments"),
+            "bookmarks" => $safeFetchTable("bookmarks"),
+            "history" => $safeFetchTable("history"),
+            "ratings" => $safeFetchTable("ratings"),
+            "purchased_chapters" => $purchasedChapters,
+            "purchases" => $purchasedChapters,
+            "wallet_transactions" => $safeFetchTable("wallet_transactions"),
+            "settlement_requests" => $safeFetchTable("settlement_requests"),
+            "reports" => $safeFetchTable("reports"),
+            "settings" => $safeFetchTable("settings"),
+            "notifications" => $safeFetchTable("notifications"),
+            "tickets" => $safeFetchTable("tickets"),
+            "ticket_messages" => $safeFetchTable("ticket_messages")
+        ];
+    }
+}
+
 // 40d. RUN BACKUP NOW (PHP)
 if ($method === 'POST' && $sub_path === '/admin/run-backup-now') {
     requireAdmin($pdo);
@@ -1600,20 +1638,8 @@ if ($method === 'POST' && $sub_path === '/admin/run-backup-now') {
         $stmtUp->execute([json_encode($existing)]);
     }
 
-    // Build backup json data
-    $backupData = [
-        "series" => $pdo->query("SELECT * FROM series")->fetchAll(),
-        "chapters" => $pdo->query("SELECT * FROM chapters")->fetchAll(),
-        "users" => $pdo->query("SELECT * FROM users")->fetchAll(),
-        "comments" => $pdo->query("SELECT * FROM comments")->fetchAll(),
-        "bookmarks" => $pdo->query("SELECT * FROM bookmarks")->fetchAll(),
-        "history" => $pdo->query("SELECT * FROM history")->fetchAll(),
-        "ratings" => $pdo->query("SELECT * FROM ratings")->fetchAll(),
-        "purchases" => $pdo->query("SELECT * FROM purchases")->fetchAll(),
-        "wallet_transactions" => $pdo->query("SELECT * FROM wallet_transactions")->fetchAll(),
-        "settlement_requests" => $pdo->query("SELECT * FROM settlement_requests")->fetchAll(),
-        "reports" => $pdo->query("SELECT * FROM reports")->fetchAll()
-    ];
+    // Build backup json data safely
+    $backupData = getSafeTableBackupData($pdo);
     
     $jsonStr = json_encode($backupData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     $dateStr = date('Y-m-d-H-i-s');
@@ -1677,19 +1703,7 @@ if ($method === 'POST' && $sub_path === '/admin/run-backup-now') {
 // 40e. DOWNLOAD BACKUP (PHP)
 if ($method === 'GET' && $sub_path === '/admin/backup') {
     requireAdmin($pdo);
-    $backupData = [
-        "series" => $pdo->query("SELECT * FROM series")->fetchAll(PDO::FETCH_ASSOC),
-        "chapters" => $pdo->query("SELECT * FROM chapters")->fetchAll(PDO::FETCH_ASSOC),
-        "users" => $pdo->query("SELECT * FROM users")->fetchAll(PDO::FETCH_ASSOC),
-        "comments" => $pdo->query("SELECT * FROM comments")->fetchAll(PDO::FETCH_ASSOC),
-        "bookmarks" => $pdo->query("SELECT * FROM bookmarks")->fetchAll(PDO::FETCH_ASSOC),
-        "history" => $pdo->query("SELECT * FROM history")->fetchAll(PDO::FETCH_ASSOC),
-        "ratings" => $pdo->query("SELECT * FROM ratings")->fetchAll(PDO::FETCH_ASSOC),
-        "purchases" => $pdo->query("SELECT * FROM purchases")->fetchAll(PDO::FETCH_ASSOC),
-        "wallet_transactions" => $pdo->query("SELECT * FROM wallet_transactions")->fetchAll(PDO::FETCH_ASSOC),
-        "settlement_requests" => $pdo->query("SELECT * FROM settlement_requests")->fetchAll(PDO::FETCH_ASSOC),
-        "reports" => $pdo->query("SELECT * FROM reports")->fetchAll(PDO::FETCH_ASSOC)
-    ];
+    $backupData = getSafeTableBackupData($pdo);
     header('Content-Type: application/json; charset=utf-8');
     header('Content-Disposition: attachment; filename=asura-clone-backup.json');
     echo json_encode($backupData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
