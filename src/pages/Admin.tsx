@@ -133,6 +133,10 @@ export default function Admin() {
 
   const [siteSettings, setSiteSettings] = useState({
     maintenanceMode: false,
+    maintenanceTitleFa: "سایت در حال بروزرسانی و ارتقا می‌باشد",
+    maintenanceDescFa: "ما در حال ارتقای سرورها و افزودن امکانات جدید هستیم. لطفاً شکیبا باشید و به‌زودی دوباره سر بزنید.",
+    maintenanceTitleEn: "Website Under Maintenance",
+    maintenanceDescEn: "We are currently upgrading our platform to serve you better. Please check back soon.",
     aboutText: "",
     twitterUrl: "",
     discordUrl: "",
@@ -2815,18 +2819,82 @@ export default function Admin() {
                 }}
                 className="space-y-6"
               >
-                <div className="bg-black/20 p-6 rounded-xl border border-white/5 space-y-6">
-                  <div>
-                    <label className="flex items-center gap-3 cursor-pointer">
+                <div className="bg-black/20 p-6 rounded-xl border border-white/5 space-y-6" dir="rtl">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                    <div>
+                      <h3 className="text-sm font-bold text-white uppercase flex items-center gap-2">
+                        <span>تنظیمات حالت تعمیرات و بروزرسانی وبسایت (Maintenance Mode)</span>
+                      </h3>
+                      <p className="text-zinc-500 text-xs mt-1">
+                        با فعال‌سازی این حالت، دسترسی کاربران عادی قطع شده و صفحه بروزرسانی نمایش داده می‌شود.
+                      </p>
+                    </div>
+                    <label className="flex items-center gap-3 cursor-pointer bg-red-500/10 border border-red-500/20 px-4 py-2.5 rounded-xl hover:bg-red-500/20 transition-all">
                       <input 
                         type="checkbox" 
                         checked={siteSettings.maintenanceMode} 
                         onChange={e => setSiteSettings({...siteSettings, maintenanceMode: e.target.checked})}
-                        className="form-checkbox h-5 w-5 text-red-500 bg-black/40 border-white/10 rounded"
+                        className="form-checkbox h-5 w-5 text-red-500 bg-black/40 border-white/10 rounded cursor-pointer"
                       />
-                      <span className="text-white font-bold uppercase tracking-wider text-sm">Maintenance Mode</span>
+                      <span className="text-red-400 font-bold text-xs uppercase tracking-wider">فعال‌سازی حالت تعمیرات</span>
                     </label>
-                    <p className="text-zinc-500 text-xs mt-1 ml-8">When enabled, only administrators can access the site. Normal users will see an "Under Maintenance" page.</p>
+                  </div>
+
+                  {/* Dual Language Editable Fields */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                    {/* Persian Content */}
+                    <div className="space-y-4 bg-black/30 p-4 rounded-xl border border-white/5">
+                      <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                        <span>متون به زبان فارسی (Persian)</span>
+                      </h4>
+                      <div>
+                        <label className="block text-xs font-bold text-zinc-400 mb-2">عنوان پیام بروزرسانی (فارسی)</label>
+                        <input
+                          type="text"
+                          value={siteSettings.maintenanceTitleFa || ""}
+                          onChange={e => setSiteSettings({ ...siteSettings, maintenanceTitleFa: e.target.value })}
+                          className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-xs"
+                          placeholder="سایت در حال بروزرسانی و ارتقا می‌باشد"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-zinc-400 mb-2">توضیحات کامل (فارسی)</label>
+                        <textarea
+                          rows={3}
+                          value={siteSettings.maintenanceDescFa || ""}
+                          onChange={e => setSiteSettings({ ...siteSettings, maintenanceDescFa: e.target.value })}
+                          className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-xs leading-relaxed"
+                          placeholder="ما در حال ارتقای سرورها و افزودن امکانات جدید هستیم..."
+                        />
+                      </div>
+                    </div>
+
+                    {/* English Content */}
+                    <div className="space-y-4 bg-black/30 p-4 rounded-xl border border-white/5" dir="ltr">
+                      <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                        <span>English Content</span>
+                      </h4>
+                      <div>
+                        <label className="block text-xs font-bold text-zinc-400 mb-2">Maintenance Title (English)</label>
+                        <input
+                          type="text"
+                          value={siteSettings.maintenanceTitleEn || ""}
+                          onChange={e => setSiteSettings({ ...siteSettings, maintenanceTitleEn: e.target.value })}
+                          className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-xs"
+                          placeholder="Website Under Maintenance"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-zinc-400 mb-2">Maintenance Description (English)</label>
+                        <textarea
+                          rows={3}
+                          value={siteSettings.maintenanceDescEn || ""}
+                          onChange={e => setSiteSettings({ ...siteSettings, maintenanceDescEn: e.target.value })}
+                          className="w-full bg-black/50 border border-white/10 rounded-lg px-4 py-2.5 text-white text-xs leading-relaxed"
+                          placeholder="We are currently upgrading our platform to serve you better..."
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
 

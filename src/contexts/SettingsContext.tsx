@@ -1,8 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { apiClient, getSocketInstance } from '../lib/apiClient';
 
-interface SiteSettings {
+export interface SiteSettings {
   maintenanceMode: boolean;
+  maintenanceTitleFa?: string;
+  maintenanceDescFa?: string;
+  maintenanceTitleEn?: string;
+  maintenanceDescEn?: string;
   aboutText: string;
   twitterUrl: string;
   discordUrl: string;
@@ -29,6 +33,10 @@ interface SiteSettings {
 
 const defaultSettings: SiteSettings = {
   maintenanceMode: false,
+  maintenanceTitleFa: "سایت در حال بروزرسانی و ارتقا می‌باشد",
+  maintenanceDescFa: "ما در حال ارتقای سرورها و افزودن امکانات جدید هستیم. لطفاً شکیبا باشید و به‌زودی دوباره سر بزنید.",
+  maintenanceTitleEn: "Website Under Maintenance",
+  maintenanceDescEn: "We are currently upgrading our platform to serve you better. Please check back soon.",
   aboutText: "به جدیدترین مرجع ترجمه مانهوا، مانهوا و مانگا با کیفیت بالا خوش آمدید. آپدیت روزانه.",
   twitterUrl: "#",
   discordUrl: "#",

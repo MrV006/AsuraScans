@@ -1,14 +1,15 @@
 import { ReactNode, useEffect } from 'react';
 import { Navbar } from './Navbar';
-import { Github, Twitter, MessageCircle, Instagram, Send } from 'lucide-react';
+import { Github, Twitter, MessageCircle, Instagram, Send, Wrench, ShieldAlert } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
+import { MaintenanceView, isUserStaffOrAdmin } from './MaintenanceView';
 
 export function Layout({ children }: { children: ReactNode }) {
   const { settings, genres, loading } = useSettings();
-  const { isSimulatingUser, setIsSimulatingUser } = useAuth();
+  const { user, profile, isSimulatingUser, setIsSimulatingUser } = useAuth();
   const location = useLocation();
 
   useEffect(() => {
@@ -28,19 +29,34 @@ export function Layout({ children }: { children: ReactNode }) {
     }
   }, [settings.siteName, settings.seoDescription, loading]);
 
-  if (settings.maintenanceMode && window.location.pathname !== '/admin') {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0f0f12] text-white p-4">
-        <div className="text-center max-w-md">
-           <h1 className="text-4xl font-black text-[var(--color-asura-accent)] mb-4">Under Maintenance</h1>
-           <p className="text-zinc-500">We are currently upgrading the platform. Please check back later.</p>
-        </div>
-      </div>
-    );
+  const isStaffOrAdmin = isUserStaffOrAdmin(profile, user);
+
+  // If maintenance mode is enabled and user is not an admin/staff (or simulator is active)
+  if (settings.maintenanceMode && (!isStaffOrAdmin || isSimulatingUser)) {
+    return <MaintenanceView />;
   }
 
   return (
     <div className="flex flex-col min-h-screen">
+      {/* Top Warning Banner for Staff/Admin when Maintenance Mode is ON */}
+      {settings.maintenanceMode && isStaffOrAdmin && !isSimulatingUser && (
+        <div className="bg-red-600 text-white text-xs font-bold px-4 py-2 flex items-center justify-between z-[110] border-b border-red-500 shadow-md" dir="rtl">
+          <div className="flex items-center gap-2">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+            </span>
+            <span>🔧 حالت تعمیرات و بروزرسانی سایت برای کاربران عادی فعال است (شما به عنوان ادمین وارد شده‌اید).</span>
+          </div>
+          <Link
+            to="/admin"
+            className="px-3 py-1 bg-black/40 hover:bg-black/60 text-white rounded-lg text-[11px] font-black transition-all border border-white/20"
+          >
+            مدیریت سایت
+          </Link>
+        </div>
+      )}
+
       {isSimulatingUser && (
         <div className="fixed bottom-6 left-4 right-4 md:left-auto md:right-6 md:max-w-sm bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 text-black text-xs font-black z-[100] rounded-2xl p-4 md:p-5 shadow-2xl shadow-amber-500/20 border border-amber-400/50 flex flex-col gap-3 md:gap-4 animate-fade-in transition-all" dir="rtl">
           <div className="flex items-start gap-2.5">
