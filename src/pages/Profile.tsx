@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../contexts/SettingsContext';
 import { Layout } from '../components/Layout';
 import { Navigate, Link } from 'react-router-dom';
 import { Settings, Bookmark, MessageSquare, Heart, Clock, Wallet } from 'lucide-react';
@@ -9,6 +10,7 @@ import { apiClient, getSocketInstance } from '../lib/apiClient';
 
 export default function Profile() {
   const { user, profile, loading, setShowSetupModal } = useAuth();
+  const { settings } = useSettings();
   const { bookmarks, loading: bookmarksLoading, removeBookmark } = useBookmarks();
   const { history, loading: historyLoading } = useHistory();
   const [activeTab, setActiveTab] = useState<'bookmarks' | 'history' | 'comments' | 'settings' | 'wallet'>('bookmarks');
@@ -218,7 +220,7 @@ export default function Profile() {
                 )}
               </div>
               <h1 className="text-lg font-black text-white mb-1 text-center truncate w-full">
-                {profile?.displayName || 'کاربر آسورا'}
+                {profile?.displayName || `کاربر ${settings?.siteName || 'آسورا'}`}
               </h1>
               <p className="text-[11px] font-mono text-zinc-500 mb-2 truncate w-full text-center">{user.email}</p>
               {profile?.melliCode && (

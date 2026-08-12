@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../contexts/SettingsContext';
+import { SEOHead } from '../components/SEOHead';
 import { apiClient } from '../lib/apiClient';
 import { 
   LifeBuoy, PlusCircle, MessageSquare, Clock, CheckCircle, XCircle, 
@@ -64,6 +66,8 @@ const STATUS_MAP: Record<string, { label: string; badge: string; icon: React.Rea
 
 export default function Support() {
   const { user } = useAuth();
+  const { settings } = useSettings();
+  const siteName = settings?.siteName || "آسورا";
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
@@ -182,6 +186,10 @@ export default function Support() {
 
   return (
     <Layout>
+      <SEOHead 
+        title={`پشتیبانی آنلاین و تیکت‌ها | ${siteName}`}
+        description={`پشتیبانی آنلاین، پیگیری درخواست‌ها و ارسال تیکت در ${siteName}`}
+      />
       <div className="container mx-auto px-4 py-8 max-w-6xl text-zinc-100" dir="rtl">
         
         {/* Banner Section */}
@@ -191,7 +199,7 @@ export default function Support() {
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-full text-xs font-semibold">
                 <LifeBuoy className="w-3.5 h-3.5" /> مرکز پشتیبانی و تیکت‌ها
               </div>
-              <h1 className="text-2xl md:text-3xl font-black text-white">پشتیبانی آنلاین آسورا</h1>
+              <h1 className="text-2xl md:text-3xl font-black text-white">پشتیبانی آنلاین {siteName}</h1>
               <p className="text-xs md:text-sm text-zinc-400 max-w-xl leading-relaxed">
                 هرگونه سؤال، مشکل در خرید، خرابی چپترها یا درخواست‌های خود را مطرح کنید. کارشناسان پشتیبانی ما در سریع‌ترین زمان ممکن پاسخگوی شما خواهند بود.
               </p>
