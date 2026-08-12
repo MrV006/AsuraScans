@@ -2051,9 +2051,11 @@ if ($method === 'GET' && $sub_path === '/admin/reports') {
 // 44. SUBMIT REPORT
 if ($method === 'POST' && $sub_path === '/reports') {
     $user = getUserFromHeaders($pdo);
-    if (!$user) sendResponse(["error" => "کاربر یافت نشد."], 401);
-    
     $input = getJsonInput();
+    
+    $userId = $user ? $user['id'] : (isset($input['userId']) && !empty($input['userId']) ? $input['userId'] : 'guest');
+    $userName = $user ? $user['displayName'] : (isset($input['userName']) && !empty($input['userName']) ? $input['userName'] : 'کاربر میهمان');
+    
     $title = isset($input['title']) ? trim($input['title']) : '';
     $content = isset($input['content']) ? trim($input['content']) : '';
     
@@ -2061,9 +2063,9 @@ if ($method === 'POST' && $sub_path === '/reports') {
         sendResponse(["error" => "پر کردن عنوان و متن گزارش الزامی است."], 400);
     }
     
-    $id = 'report-' . round(microtime(true) * 1000);
+    $id = isset($input['id']) && !empty($input['id']) ? $input['id'] : ('report-' . round(microtime(true) * 1000));
     $stmt = $pdo->prepare("INSERT INTO reports (id, userId, userName, title, content, status) VALUES (?, ?, ?, ?, ?, 'pending')");
-    $stmt->execute([$id, $user['id'], $user['displayName'], $title, $content]);
+    $stmt->execute([$id, $userId, $userName, $title, $content]);
     
     sendResponse(["success" => true]);
 }
