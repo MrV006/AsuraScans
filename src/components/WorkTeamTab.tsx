@@ -467,9 +467,77 @@ export default function WorkTeamTab({
             ارسال فایل کار چپتر جدید یا موجود
           </h3>
           <p className="text-xs text-zinc-400 mt-1">
-            توجه: فایل‌های ترجمه (Word) و کلین صرفاً جهت اطلاع و استفاده ادیتور قرار می‌گیرند و روی سایت عمومی منتشر نمی‌شوند.
+            توجه: فایل‌های ترجمه (Word) و کلین صرفاً جهت دانلود و استفاده ادیتور قرار می‌گیرند و پس از تایید نهایی و انتشار، جهت حفظ منابع هاست به صورت خودکار پاک‌سازی می‌شوند.
           </p>
         </div>
+
+        {/* Realtime Available Files Download Box for Contributors */}
+        {selectedChapterNumber && (
+          (() => {
+            const chapNum = parseFloat(selectedChapterNumber);
+            const currentChap = chaptersList.find((c: Chapter) => c.number === chapNum);
+            const subs = currentChap?.submissions || [];
+            const translatorSub = subs.find((s: any) => s.role === 'translator' && s.fileUrl);
+            const cleanerSub = subs.find((s: any) => s.role === 'cleaner' && s.fileUrl);
+
+            if (translatorSub || cleanerSub) {
+              return (
+                <div className="p-4 bg-gradient-to-r from-blue-900/20 via-black to-purple-900/20 border border-blue-500/30 rounded-2xl space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-black text-blue-300">
+                    <DownloadCloud size={16} />
+                    فایل‌های آماده چپتر {selectedChapterNumber} جهت دانلود و ادامه کار:
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {translatorSub && (
+                      <div className="flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-xl">
+                        <div className="flex items-center gap-2">
+                          <FileText size={18} className="text-amber-400" />
+                          <div>
+                            <span className="text-xs font-bold text-white block">فایل ورد ترجمه</span>
+                            <span className="text-[10px] text-zinc-400">ارسال شده توسط {translatorSub.userName || 'مترجم'}</span>
+                          </div>
+                        </div>
+                        <a
+                          href={translatorSub.fileUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          download
+                          className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-black text-xs font-black rounded-lg transition-all flex items-center gap-1 shadow-md"
+                        >
+                          <DownloadCloud size={13} />
+                          دانلود فایل ورد
+                        </a>
+                      </div>
+                    )}
+
+                    {cleanerSub && (
+                      <div className="flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-xl">
+                        <div className="flex items-center gap-2">
+                          <FileArchive size={18} className="text-blue-400" />
+                          <div>
+                            <span className="text-xs font-bold text-white block">فایل فشرده کلین (Clean)</span>
+                            <span className="text-[10px] text-zinc-400">ارسال شده توسط {cleanerSub.userName || 'کلینر'}</span>
+                          </div>
+                        </div>
+                        <a
+                          href={cleanerSub.fileUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          download
+                          className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-black rounded-lg transition-all flex items-center gap-1 shadow-md"
+                        >
+                          <DownloadCloud size={13} />
+                          دانلود فایل کلین
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })()
+        )}
 
         <form onSubmit={handleSubmitWork} className="space-y-5">
           {/* Chapter Selector & Title */}

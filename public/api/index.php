@@ -1345,6 +1345,33 @@ if (($method === 'DELETE' && matchRoute('/series/:seriesId/chapters/:id', $sub_p
 // 25. APPROVE SUBMITTED CHAPTER (ADMIN)
 if ($method === 'PUT' && matchRoute('/series/:seriesId/chapters/:id/approve', $sub_path, $params)) {
     requireAdmin($pdo);
+    
+    // Fetch chapter submissions to purge temp Word and clean files from uploads directory
+    $stmtCh = $pdo->prepare("SELECT submissions FROM chapters WHERE seriesId = ? AND id = ?");
+    $stmtCh->execute([$params['seriesId'], $params['id']]);
+    $chRow = $stmtCh->fetch();
+    
+    if ($chRow && !empty($chRow['submissions'])) {
+        $submissions = json_decode($chRow['submissions'], true);
+        if (is_array($submissions)) {
+            $uploadsDir = __DIR__ . '/../uploads/';
+            foreach ($submissions as &$sub) {
+                if (isset($sub['role']) && in_array($sub['role'], ['translator', 'cleaner'])) {
+                    if (!empty($sub['fileUrl']) && strpos($sub['fileUrl'], '/uploads/') === 0) {
+                        $relPath = ltrim(substr($sub['fileUrl'], strlen('/uploads/')), '/');
+                        $fullFilePath = realpath($uploadsDir . $relPath);
+                        if ($fullFilePath && file_exists($fullFilePath) && strpos($fullFilePath, realpath($uploadsDir)) === 0) {
+                            @unlink($fullFilePath);
+                        }
+                    }
+                    $sub['fileUrl'] = ""; // Clear temp file URL after publish
+                }
+            }
+            $stmtUpSub = $pdo->prepare("UPDATE chapters SET submissions = ? WHERE seriesId = ? AND id = ?");
+            $stmtUpSub->execute([json_encode($submissions, JSON_UNESCAPED_UNICODE), $params['seriesId'], $params['id']]);
+        }
+    }
+    
     $stmt = $pdo->prepare("UPDATE chapters SET isPending = 0 WHERE seriesId = ? AND id = ?");
     $stmt->execute([$params['seriesId'], $params['id']]);
     sendResponse(["success" => true]);
@@ -1390,15 +1417,46 @@ if ($method === 'POST' && matchRoute('/series/:seriesId/chapters/:id/view', $sub
     sendResponse(["views" => (int)($res['views'] ?? 0)]);
 }
 
-// 27. SUBMIT CHAPTER WORK (TRANSLATION/EDIT)
+// 27. SUBMIT CHAPTER WORK (TRANSLATION/EDIT/CLEAN)
 if ($method === 'POST' && matchRoute('/series/:seriesId/chapters/:id/submit', $sub_path, $params)) {
     $user = getUserFromHeaders($pdo);
     if (!$user) sendResponse(["error" => "کاربر یافت نشد."], 401);
     
     $input = getJsonInput();
-    $images = isset($input['images']) ? $input['images'] : [];
+    $userId = $user['id'];
+    $role = isset($input['role']) ? $input['role'] : 'translator';
+    $fileUrl = isset($input['fileUrl']) ? trim($input['fileUrl']) : '';
+    $note = isset($input['note']) ? trim($input['note']) : '';
+    $images = isset($input['images']) && is_array($input['images']) ? $input['images'] : [];
+    $isAlsoCleaner = !empty($input['isAlsoCleaner']);
+    $isAlsoEditor = !empty($input['isAlsoEditor']);
+    $isAlsoTranslator = !empty($input['isAlsoTranslator']);
     
-    $stmt = $pdo->prepare("SELECT submissions FROM chapters WHERE seriesId = ? AND id = ?");
+    // Gating: check if user is approved contributor or admin
+    $stmtS = $pdo->prepare("SELECT contributors FROM series WHERE id = ?");
+    $stmtS->execute([$params['seriesId']]);
+    $sRow = $stmtS->fetch();
+    if (!$sRow) sendResponse(["error" => "مجموعه یافت نشد."], 404);
+    
+    $seriesContribs = $sRow['contributors'] ? json_decode($sRow['contributors'], true) : [];
+    $isSeriesContrib = false;
+    if (is_array($seriesContribs)) {
+        foreach ($seriesContribs as $c) {
+            if (isset($c['userId']) && $c['userId'] === $userId && (empty($c['status']) || $c['status'] === 'approved')) {
+                $isSeriesContrib = true;
+                break;
+            }
+        }
+    }
+    
+    $userRoles = isset($user['roles']) ? json_decode($user['roles'], true) : [$user['role']];
+    $hasAdminRole = in_array('admin', (array)$userRoles) || in_array('super_admin', (array)$userRoles) || $userId === 'admin';
+    
+    if (!$isSeriesContrib && !$hasAdminRole) {
+        sendResponse(["error" => "شما عضو تایید شده تیم تولید این اثر نیستید و اجازه ثبت کار ندارید."], 403);
+    }
+    
+    $stmt = $pdo->prepare("SELECT * FROM chapters WHERE seriesId = ? AND id = ?");
     $stmt->execute([$params['seriesId'], $params['id']]);
     $ch = $stmt->fetch();
     if (!$ch) sendResponse(["error" => "چپتر یافت نشد."], 404);
@@ -1406,15 +1464,58 @@ if ($method === 'POST' && matchRoute('/series/:seriesId/chapters/:id/submit', $s
     $submissions = $ch['submissions'] ? json_decode($ch['submissions'], true) : [];
     if (!is_array($submissions)) $submissions = [];
     
-    $submissions[] = [
-        "userId" => $user['id'],
-        "userName" => $user['displayName'],
-        "images" => $images,
+    // Check for duplicate role submission conflicts
+    if (!$hasAdminRole) {
+        foreach ($submissions as $sub) {
+            if (isset($sub['role']) && $sub['role'] === $role && isset($sub['userId']) && $sub['userId'] !== $userId) {
+                sendResponse(["error" => "تداخل ثبت: قبلاً برای این بخش چپتر فایلی توسط همکار دیگری ارسال شده است. جهت جلوگیری از تداخل، کار ثبت نشد تا توسط مدیریت تعیین تکلیف شود."], 409);
+            }
+        }
+    }
+    
+    $newSub = [
+        "id" => "sub-" . round(microtime(true) * 1000) . "-" . rand(1000, 9999),
+        "userId" => $userId,
+        "userName" => $user['displayName'] ?? $user['email'] ?? "همکار",
+        "role" => $role,
+        "fileUrl" => $fileUrl,
+        "note" => $note,
         "createdAt" => date('Y-m-d H:i:s')
     ];
+    $submissions[] = $newSub;
     
-    $stmtUpdate = $pdo->prepare("UPDATE chapters SET submissions = ? WHERE id = ?");
-    $stmtUpdate->execute([json_encode($submissions), $params['id']]);
+    // Assign contributors
+    $contributors = $ch['contributors'] ? json_decode($ch['contributors'], true) : [];
+    if (!is_array($contributors)) $contributors = [];
+    
+    $rolesToAssign = [$role];
+    if ($isAlsoCleaner && !in_array("cleaner", $rolesToAssign)) $rolesToAssign[] = "cleaner";
+    if ($isAlsoEditor && !in_array("editor", $rolesToAssign)) $rolesToAssign[] = "editor";
+    if ($isAlsoTranslator && !in_array("translator", $rolesToAssign)) $rolesToAssign[] = "translator";
+    
+    foreach ($rolesToAssign as $r) {
+        if (!isset($contributors[$r])) $contributors[$r] = [];
+        if (!is_array($contributors[$r])) $contributors[$r] = [];
+        if (!in_array($userId, $contributors[$r])) {
+            $contributors[$r][] = $userId;
+        }
+    }
+    
+    $imagesStr = $ch['images'];
+    $isPending = 1;
+    if (($role === "editor" || $isAlsoEditor) && !empty($images)) {
+        $imagesStr = implode(',', $images);
+    }
+    
+    $stmtUp = $pdo->prepare("UPDATE chapters SET submissions = ?, contributors = ?, images = ?, isPending = ? WHERE seriesId = ? AND id = ?");
+    $stmtUp->execute([
+        json_encode($submissions, JSON_UNESCAPED_UNICODE),
+        json_encode($contributors, JSON_UNESCAPED_UNICODE),
+        $imagesStr,
+        $isPending,
+        $params['seriesId'],
+        $params['id']
+    ]);
     
     sendResponse(["success" => true]);
 }
