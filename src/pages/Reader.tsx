@@ -74,9 +74,10 @@ interface MangaImageProps {
   chapterId?: string;
   chapterNumber?: number;
   seriesTitle?: string;
+  reloadKey?: number;
 }
 
-// Independent, high-performance image component with auto-retry and non-blocking parallel loading
+// Independent, ultra-resilient image component with watchdog timeout, auto-retry, and non-blocking parallel loading
 function MangaImage({
   src,
   index,
@@ -85,33 +86,58 @@ function MangaImage({
   seriesId,
   chapterId,
   chapterNumber,
-  seriesTitle
+  seriesTitle,
+  reloadKey
 }: MangaImageProps) {
   const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
   const [retryCount, setRetryCount] = useState(0);
   const [currentSrc, setCurrentSrc] = useState(src);
   const [autoReported, setAutoReported] = useState(false);
 
-  // Reset image state if URL changes
+  // Reset image state if primary src URL or reloadKey changes
   useEffect(() => {
     setStatus('loading');
     setRetryCount(0);
-    setCurrentSrc(src);
+    const separator = src.includes('?') ? '&' : '?';
+    setCurrentSrc(reloadKey ? `${src}${separator}reload=${Date.now()}` : src);
     setAutoReported(false);
-  }, [src]);
+  }, [src, reloadKey]);
+
+  // Watchdog timer: If an image hangs in 'loading' state for too long on a slow/unstable connection (e.g. 9s),
+  // automatically trigger a soft refresh with cache-buster without stopping.
+  useEffect(() => {
+    if (status !== 'loading') return;
+
+    const timeoutMs = Math.min(8000 + retryCount * 2500, 20000);
+    const timer = setTimeout(() => {
+      if (status === 'loading') {
+        if (retryCount < 6) {
+          const nextRetry = retryCount + 1;
+          setRetryCount(nextRetry);
+          const separator = src.includes('?') ? '&' : '?';
+          setCurrentSrc(`${src}${separator}retry=${Date.now()}`);
+        } else {
+          setStatus('error');
+        }
+      }
+    }, timeoutMs);
+
+    return () => clearTimeout(timer);
+  }, [currentSrc, status, retryCount, src]);
 
   const handleLoad = () => {
     setStatus('loaded');
   };
 
   const handleError = () => {
-    if (retryCount < 3) {
+    if (retryCount < 6) {
       const nextRetry = retryCount + 1;
       setRetryCount(nextRetry);
       const separator = src.includes('?') ? '&' : '?';
+      const delay = Math.min(1200 + retryCount * 800, 5000);
       setTimeout(() => {
         setCurrentSrc(`${src}${separator}retry=${Date.now()}`);
-      }, 1200);
+      }, delay);
     } else {
       setStatus('error');
       // Auto-report persistent host errors once to the admin panel
@@ -123,7 +149,7 @@ function MangaImage({
           userId: uid,
           userName: 'سیستم خودمختار ریدر',
           title: `🚨 عدم بارگذاری تصویر ${index + 1} در چپتر ${chapterNumber || ''}`,
-          content: `تصویر شماره ${index + 1} از ${totalImages} در اثر "${seriesTitle || ''}" (چپتر ${chapterNumber || ''}) پس از ۳ بار تلاش بارگذاری نشد.\nآدرس تصویر: ${src}`
+          content: `تصویر شماره ${index + 1} از ${totalImages} در اثر "${seriesTitle || ''}" (چپتر ${chapterNumber || ''}) پس از ۶ بار تلاش بارگذاری نشد.\nآدرس تصویر: ${src}`
         }).catch(err => console.error("Auto report error:", err));
       }
     }
@@ -138,27 +164,40 @@ function MangaImage({
 
   return (
     <div 
-      className="reader-image-wrapper w-full relative flex flex-col justify-center items-center"
-      style={{ minHeight: status === 'loaded' ? 'auto' : '260px' }}
+      className="reader-image-wrapper w-full relative flex flex-col justify-center items-center min-h-[300px]"
     >
-      {/* Loading Placeholder Spinner */}
+      {/* Loading Placeholder Overlay (Does NOT use display:none on img wrapper) */}
       {status === 'loading' && (
-        <div className="w-full flex flex-col items-center justify-center bg-[#111217]/60 border border-white/5 rounded-2xl py-10 px-6 min-h-[260px] my-1 shadow-inner font-sans animate-pulse" dir="rtl">
-          <div className="w-10 h-10 border-3 border-zinc-700 border-t-[var(--color-asura-accent)] rounded-full animate-spin mb-3"></div>
-          <p className="text-zinc-300 text-xs font-bold mb-1">
+        <div className="w-full flex flex-col items-center justify-center bg-[#111217]/80 border border-white/5 rounded-2xl py-12 px-6 min-h-[320px] my-1 shadow-inner font-sans" dir="rtl">
+          <div className="relative mb-3">
+            <div className="w-10 h-10 border-3 border-zinc-700 border-t-[var(--color-asura-accent)] rounded-full animate-spin"></div>
+            <RefreshCw size={14} className="absolute inset-0 m-auto text-[var(--color-asura-accent)] animate-pulse" />
+          </div>
+          <p className="text-zinc-200 text-xs font-bold mb-1 text-center">
             در حال دریافت و بارگذاری تصویر {(index + 1).toLocaleString('fa-IR')} از {totalImages.toLocaleString('fa-IR')}...
           </p>
-          {retryCount > 0 && (
-            <p className="text-[11px] text-amber-400 font-medium">
-              تلاش مجدد ({retryCount.toLocaleString('fa-IR')} از ۳)...
+          {retryCount > 0 ? (
+            <p className="text-[11px] text-amber-400 font-bold bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-lg mt-2 animate-pulse">
+              اختلال اینترنت؛ تلاش مجدد خودکار ({retryCount.toLocaleString('fa-IR')} از ۶)...
+            </p>
+          ) : (
+            <p className="text-[10px] text-zinc-500 font-medium">
+              بازخوانی هوشمند و خودکار در صورت کندی اینترنت فعال است
             </p>
           )}
+          <button
+            onClick={handleManualRetry}
+            className="mt-4 px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white font-bold text-[11px] rounded-xl border border-white/10 transition-all flex items-center gap-1.5"
+          >
+            <RefreshCw size={12} />
+            <span>بازخوانی فوری این تصویر</span>
+          </button>
         </div>
       )}
 
       {/* Error Card for Failed Image */}
       {status === 'error' && (
-        <div className="w-full flex flex-col items-center justify-center bg-red-500/10 border border-red-500/25 rounded-2xl p-6 min-h-[260px] my-1 text-center shadow-xl font-sans" dir="rtl">
+        <div className="w-full flex flex-col items-center justify-center bg-red-500/10 border border-red-500/25 rounded-2xl p-6 min-h-[280px] my-1 text-center shadow-xl font-sans" dir="rtl">
           <div className="w-12 h-12 bg-red-500/20 border border-red-500/30 rounded-2xl flex items-center justify-center text-red-400 mb-3">
             <AlertTriangle size={24} />
           </div>
@@ -166,7 +205,7 @@ function MangaImage({
             خطا در بارگذاری تصویر {(index + 1).toLocaleString('fa-IR')}
           </h3>
           <p className="text-[11px] text-zinc-400 max-w-sm leading-relaxed mb-4">
-            امکان دریافت این تصویر از سرور هاست فراهم نشد. می‌توانید مجدداً تلاش کنید یا خرابی را گزارش دهید.
+            تصویر دریافت نشد. می‌توانید با دکمه زیر تصویر را بازخوانی زنده کنید.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-2">
             <button
@@ -174,7 +213,7 @@ function MangaImage({
               className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-black text-xs rounded-xl transition-all shadow-md flex items-center gap-1.5"
             >
               <RefreshCw size={14} />
-              <span>تلاش مجدد</span>
+              <span>تلاش مجدد و بازخوانی تصویر</span>
             </button>
             {onReportRequest && (
               <button
@@ -189,14 +228,15 @@ function MangaImage({
         </div>
       )}
 
-      {/* Actual HTML Image Element */}
-      <div className={`relative w-full overflow-hidden select-none ${status === 'loaded' ? 'block' : 'hidden'}`}>
+      {/* Actual HTML Image Element - KEPT VISIBLE IN DOM TREE AT ALL TIMES (Never hidden with display:none) */}
+      <div className={`relative w-full overflow-hidden select-none ${status === 'loaded' ? 'block' : 'opacity-0 h-0 pointer-events-none'}`}>
         <img 
           src={currentSrc} 
           alt={`Page ${index + 1}`} 
           onLoad={handleLoad}
           onError={handleError}
-          loading={index < 4 ? 'eager' : 'lazy'}
+          loading="eager"
+          decoding="async"
           className="object-contain block w-full mx-auto select-none pointer-events-none transition-opacity duration-300"
           referrerPolicy="no-referrer"
         />
@@ -226,6 +266,7 @@ export default function Reader() {
   const [imageGap, setImageGap] = useState<number>(0);
   const [readingMode, setReadingMode] = useState<'vertical' | 'single' | 'double'>('vertical');
   const [activePageIndex, setActivePageIndex] = useState<number>(0);
+  const [globalReloadKey, setGlobalReloadKey] = useState<number>(0);
 
   const [dbUser, setDbUser] = useState<any>(null);
   const [isPurchased, setIsPurchased] = useState<boolean>(false);
@@ -773,11 +814,20 @@ export default function Reader() {
           </div>
 
           <button
+            onClick={() => setGlobalReloadKey(prev => prev + 1)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 rounded-xl text-xs font-black transition-all shrink-0 hover:scale-105 active:scale-95 mr-auto md:mr-0"
+            title="بازخوانی فوری تمام تصاویر چپتر (مناسب کندی اینترنت)"
+          >
+            <RefreshCw size={14} />
+            <span>بازخوانی تمام تصاویر</span>
+          </button>
+
+          <button
             onClick={() => {
               setReportPageNum(readingMode !== 'vertical' ? `صفحه ${activePageIndex + 1}` : '');
               setShowReportModal(true);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-black transition-all shrink-0 hover:scale-105 active:scale-95 mr-auto md:mr-0"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-black transition-all shrink-0 hover:scale-105 active:scale-95"
             title="گزارش خراب بودن تصاویر یا اشکال در چپتر"
           >
             <Flag size={14} />
@@ -848,6 +898,7 @@ export default function Reader() {
                     chapterId={chapter?.id}
                     chapterNumber={chapter?.number}
                     seriesTitle={series?.title}
+                    reloadKey={globalReloadKey}
                   />
                 ))}
               </div>
@@ -867,6 +918,7 @@ export default function Reader() {
                     chapterId={chapter?.id}
                     chapterNumber={chapter?.number}
                     seriesTitle={series?.title}
+                    reloadKey={globalReloadKey}
                   />
                   
                   {/* Left / Right Nav Click Targets */}
@@ -910,6 +962,7 @@ export default function Reader() {
                         chapterId={chapter?.id}
                         chapterNumber={chapter?.number}
                         seriesTitle={series?.title}
+                        reloadKey={globalReloadKey}
                       />
                     </div>
                   ) : (
@@ -930,6 +983,7 @@ export default function Reader() {
                       chapterId={chapter?.id}
                       chapterNumber={chapter?.number}
                       seriesTitle={series?.title}
+                      reloadKey={globalReloadKey}
                     />
                   </div>
                 </div>
