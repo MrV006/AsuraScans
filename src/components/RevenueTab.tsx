@@ -264,8 +264,30 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
   };
 
   // Role Changes Handlers
-  const handleRolePercentageChange = (id: string, val: number) => {
+  const handleRolePercentageChange = (id: string, rawVal: number) => {
+    const val = Math.max(0, Math.min(100, Math.round(rawVal)));
     setRoles(prev => prev.map(r => r.id === id ? { ...r, percentage: val } : r));
+  };
+
+  const handleAutoBalance = () => {
+    if (!roles || roles.length === 0) return;
+    const currentTotal = roles.reduce((s, r) => s + r.percentage, 0);
+    if (currentTotal === 100) return;
+
+    const diff = 100 - currentTotal;
+    setRoles(prev => {
+      const updated = [...prev];
+      // Prefer adjusting 'website' role, or last role
+      const targetIdx = updated.findIndex(r => r.id === 'website') !== -1 
+        ? updated.findIndex(r => r.id === 'website') 
+        : updated.length - 1;
+      
+      if (targetIdx !== -1) {
+        const newPct = Math.max(0, Math.min(100, updated[targetIdx].percentage + diff));
+        updated[targetIdx] = { ...updated[targetIdx], percentage: newPct };
+      }
+      return updated;
+    });
   };
 
   const handleAddRole = (e: React.FormEvent) => {
@@ -581,7 +603,7 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
 
         {/* Roles Sliders Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {roles.map((r, i) => {
+          {roles.map((r) => {
             const isSystemDefault = ["website", "translator", "editor", "cleaner"].includes(r.id);
             const presetInfo = SYSTEM_PRESET_ROLES[r.id];
 
@@ -595,6 +617,7 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                     </span>
                     {!isSystemDefault && (
                       <button
+                        type="button"
                         onClick={() => handleDeleteRole(r.id)}
                         className="text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-500/10"
                         title="حذف نقش سفارشی"
@@ -608,20 +631,74 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                   </p>
                 </div>
 
-                <div className="space-y-2 pt-2 border-t border-white/5">
-                  <div className="flex items-center justify-between text-xs font-mono font-bold">
-                    <span className="text-zinc-500 text-[10px]">درصد سهم:</span>
-                    <span className="text-[var(--color-asura-accent-light)] font-black text-sm">{r.percentage}%</span>
+                <div className="space-y-3 pt-2 border-t border-white/5">
+                  {/* Header & Numeric Input */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-zinc-400 text-[11px] font-bold">درصد سهم:</span>
+                    <div className="flex items-center gap-1 bg-black/60 border border-white/10 rounded-lg px-2 py-1 focus-within:border-[var(--color-asura-accent)]">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={r.percentage}
+                        onChange={e => handleRolePercentageChange(r.id, Number(e.target.value) || 0)}
+                        className="w-12 bg-transparent text-right text-[var(--color-asura-accent-light)] font-black font-mono text-sm focus:outline-none"
+                      />
+                      <span className="text-zinc-400 text-xs font-bold">%</span>
+                    </div>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="5"
-                    value={r.percentage}
-                    onChange={e => handleRolePercentageChange(r.id, Number(e.target.value))}
-                    className="w-full accent-[var(--color-asura-accent)] cursor-pointer"
-                  />
+
+                  {/* Stepper Buttons (-5%, -1%, +1%, +5%) */}
+                  <div className="flex items-center justify-between gap-1 bg-white/5 p-1 rounded-xl border border-white/5">
+                    <button
+                      type="button"
+                      onClick={() => handleRolePercentageChange(r.id, r.percentage - 5)}
+                      className="px-2 py-1 bg-white/5 hover:bg-red-500/20 text-zinc-300 hover:text-red-400 font-mono text-[10px] font-black rounded-lg transition-colors shrink-0"
+                      title="کاهش ۵٪"
+                    >
+                      -۵٪
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRolePercentageChange(r.id, r.percentage - 1)}
+                      className="px-2 py-1 bg-white/5 hover:bg-red-500/20 text-zinc-300 hover:text-red-400 font-mono text-[10px] font-black rounded-lg transition-colors shrink-0"
+                      title="کاهش ۱٪"
+                    >
+                      -۱٪
+                    </button>
+                    <div className="flex-1 text-center font-mono text-xs font-black text-white/80">
+                      {r.percentage}٪
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRolePercentageChange(r.id, r.percentage + 1)}
+                      className="px-2 py-1 bg-white/5 hover:bg-emerald-500/20 text-zinc-300 hover:text-emerald-400 font-mono text-[10px] font-black rounded-lg transition-colors shrink-0"
+                      title="افزایش ۱٪"
+                    >
+                      +۱٪
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRolePercentageChange(r.id, r.percentage + 5)}
+                      className="px-2 py-1 bg-white/5 hover:bg-emerald-500/20 text-zinc-300 hover:text-emerald-400 font-mono text-[10px] font-black rounded-lg transition-colors shrink-0"
+                      title="افزایش ۵٪"
+                    >
+                      +۵٪
+                    </button>
+                  </div>
+
+                  {/* Range Slider in strict LTR container to prevent RTL jump glitches */}
+                  <div className="w-full pt-1" dir="ltr">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={r.percentage}
+                      onChange={e => handleRolePercentageChange(r.id, Number(e.target.value))}
+                      className="w-full h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-[var(--color-asura-accent)] focus:outline-none"
+                    />
+                  </div>
                 </div>
               </div>
             );
@@ -632,26 +709,42 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
         {(() => {
           const total = roles.reduce((sum, r) => sum + r.percentage, 0);
           const isValid = total === 100;
+          const diff = 100 - total;
 
           return (
             <div className="space-y-3 pt-2">
-              <div className={`p-4 rounded-xl border flex items-center justify-between text-xs font-bold ${
+              <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-bold ${
                 isValid
                   ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
                   : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
               }`}>
-                <span className="flex items-center gap-2">
-                  <AlertTriangle size={16} />
-                  {isValid
-                    ? "مجموع درصدها برابر با ۱۰۰٪ بوده و آماده تایید است."
-                    : `مجموع درصد تمام نقش‌ها باید دقیقا ۱۰۰٪ باشد. (مجموع فعلی: ${total}٪)`
-                  }
-                </span>
-                <span className="font-mono text-sm font-black">{total}%</span>
+                <div className="flex items-center gap-2">
+                  <AlertTriangle size={16} className="shrink-0" />
+                  <span>
+                    {isValid
+                      ? "مجموع درصدها دقیقاً برابر با ۱۰۰٪ بوده و آماده تایید است."
+                      : `مجموع درصد تمام نقش‌ها باید دقیقاً ۱۰۰٪ باشد. (مجموع فعلی: ${total}٪ | ${diff > 0 ? `${diff}٪ باقی‌مانده` : `${Math.abs(diff)}٪ مازاد`})`
+                    }
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  {!isValid && (
+                    <button
+                      type="button"
+                      onClick={handleAutoBalance}
+                      className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[11px] font-black rounded-lg border border-amber-500/30 transition-colors"
+                      title="تنظیم خودکار درصد سهم وبسایت برای رسیدن به مجموع ۱۰۰٪"
+                    >
+                      ⚡ توازن هوشمند ۱۰۰٪
+                    </button>
+                  )}
+                  <span className="font-mono text-base font-black px-2 py-0.5 bg-black/40 rounded-lg border border-white/10">{total}%</span>
+                </div>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-4 items-center">
                 <button
+                  type="button"
                   onClick={handleSaveRoles}
                   disabled={savingRoles || !isValid}
                   className="w-full sm:w-2/3 py-3 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] disabled:opacity-50 text-white text-xs font-black rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"

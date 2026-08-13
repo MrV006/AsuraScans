@@ -2610,5 +2610,256 @@ if ($method === 'POST' && $sub_path === '/admin/fix-charset') {
     }
 }
 
+// ADMIN GET REVENUE ROLES
+if ($method === 'GET' && $sub_path === '/admin/revenue-roles') {
+    requireAdmin($pdo);
+    try {
+        $stmt = $pdo->prepare("SELECT val FROM settings WHERE id = 'revenue_roles'");
+        $stmt->execute();
+        $row = $stmt->fetch();
+        $defaultRoles = [
+            ["id" => "editor", "name" => "ادیتور", "percentage" => 30],
+            ["id" => "translator", "name" => "مترجم", "percentage" => 20],
+            ["id" => "cleaner", "name" => "کلینر", "percentage" => 30],
+            ["id" => "website", "name" => "وبسایت", "percentage" => 20]
+        ];
+        $roles = ($row && !empty($row['val'])) ? json_decode($row['val'], true) : $defaultRoles;
+        sendResponse($roles);
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
+    }
+}
+
+// ADMIN SAVE REVENUE ROLES
+if ($method === 'POST' && $sub_path === '/admin/revenue-roles') {
+    requireAdmin($pdo);
+    try {
+        $input = getJsonInput();
+        $roles = $input['roles'] ?? null;
+        if (!is_array($roles)) {
+            sendResponse(["error" => "لیست نقش‌ها ارسالی نامعتبر است."], 400);
+        }
+        $stmt = $pdo->prepare("INSERT INTO settings (id, val) VALUES ('revenue_roles', ?) ON DUPLICATE KEY UPDATE val=VALUES(val)");
+        $stmt->execute([json_encode($roles, JSON_UNESCAPED_UNICODE)]);
+        sendResponse(["success" => true]);
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
+    }
+}
+
+// ADMIN GET WEBSITE REVENUE
+if ($method === 'GET' && $sub_path === '/admin/website-revenue') {
+    requireAdmin($pdo);
+    try {
+        $stmt = $pdo->prepare("SELECT val FROM settings WHERE id = 'website_revenue'");
+        $stmt->execute();
+        $row = $stmt->fetch();
+        $revenue = ($row && !empty($row['val'])) ? json_decode($row['val'], true) : ["totalEarned" => 0];
+
+        $txs = [];
+        try {
+            $txStmt = $pdo->prepare("SELECT * FROM wallet_transactions WHERE (description LIKE '%سود سایت%' OR description LIKE '%تسویه حساب%') ORDER BY createdAt DESC LIMIT 100");
+            $txStmt->execute();
+            $txs = $txStmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {}
+
+        sendResponse([
+            "totalEarned" => (int)($revenue['totalEarned'] ?? 0),
+            "transactions" => $txs
+        ]);
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
+    }
+}
+
+// ADMIN SETTLE WEBSITE REVENUE
+if ($method === 'POST' && $sub_path === '/admin/settle-website-revenue') {
+    requireAdmin($pdo);
+    try {
+        $input = getJsonInput();
+        $amount = (int)($input['amount'] ?? 0);
+        $description = trim($input['description'] ?? '');
+
+        if ($amount <= 0) {
+            sendResponse(["error" => "مبلغ ارسالی برای تسویه حساب معتبر نیست."], 400);
+        }
+
+        $stmt = $pdo->prepare("SELECT val FROM settings WHERE id = 'website_revenue'");
+        $stmt->execute();
+        $row = $stmt->fetch();
+        $currentRev = ($row && !empty($row['val'])) ? json_decode($row['val'], true) : ["totalEarned" => 0];
+
+        $previousTotal = (int)($currentRev['totalEarned'] ?? 0);
+        $currentRev['totalEarned'] = $previousTotal - $amount;
+
+        $stmtUp = $pdo->prepare("INSERT INTO settings (id, val) VALUES ('website_revenue', ?) ON DUPLICATE KEY UPDATE val=VALUES(val)");
+        $stmtUp->execute([json_encode($currentRev, JSON_UNESCAPED_UNICODE)]);
+
+        // Create transaction
+        $now = date('Y-m-d H:i:s');
+        $transId = "tx-" . time() . "-" . rand(10000, 99999);
+        $desc = $description ? ("تسویه حساب: " . $description) : "کاهش و تسویه حساب از سود سایت";
+
+        try {
+            $adminStmt = $pdo->prepare("SELECT id, displayName FROM users WHERE role = 'admin' LIMIT 1");
+            $adminStmt->execute();
+            $adminUser = $adminStmt->fetch(PDO::FETCH_ASSOC);
+            $adminId = $adminUser ? $adminUser['id'] : 'system';
+            $adminName = $adminUser ? $adminUser['displayName'] : 'مدیر کل';
+
+            $txIns = $pdo->prepare("INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, 'debit', ?, 'system', 'سیستم', ?)");
+            $txIns->execute([$transId, $adminId, $adminName, -$amount, $desc, $now]);
+        } catch (Exception $e) {}
+
+        sendResponse(["success" => true, "newBalance" => $currentRev['totalEarned']]);
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
+    }
+}
+
+// ADMIN GET STAFF
+if ($method === 'GET' && $sub_path === '/admin/staff') {
+    requireAdmin($pdo);
+    try {
+        $stmt = $pdo->prepare("SELECT id, email, displayName, role FROM users WHERE role = 'staff' OR role = 'admin'");
+        $stmt->execute();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        sendResponse($rows ?: []);
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
+    }
+}
+
+// ADMIN GET LOGS
+if ($method === 'GET' && $sub_path === '/admin/logs') {
+    requireAdmin($pdo);
+    try {
+        $logs = [];
+        try {
+            $txStmt = $pdo->prepare("SELECT * FROM wallet_transactions ORDER BY createdAt DESC LIMIT 30");
+            $txStmt->execute();
+            foreach ($txStmt->fetchAll(PDO::FETCH_ASSOC) as $tx) {
+                $amt = (int)($tx['amount'] ?? 0);
+                $logs[] = [
+                    'id' => $tx['id'],
+                    'type' => $amt < 0 ? 'payout' : 'charge',
+                    'title' => $amt < 0 ? 'تسویه و پرداخت مالی' : 'شارژ / تراکنش',
+                    'description' => ($tx['userName'] ?? 'کاربر') . ": " . ($tx['description'] ?? '') . " (" . number_format(abs($amt)) . " ت)",
+                    'createdAt' => $tx['createdAt']
+                ];
+            }
+        } catch (Exception $e) {}
+
+        try {
+            $chStmt = $pdo->prepare("SELECT * FROM chapters ORDER BY createdAt DESC LIMIT 30");
+            $chStmt->execute();
+            foreach ($chStmt->fetchAll(PDO::FETCH_ASSOC) as $ch) {
+                $isPending = !empty($ch['isPending']);
+                $logs[] = [
+                    'id' => 'ch-' . $ch['id'],
+                    'type' => $isPending ? 'upload' : 'approval',
+                    'title' => $isPending ? 'بارگذاری / ثبت چپتر' : 'تایید و انتشار چپتر',
+                    'description' => "چپتر " . $ch['number'] . " (" . ($ch['title'] ?: 'بدون عنوان') . ") - " . ($isPending ? 'در انتظار تایید' : 'منتشر شده عمومی'),
+                    'createdAt' => $ch['createdAt']
+                ];
+            }
+        } catch (Exception $e) {}
+
+        usort($logs, function($a, $b) {
+            return strtotime($b['createdAt']) - strtotime($a['createdAt']);
+        });
+
+        sendResponse(array_slice($logs, 0, 30));
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
+    }
+}
+
+// ADMIN GET SERIES SALES SUMMARY
+if ($method === 'GET' && preg_match('/^\/admin\/series\/([^\/]+)\/sales-summary$/', $sub_path, $matches)) {
+    requireAdmin($pdo);
+    try {
+        $seriesId = $matches[1];
+        $sStmt = $pdo->prepare("SELECT * FROM series WHERE id = ?");
+        $sStmt->execute([$seriesId]);
+        $series = $sStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$series) {
+            sendResponse(["error" => "کار یافت نشد"], 404);
+        }
+
+        $cStmt = $pdo->prepare("SELECT * FROM chapters WHERE seriesId = ?");
+        $cStmt->execute([$seriesId]);
+        $chapters = $cStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $purchases = [];
+        try {
+            $pStmt = $pdo->prepare("SELECT * FROM purchased_chapters WHERE seriesId = ?");
+            $pStmt->execute([$seriesId]);
+            $purchases = $pStmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {}
+
+        $chapterMap = [];
+        foreach ($purchases as $p) {
+            $chId = $p['chapterId'];
+            $chapterMap[$chId] = ($chapterMap[$chId] ?? 0) + 1;
+        }
+
+        $price = 400;
+        $list = [];
+        foreach ($chapters as $ch) {
+            $cnt = $chapterMap[$ch['id']] ?? 0;
+            $contributors = [];
+            if (!empty($ch['contributors'])) {
+                $contributors = is_array($ch['contributors']) ? $ch['contributors'] : json_decode($ch['contributors'], true);
+            }
+            $list[] = [
+                'id' => $ch['id'],
+                'number' => $ch['number'],
+                'title' => $ch['title'],
+                'salesCount' => $cnt,
+                'totalSalesAmount' => $cnt * $price,
+                'contributors' => $contributors
+            ];
+        }
+
+        $totalPurchasesCount = count($purchases);
+        $totalSales = $totalPurchasesCount * $price;
+
+        sendResponse([
+            "seriesTitle" => $series['title'],
+            "totalPurchasesCount" => $totalPurchasesCount,
+            "totalSales" => $totalSales,
+            "byChapter" => $list
+        ]);
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
+    }
+}
+
+// ADMIN SAVE CHAPTER CONTRIBUTORS
+if ($method === 'POST' && preg_match('/^\/series\/([^\/]+)\/chapters\/([^\/]+)\/contributors$/', $sub_path, $matches)) {
+    requireAdmin($pdo);
+    try {
+        $seriesId = $matches[1];
+        $chapterId = $matches[2];
+        $input = getJsonInput();
+        $contributors = $input['contributors'] ?? [];
+
+        $chStmt = $pdo->prepare("SELECT * FROM chapters WHERE id = ?");
+        $chStmt->execute([$chapterId]);
+        $ch = $chStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$ch) {
+            sendResponse(["error" => "چپتر یافت نشد"], 404);
+        }
+
+        $upStmt = $pdo->prepare("UPDATE chapters SET contributors = ? WHERE id = ?");
+        $upStmt->execute([json_encode($contributors, JSON_UNESCAPED_UNICODE), $chapterId]);
+
+        sendResponse(["success" => true]);
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
+    }
+}
+
 // Fallback Route if not matched
 sendResponse(["error" => "مسیر انتخابی یافت نشد."], 404);
