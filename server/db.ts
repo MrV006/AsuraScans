@@ -279,8 +279,12 @@ class DatabaseManager {
           password: dbPassword,
           database: dbName,
           waitForConnections: true,
-          connectionLimit: 10,
+          connectionLimit: 20,
+          maxIdle: 10,
+          idleTimeout: 60000,
           queueLimit: 0,
+          enableKeepAlive: true,
+          keepAliveInitialDelay: 10000,
           charset: 'utf8mb4'
         });
 
@@ -288,7 +292,7 @@ class DatabaseManager {
           connection.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
           connection.query("SET CHARACTER SET utf8mb4");
         });
-        
+
         // Test connection
         const conn = await this.pool.getConnection();
         await conn.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
@@ -308,6 +312,43 @@ class DatabaseManager {
       this.isUsingMySQL = false;
       this.loadLocalData();
     }
+  }
+
+  /**
+   * Safe MySQL query executor with auto-retry on transient connection drops
+   */
+  public async executeWithRetry<T = any>(
+    queryFn: (conn: mysql.PoolConnection | mysql.Pool) => Promise<T>,
+    maxRetries = 3
+  ): Promise<T> {
+    if (!this.isUsingMySQL || !this.pool) {
+      throw new Error("MySQL is not active");
+    }
+
+    let attempt = 0;
+    while (attempt < maxRetries) {
+      attempt++;
+      try {
+        return await queryFn(this.pool);
+      } catch (err: any) {
+        const isConnErr = err && (
+          err.code === 'ECONNRESET' ||
+          err.code === 'PROTOCOL_CONNECTION_LOST' ||
+          err.code === 'ETIMEDOUT' ||
+          err.code === 'EPIPE' ||
+          err.code === 'ER_LOCK_DEADLOCK' ||
+          err.message?.includes('Connection lost')
+        );
+
+        if (isConnErr && attempt < maxRetries) {
+          console.warn(`[DB] MySQL transient error (${err.code || err.message}), retrying attempt ${attempt}/${maxRetries}...`);
+          await new Promise(r => setTimeout(r, attempt * 300));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error("MySQL max retries exceeded");
   }
 
   // Load from local JSON file
@@ -604,6 +645,28 @@ class DatabaseManager {
           await this.pool.execute(aq);
         } catch (err) {
           // ignore error if already exists
+        }
+      }
+
+      // Add high-performance indexes for heavy production queries
+      const indexQueries = [
+        `CREATE INDEX IF NOT EXISTS idx_series_slug ON series(slug)`,
+        `CREATE INDEX IF NOT EXISTS idx_series_type_status ON series(type, status)`,
+        `CREATE INDEX IF NOT EXISTS idx_series_created ON series(createdAt)`,
+        `CREATE INDEX IF NOT EXISTS idx_chapters_series_num ON chapters(seriesId, number)`,
+        `CREATE INDEX IF NOT EXISTS idx_chapters_pending ON chapters(isPending)`,
+        `CREATE INDEX IF NOT EXISTS idx_comments_chapter ON comments(chapterId, status)`,
+        `CREATE INDEX IF NOT EXISTS idx_wallet_user_created ON wallet_transactions(userId, createdAt)`,
+        `CREATE INDEX IF NOT EXISTS idx_purchased_user_series ON purchased_chapters(userId, seriesId)`,
+        `CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(userId, isRead, createdAt)`,
+        `CREATE INDEX IF NOT EXISTS idx_settlement_user_status ON settlement_requests(userId, status)`
+      ];
+
+      for (const iq of indexQueries) {
+        try {
+          await this.pool.execute(iq);
+        } catch (idxErr) {
+          // Ignore index creation errors if unsupported or already present
         }
       }
 
@@ -1408,14 +1471,55 @@ class DatabaseManager {
     }
 
     if (this.isUsingMySQL && this.pool) {
-      await this.pool.execute('DELETE FROM series WHERE id = ?', [id]);
-      return true;
+      const conn = await this.pool.getConnection();
+      try {
+        await conn.beginTransaction();
+
+        // 1. Delete comments associated with chapters of this series
+        const [chRows] = await conn.execute('SELECT id FROM chapters WHERE seriesId = ?', [id]);
+        const chapterIds = (chRows as any[]).map(r => r.id);
+        if (chapterIds.length > 0) {
+          const placeholders = chapterIds.map(() => '?').join(',');
+          await conn.execute(`DELETE FROM comments WHERE chapterId IN (${placeholders})`, chapterIds);
+        }
+
+        // 2. Delete bookmarks, ratings, history, views, and purchases
+        await conn.execute('DELETE FROM bookmarks WHERE seriesId = ?', [id]);
+        await conn.execute('DELETE FROM ratings WHERE seriesId = ?', [id]);
+        await conn.execute('DELETE FROM history WHERE seriesId = ?', [id]);
+        await conn.execute('DELETE FROM chapter_views_log WHERE seriesId = ?', [id]);
+        await conn.execute('DELETE FROM purchased_chapters WHERE seriesId = ?', [id]);
+        
+        // 3. Delete chapters and series
+        await conn.execute('DELETE FROM chapters WHERE seriesId = ?', [id]);
+        await conn.execute('DELETE FROM series WHERE id = ?', [id]);
+
+        await conn.commit();
+        return true;
+      } catch (cascadeErr) {
+        await conn.rollback();
+        console.error("Cascading delete failed, attempting fallback direct delete:", cascadeErr);
+        await this.pool.execute('DELETE FROM series WHERE id = ?', [id]);
+        return true;
+      } finally {
+        conn.release();
+      }
     }
+
+    // Local JSON Cascade Cleanup
+    const targetChapters = (this.localData.chapters || []).filter(c => c.seriesId === id);
+    const targetChapIds = new Set(targetChapters.map(c => c.id));
+
     this.localData.series = this.localData.series.filter(s => s.id !== id);
     this.localData.chapters = this.localData.chapters.filter(c => c.seriesId !== id);
-    this.localData.bookmarks = this.localData.bookmarks.filter(b => b.seriesId !== id);
-    this.localData.history = this.localData.history.filter(h => h.seriesId !== id);
-    this.localData.ratings = this.localData.ratings.filter(r => r.seriesId !== id);
+    this.localData.comments = (this.localData.comments || []).filter(c => !targetChapIds.has(c.chapterId));
+    this.localData.bookmarks = (this.localData.bookmarks || []).filter(b => b.seriesId !== id);
+    this.localData.history = (this.localData.history || []).filter(h => h.seriesId !== id);
+    this.localData.ratings = (this.localData.ratings || []).filter(r => r.seriesId !== id);
+    this.localData.purchased_chapters = (this.localData.purchased_chapters || []).filter(pc => pc.seriesId !== id);
+    if (this.localData.chapter_views_log) {
+      this.localData.chapter_views_log = this.localData.chapter_views_log.filter((v: any) => v.seriesId !== id);
+    }
     this.saveLocalData();
     return true;
   }
@@ -1651,10 +1755,35 @@ class DatabaseManager {
     }
 
     if (this.isUsingMySQL && this.pool) {
-      await this.pool.execute('DELETE FROM chapters WHERE seriesId = ? AND id = ?', [seriesId, id]);
-      return true;
+      const conn = await this.pool.getConnection();
+      try {
+        await conn.beginTransaction();
+
+        // 1. Delete comments associated with this chapter
+        await conn.execute('DELETE FROM comments WHERE chapterId = ?', [id]);
+        
+        // 2. Delete chapter views log
+        await conn.execute('DELETE FROM chapter_views_log WHERE chapterId = ?', [id]);
+
+        // 3. Delete chapter
+        await conn.execute('DELETE FROM chapters WHERE seriesId = ? AND id = ?', [seriesId, id]);
+
+        await conn.commit();
+        return true;
+      } catch (err) {
+        await conn.rollback();
+        console.error("Cascading chapter delete failed, running fallback delete:", err);
+        await this.pool.execute('DELETE FROM chapters WHERE seriesId = ? AND id = ?', [seriesId, id]);
+        return true;
+      } finally {
+        conn.release();
+      }
     }
     this.localData.chapters = this.localData.chapters.filter(c => !(c.seriesId === seriesId && c.id === id));
+    this.localData.comments = (this.localData.comments || []).filter(c => c.chapterId !== id);
+    if (this.localData.chapter_views_log) {
+      this.localData.chapter_views_log = this.localData.chapter_views_log.filter((v: any) => v.chapterId !== id);
+    }
     this.saveLocalData();
     return true;
   }
@@ -2866,12 +2995,6 @@ class DatabaseManager {
     creatorId: string,
     creatorName: string
   ): Promise<boolean> {
-    const user = await this.getUser(userId);
-    if (!user) {
-      throw new Error('User not found');
-    }
-
-    const newBalance = (user.walletBalance || 0) + amount;
     const transId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     const now = new Date().toISOString();
 
@@ -2879,14 +3002,32 @@ class DatabaseManager {
       const conn = await this.pool.getConnection();
       try {
         await conn.beginTransaction();
-        
-        // Update user balance
+
+        // 1. Lock user row for update
+        const [uRows] = await conn.execute(
+          'SELECT id, displayName, email, walletBalance FROM users WHERE id = ? FOR UPDATE',
+          [userId]
+        );
+        const lockedUser = (uRows as any[])[0];
+        if (!lockedUser) {
+          await conn.rollback();
+          throw new Error('User not found');
+        }
+
+        const currentBal = lockedUser.walletBalance || 0;
+        const newBalance = currentBal + amount;
+        if (newBalance < 0) {
+          await conn.rollback();
+          throw new Error('موجودی حساب کافی نیست و نمی‌تواند منفی شود.');
+        }
+
+        // 2. Update user balance
         await conn.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newBalance, userId]);
 
-        // Insert transaction log
+        // 3. Insert transaction log
         await conn.execute(
           'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [transId, userId, user.displayName, amount, type, description, creatorId, creatorName, now]
+          [transId, userId, lockedUser.displayName || lockedUser.email, amount, type, description, creatorId, creatorName, now]
         );
 
         await conn.commit();
@@ -2897,6 +3038,14 @@ class DatabaseManager {
         conn.release();
       }
     } else {
+      const user = await this.getUser(userId);
+      if (!user) {
+        throw new Error('User not found');
+      }
+      const newBalance = (user.walletBalance || 0) + amount;
+      if (newBalance < 0) {
+        throw new Error('موجودی حساب کافی نیست و نمی‌تواند منفی شود.');
+      }
       // Local database update
       const uIdx = this.localData.users.findIndex(u => u.id === userId);
       if (uIdx >= 0) {
@@ -3062,28 +3211,71 @@ class DatabaseManager {
     const now = new Date().toISOString();
 
     if (action === 'approve') {
-      const user = await this.getUser(reqObj.userId);
-      if (!user) return { success: false, error: 'کاربر مربوطه یافت نشد.' };
-      const currentBalance = user.walletBalance || 0;
-      if (currentBalance < reqObj.amount) {
-        return { success: false, error: `موجودی کاربر (${currentBalance.toLocaleString()} تومان) از مبلغ تسویه کمتر است.` };
-      }
-
-      const newBalance = currentBalance - reqObj.amount;
       const transId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
       const desc = `تسویه حساب و واریز به کارت/شبا ${reqObj.cardOrSheba} (${reqObj.accountHolder})`;
 
       if (this.isUsingMySQL && this.pool) {
-        await this.pool.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newBalance, reqObj.userId]);
-        await this.pool.execute(
-          'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [transId, reqObj.userId, user.displayName, -reqObj.amount, 'debit', desc, adminUid, 'مدیریت کل', now]
-        );
-        await this.pool.execute(
-          'UPDATE settlement_requests SET status = ?, processedAt = ?, processedBy = ? WHERE id = ?',
-          ['approved', now, adminUid, requestId]
-        );
+        const conn = await this.pool.getConnection();
+        try {
+          await conn.beginTransaction();
+
+          // 1. Lock settlement request row
+          const [srRows] = await conn.execute(
+            'SELECT * FROM settlement_requests WHERE id = ? FOR UPDATE',
+            [requestId]
+          );
+          const currentSr = (srRows as any[])[0];
+          if (!currentSr || currentSr.status !== 'pending') {
+            await conn.rollback();
+            return { success: false, error: 'این درخواست قبلاً پردازش شده یا معتبر نیست.' };
+          }
+
+          // 2. Lock user row
+          const [userRows] = await conn.execute(
+            'SELECT id, displayName, email, walletBalance FROM users WHERE id = ? FOR UPDATE',
+            [reqObj.userId]
+          );
+          const lockedUser = (userRows as any[])[0];
+          if (!lockedUser) {
+            await conn.rollback();
+            return { success: false, error: 'کاربر مربوطه یافت نشد.' };
+          }
+
+          const currentBalance = lockedUser.walletBalance || 0;
+          if (currentBalance < reqObj.amount) {
+            await conn.rollback();
+            return { success: false, error: `موجودی کاربر (${currentBalance.toLocaleString()} تومان) از مبلغ تسویه کمتر است.` };
+          }
+
+          const newBalance = currentBalance - reqObj.amount;
+
+          // 3. Update balance and insert transaction
+          await conn.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newBalance, reqObj.userId]);
+          await conn.execute(
+            'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [transId, reqObj.userId, lockedUser.displayName || lockedUser.email, -reqObj.amount, 'debit', desc, adminUid, 'مدیریت کل', now]
+          );
+          await conn.execute(
+            'UPDATE settlement_requests SET status = ?, processedAt = ?, processedBy = ? WHERE id = ?',
+            ['approved', now, adminUid, requestId]
+          );
+
+          await conn.commit();
+        } catch (txErr: any) {
+          await conn.rollback();
+          console.error('Error in settlement approve transaction:', txErr);
+          return { success: false, error: txErr.message || 'خطا در پردازش تراکنش تسویه' };
+        } finally {
+          conn.release();
+        }
       } else {
+        const user = await this.getUser(reqObj.userId);
+        if (!user) return { success: false, error: 'کاربر مربوطه یافت نشد.' };
+        const currentBalance = user.walletBalance || 0;
+        if (currentBalance < reqObj.amount) {
+          return { success: false, error: `موجودی کاربر (${currentBalance.toLocaleString()} تومان) از مبلغ تسویه کمتر است.` };
+        }
+        const newBalance = currentBalance - reqObj.amount;
         user.walletBalance = newBalance;
         if (!this.localData.wallet_transactions) this.localData.wallet_transactions = [];
         this.localData.wallet_transactions.push({
@@ -3283,17 +3475,46 @@ class DatabaseManager {
       try {
         await conn.beginTransaction();
 
-        // 1. Deduct balance from buyer
-        await conn.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newBalance, userId]);
+        // 1. Lock purchaser row for update (Pessimistic concurrency lock)
+        const [lockedUserRows] = await conn.execute(
+          'SELECT walletBalance, displayName, email FROM users WHERE id = ? FOR UPDATE',
+          [userId]
+        );
+        const lockedUser = (lockedUserRows as any[])[0];
+        if (!lockedUser) {
+          await conn.rollback();
+          return { success: false, error: 'کاربر خریدار یافت نشد' };
+        }
 
-        // 2. Insert transaction log for purchaser
+        const realCurrentBalance = lockedUser.walletBalance || 0;
+        if (realCurrentBalance < price) {
+          await conn.rollback();
+          return { success: false, error: 'موجودی کیف پول شما کافی نیست. لطفا برای ادامه مطالعه ابتدا حساب خود را شارژ کنید.' };
+        }
+
+        // Check if already purchased inside lock
+        const [existingPurchaseRows] = await conn.execute(
+          'SELECT 1 FROM purchased_chapters WHERE userId = ? AND seriesId = ? AND (chapterId = ? OR chapterNumber = ?) LIMIT 1 FOR UPDATE',
+          [userId, seriesId, chapterId, chapter.number]
+        );
+        if ((existingPurchaseRows as any[]).length > 0) {
+          await conn.rollback();
+          return { success: true, newBalance: realCurrentBalance };
+        }
+
+        const realNewBalance = realCurrentBalance - price;
+
+        // 2. Deduct balance from buyer atomically
+        await conn.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [realNewBalance, userId]);
+
+        // 3. Insert transaction log for purchaser
         const description = `خرید چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
         await conn.execute(
           'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [transId, userId, user.displayName || user.email, -price, 'purchase', description, 'system', 'سیستم', now]
+          [transId, userId, lockedUser.displayName || lockedUser.email, -price, 'purchase', description, 'system', 'سیستم', now]
         );
 
-        // 3. Insert purchased chapter record with chapterNumber
+        // 4. Insert purchased chapter record with chapterNumber
         await conn.execute(
           'INSERT INTO purchased_chapters (id, userId, seriesId, chapterId, chapterNumber, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
           [purchaseId, userId, seriesId, chapterId, chapter.number, now]

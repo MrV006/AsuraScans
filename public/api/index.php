@@ -2,9 +2,28 @@
 // PHP Backend for AsuraClone - Shared Hosting Compatible
 // Configured for mr-v.ir
 
-// Error reporting (for debugging, set to 0 in production)
-ini_set('display_errors', 1);
+// Error reporting & Exception Handling
+ini_set('display_errors', 0);
 error_reporting(E_ALL);
+
+set_exception_handler(function ($e) {
+    if (!headers_sent()) {
+        http_response_code(500);
+        header("Content-Type: application/json; charset=UTF-8");
+    }
+    echo json_encode([
+        "error" => "خطایی در پردازش درخواست سمت سرور رخ داد.",
+        "message" => $e->getMessage()
+    ], JSON_UNESCAPED_UNICODE);
+    exit();
+});
+
+set_error_handler(function ($severity, $message, $file, $line) {
+    if (!(error_reporting() & $severity)) {
+        return;
+    }
+    throw new ErrorException($message, 0, $severity, $file, $line);
+});
 
 // Security & CORS Headers
 @header_remove("X-Powered-By");
@@ -412,6 +431,27 @@ function ensureSchema($pdo) {
         $pdo->exec("ALTER TABLE series ADD COLUMN contributors TEXT");
     } catch (PDOException $e) {
         // Ignored if column already exists
+    }
+
+    // High performance indexes
+    $indexQueries = [
+        "CREATE INDEX idx_series_slug ON series(id)",
+        "CREATE INDEX idx_series_type_status ON series(type, status)",
+        "CREATE INDEX idx_series_created ON series(createdAt)",
+        "CREATE INDEX idx_chapters_series_num ON chapters(seriesId, number)",
+        "CREATE INDEX idx_chapters_pending ON chapters(isPending)",
+        "CREATE INDEX idx_comments_chapter ON comments(chapterId, status)",
+        "CREATE INDEX idx_wallet_user_created ON wallet_transactions(userId, createdAt)",
+        "CREATE INDEX idx_purchased_user_series ON purchased_chapters(userId, seriesId)",
+        "CREATE INDEX idx_notifications_user_read ON notifications(userId, isRead, createdAt)",
+        "CREATE INDEX idx_settlement_user_status ON settlement_requests(userId, status)"
+    ];
+    foreach ($indexQueries as $iq) {
+        try {
+            $pdo->exec($iq);
+        } catch (Exception $e) {
+            // Ignored if index exists
+        }
     }
 }
 
@@ -1041,31 +1081,33 @@ if (($method === 'DELETE' && matchRoute('/series/:id', $sub_path, $params)) || (
     // Begin transaction
     $pdo->beginTransaction();
     try {
-        // Delete chapters
-        $stmtCh = $pdo->prepare("DELETE FROM chapters WHERE seriesId = ?");
-        $stmtCh->execute([$seriesId]);
-        
-        // Delete bookmarks
+        // 1. Delete comments for those chapters FIRST before deleting chapters
+        $stmtComm = $pdo->prepare("DELETE FROM comments WHERE chapterId IN (SELECT id FROM chapters WHERE seriesId = ?)");
+        $stmtComm->execute([$seriesId]);
+
+        // 2. Delete bookmarks, history, ratings, purchases, and views log
         $stmtBk = $pdo->prepare("DELETE FROM bookmarks WHERE seriesId = ?");
         $stmtBk->execute([$seriesId]);
         
-        // Delete history
         $stmtHi = $pdo->prepare("DELETE FROM history WHERE seriesId = ?");
         $stmtHi->execute([$seriesId]);
         
-        // Delete ratings
         $stmtRt = $pdo->prepare("DELETE FROM ratings WHERE seriesId = ?");
         $stmtRt->execute([$seriesId]);
         
-        // Delete purchased chapters
         $stmtPur = $pdo->prepare("DELETE FROM purchased_chapters WHERE seriesId = ?");
         $stmtPur->execute([$seriesId]);
+
+        try {
+            $stmtVw = $pdo->prepare("DELETE FROM chapter_views_log WHERE seriesId = ?");
+            $stmtVw->execute([$seriesId]);
+        } catch (Exception $e) {}
         
-        // Delete comments for those chapters
-        $stmtComm = $pdo->prepare("DELETE FROM comments WHERE chapterId IN (SELECT id FROM chapters WHERE seriesId = ?)");
-        $stmtComm->execute([$seriesId]);
+        // 3. Delete chapters
+        $stmtCh = $pdo->prepare("DELETE FROM chapters WHERE seriesId = ?");
+        $stmtCh->execute([$seriesId]);
         
-        // Finally, delete series
+        // 4. Finally, delete series
         $stmt = $pdo->prepare("DELETE FROM series WHERE id = ?");
         $stmt->execute([$seriesId]);
         
@@ -2809,8 +2851,38 @@ if ($method === 'POST' && $sub_path === '/admin/upload') {
         sendResponse(["error" => "هیچ فایلی برای آپلود یافت نشد."], 400);
     }
     
-    // Target directory
-    $uploadsDir = __DIR__ . '/../uploads/';
+    // Determine standardized structured directory: series/{title}/chapter-{num}/
+    $seriesTitle = trim($_POST['seriesTitle'] ?? $_GET['seriesTitle'] ?? $_POST['seriesId'] ?? $_GET['seriesId'] ?? '');
+    $chapterNumber = trim($_POST['chapterNumber'] ?? $_GET['chapterNumber'] ?? '');
+    $folderType = trim($_POST['folderType'] ?? $_GET['folderType'] ?? '');
+
+    $relParts = [];
+    if (!empty($seriesTitle)) {
+        $safeSeries = preg_replace('/[^\p{L}\p{N}_\-\s]/u', '', $seriesTitle);
+        $safeSeries = trim(preg_replace('/\s+/', '-', $safeSeries)) ?: 'series';
+        $relParts[] = 'series';
+        $relParts[] = $safeSeries;
+
+        if ($chapterNumber !== '') {
+            $relParts[] = 'chapter-' . preg_replace('/[^0-9\.]/', '', $chapterNumber);
+        } elseif (!empty($folderType)) {
+            $relParts[] = preg_replace('/[^a-zA-Z0-9_\-]/', '', $folderType);
+        }
+    } elseif (!empty($folderType)) {
+        $cleanFolder = preg_replace('/[^a-zA-Z0-9_\-]/', '', $folderType);
+        if (in_array($cleanFolder, ['cover', 'banner', 'logo'])) {
+            $relParts = ['site', $cleanFolder];
+        } else {
+            $relParts = [$cleanFolder];
+        }
+    }
+
+    if (empty($relParts)) {
+        $relParts[] = 'general';
+    }
+
+    $relPath = implode('/', $relParts);
+    $uploadsDir = __DIR__ . '/../uploads/' . $relPath . '/';
     if (!file_exists($uploadsDir)) {
         mkdir($uploadsDir, 0755, true);
     }
@@ -2877,14 +2949,14 @@ if ($method === 'POST' && $sub_path === '/admin/upload') {
                             $targetPath = $uploadsDir . $uniqueName . '.webp';
                             imagewebp($img, $targetPath, 75);
                             imagedestroy($img);
-                            $urls[] = '/uploads/' . $uniqueName . '.webp';
+                            $urls[] = '/uploads/' . $relPath . '/' . $uniqueName . '.webp';
                         } else {
                             // save as original extension
                             $ext = pathinfo($entryName, PATHINFO_EXTENSION);
                             $targetPath = $uploadsDir . $uniqueName . '.' . $ext;
                             file_put_contents($targetPath, $content);
                             if ($img !== false) imagedestroy($img);
-                            $urls[] = '/uploads/' . $uniqueName . '.' . $ext;
+                            $urls[] = '/uploads/' . $relPath . '/' . $uniqueName . '.' . $ext;
                         }
                     }
                 }
@@ -2900,13 +2972,13 @@ if ($method === 'POST' && $sub_path === '/admin/upload') {
                 $targetPath = $uploadsDir . $uniqueName . '.webp';
                 imagewebp($img, $targetPath, 75);
                 imagedestroy($img);
-                $urls[] = '/uploads/' . $uniqueName . '.webp';
+                $urls[] = '/uploads/' . $relPath . '/' . $uniqueName . '.webp';
             } else {
                 $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
                 $targetPath = $uploadsDir . $uniqueName . '.' . $ext;
                 move_uploaded_file($file['tmp_name'], $targetPath);
                 if ($img !== false) imagedestroy($img);
-                $urls[] = '/uploads/' . $uniqueName . '.' . $ext;
+                $urls[] = '/uploads/' . $relPath . '/' . $uniqueName . '.' . $ext;
             }
         }
     }

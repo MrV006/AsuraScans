@@ -7,6 +7,11 @@ import { Server } from "socket.io";
 import { dbManager } from "./server/db";
 import multer from "multer";
 import sharp from "sharp";
+
+// Configure Sharp memory limits and worker threads for shared host/container efficiency
+sharp.cache({ memory: 64, files: 20, items: 100 });
+sharp.concurrency(2); // Keep concurrency controlled to avoid CPU/RAM starvation during high volume zip processing
+
 import JSZip from "jszip";
 import fs from "fs";
 import crypto from "crypto";
@@ -3094,7 +3099,8 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
       if (isFtpEnabled) {
         const batchPayload = itemsToUpload.map(item => ({
           buffer: item.buffer,
-          remoteRelPath: `uploads/${relPrefix}/${item.fileName}`
+          remoteRelPath: `uploads/${relPrefix}/${item.fileName}`,
+          localFallbackPath: path.join(targetDir, item.fileName)
         }));
         ftpUrls = await uploadBatchFilesToFtp(batchPayload, dbFtpConfig);
       }
@@ -3230,9 +3236,64 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
     });
   }
 
-  httpServer.listen(PORT, "0.0.0.0", () => {
+  // Global Centralized Error Handling Middleware (Production-Safe)
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error(`[Server Unhandled Error] ${req.method} ${req.originalUrl}:`, err);
+    if (res.headersSent) {
+      return next(err);
+    }
+    const statusCode = typeof err.statusCode === 'number' ? err.statusCode : (typeof err.status === 'number' ? err.status : 500);
+    const isProd = process.env.NODE_ENV === 'production';
+    const message = err.message || "خطای ناشناخته در پردازش درخواست سرور.";
+
+    res.status(statusCode).json({
+      error: message,
+      ...(isProd ? {} : { stack: err.stack, details: err })
+    });
+  });
+
+  const server = httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on port ${PORT}`);
   });
+
+  // Graceful Shutdown on SIGTERM and SIGINT
+  let isShuttingDown = false;
+  const gracefulShutdown = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`\n[Server] Received ${signal}. Starting graceful shutdown...`);
+
+    // Stop accepting new connections
+    server.close(async () => {
+      console.log("[Server] HTTP server closed.");
+      try {
+        // Disconnect all socket.io clients
+        io.disconnectSockets(true);
+        console.log("[Server] Socket connections closed.");
+
+        // Close MySQL pool if active
+        if (dbManager.isUsingMySQL && dbManager.pool) {
+          await dbManager.pool.end();
+          console.log("[Server] MySQL connection pool closed.");
+        }
+        console.log("[Server] Graceful shutdown completed cleanly.");
+        process.exit(0);
+      } catch (shutdownErr) {
+        console.error("[Server] Error during graceful shutdown:", shutdownErr);
+        process.exit(1);
+      }
+    });
+
+    // Force exit after 10s if dangling connections remain
+    setTimeout(() => {
+      console.error("[Server] Could not close connections in time, forcefully shutting down.");
+      process.exit(1);
+    }, 10000).unref();
+  };
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 }
 
 startServer();
+
