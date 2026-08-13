@@ -2836,6 +2836,60 @@ if ($method === 'GET' && preg_match('/^\/admin\/series\/([^\/]+)\/sales-summary$
     }
 }
 
+// ADMIN ADD CONTRIBUTOR TO SERIES
+if ($method === 'POST' && matchRoute('/series/:id/add-contributor', $sub_path, $params)) {
+    requireAdmin($pdo);
+    try {
+        $input = getJsonInput();
+        $userId = $input['userId'] ?? null;
+        $displayName = $input['displayName'] ?? 'همکار';
+        $email = $input['email'] ?? '';
+        $role = $input['role'] ?? 'translator';
+        $melliCode = $input['melliCode'] ?? '';
+
+        $stmt = $pdo->prepare("SELECT * FROM series WHERE id = ?");
+        $stmt->execute([$params['id']]);
+        $series = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$series) sendResponse(["error" => "مجموعه یافت نشد."], 404);
+
+        $contributors = $series['contributors'] ? json_decode($series['contributors'], true) : [];
+        if (!is_array($contributors)) $contributors = [];
+
+        $existingIdx = -1;
+        foreach ($contributors as $idx => $c) {
+            if ($c['userId'] === $userId) {
+                $existingIdx = $idx;
+                break;
+            }
+        }
+
+        if ($existingIdx >= 0) {
+            $contributors[$existingIdx]['displayName'] = $displayName;
+            $contributors[$existingIdx]['email'] = $email;
+            $contributors[$existingIdx]['role'] = $role;
+            $contributors[$existingIdx]['status'] = 'approved';
+            $contributors[$existingIdx]['melliCode'] = $melliCode;
+        } else {
+            $contributors[] = [
+                "userId" => $userId ?: ("contrib_" . time()),
+                "email" => $email,
+                "displayName" => $displayName,
+                "role" => $role,
+                "status" => "approved",
+                "melliCode" => $melliCode
+            ];
+        }
+
+        $stmtUpdate = $pdo->prepare("UPDATE series SET contributors = ? WHERE id = ?");
+        $stmtUpdate->execute([json_encode($contributors, JSON_UNESCAPED_UNICODE), $params['id']]);
+
+        $series['contributors'] = $contributors;
+        sendResponse($series);
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
+    }
+}
+
 // ADMIN SAVE CHAPTER CONTRIBUTORS
 if ($method === 'POST' && preg_match('/^\/series\/([^\/]+)\/chapters\/([^\/]+)\/contributors$/', $sub_path, $matches)) {
     requireAdmin($pdo);
@@ -2855,7 +2909,192 @@ if ($method === 'POST' && preg_match('/^\/series\/([^\/]+)\/chapters\/([^\/]+)\/
         $upStmt = $pdo->prepare("UPDATE chapters SET contributors = ? WHERE id = ?");
         $upStmt->execute([json_encode($contributors, JSON_UNESCAPED_UNICODE), $chapterId]);
 
-        sendResponse(["success" => true]);
+        sendResponse(["success" => true, "id" => $chapterId]);
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
+    }
+}
+
+// ADMIN GET CONTRIBUTOR MONTHLY EARNINGS
+if ($method === 'GET' && preg_match('/^\/admin\/contributor-earnings\/([^\/]+)$/', $sub_path, $matches)) {
+    requireAdmin($pdo);
+    try {
+        $userId = $matches[1];
+        $targetMonth = $_GET['month'] ?? date('Y-m');
+
+        // Fetch User Info
+        $uStmt = $pdo->prepare("SELECT id, displayName, email, role FROM users WHERE id = ?");
+        $uStmt->execute([$userId]);
+        $userObj = $uStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$userObj) {
+            sendResponse(["error" => "کاربر یافت نشد."], 404);
+        }
+
+        // Fetch Revenue Roles Config
+        $rStmt = $pdo->prepare("SELECT val FROM settings WHERE id = 'revenue_roles'");
+        $rStmt->execute();
+        $rRow = $rStmt->fetch();
+        $defaultRoles = [
+            ["id" => "editor", "name" => "ادیتور", "percentage" => 30],
+            ["id" => "translator", "name" => "مترجم", "percentage" => 20],
+            ["id" => "cleaner", "name" => "کلینر", "percentage" => 30],
+            ["id" => "website", "name" => "وبسایت", "percentage" => 20]
+        ];
+        $rolesList = ($rRow && !empty($rRow['val'])) ? json_decode($rRow['val'], true) : $defaultRoles;
+
+        // Fetch Purchases for targetMonth or all
+        if ($targetMonth !== 'all') {
+            $pStmt = $pdo->prepare("SELECT * FROM purchased_chapters WHERE createdAt LIKE ?");
+            $pStmt->execute([$targetMonth . '%']);
+        } else {
+            $pStmt = $pdo->prepare("SELECT * FROM purchased_chapters");
+            $pStmt->execute();
+        }
+        $purchases = $pStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Group Purchases by chapterId
+        $chapterSales = [];
+        foreach ($purchases as $p) {
+            $chId = $p['chapterId'];
+            $chapterSales[$chId] = ($chapterSales[$chId] ?? 0) + 1;
+        }
+
+        if (empty($chapterSales)) {
+            sendResponse([
+                "user" => $userObj,
+                "selectedMonth" => $targetMonth,
+                "totalEarnings" => 0,
+                "totalSalesCount" => 0,
+                "seriesBreakdown" => []
+            ]);
+            return;
+        }
+
+        // Fetch all chapters with sales
+        $chapterIds = array_keys($chapterSales);
+        $inClause = implode(',', array_fill(0, count($chapterIds), '?'));
+        $cStmt = $pdo->prepare("SELECT * FROM chapters WHERE id IN ($inClause)");
+        $cStmt->execute($chapterIds);
+        $chapters = $cStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Fetch all related series
+        $seriesIds = array_unique(array_column($chapters, 'seriesId'));
+        $seriesMap = [];
+        if (!empty($seriesIds)) {
+            $sInClause = implode(',', array_fill(0, count($seriesIds), '?'));
+            $sStmt = $pdo->prepare("SELECT * FROM series WHERE id IN ($sInClause)");
+            $sStmt->execute($seriesIds);
+            foreach ($sStmt->fetchAll(PDO::FETCH_ASSOC) as $s) {
+                $seriesMap[$s['id']] = $s;
+            }
+        }
+
+        $price = 400; // standard chapter price
+        $seriesBreakdownMap = [];
+        $grandTotalEarnings = 0;
+        $grandTotalSalesCount = 0;
+
+        foreach ($chapters as $ch) {
+            $sId = $ch['seriesId'];
+            $series = $seriesMap[$sId] ?? null;
+            if (!$series) continue;
+
+            $salesCount = $chapterSales[$ch['id']] ?? 0;
+            $chapterTotalSalesAmount = $salesCount * $price;
+
+            // Check Chapter Contributors Override
+            $chContributors = !empty($ch['contributors']) ? (is_array($ch['contributors']) ? $ch['contributors'] : json_decode($ch['contributors'], true)) : [];
+            // Check Series Contributors Default Team
+            $serContributors = !empty($series['contributors']) ? (is_array($series['contributors']) ? $series['contributors'] : json_decode($series['contributors'], true)) : [];
+
+            $userRolesInChapter = [];
+            $chapterUserEarnings = 0;
+
+            // Iterate over all available roles (excluding website)
+            foreach ($rolesList as $rl) {
+                $roleId = $rl['id'];
+                if ($roleId === 'website') continue;
+
+                $assignedStaffIds = $chContributors[$roleId] ?? null;
+
+                if (is_array($assignedStaffIds)) {
+                    if (in_array($userId, $assignedStaffIds)) {
+                        $coWorkersCount = count($assignedStaffIds);
+                        $rolePct = (float)($rl['percentage'] ?? 0);
+                        $rolePool = $chapterTotalSalesAmount * ($rolePct / 100);
+                        $userShare = $coWorkersCount > 0 ? ($rolePool / $coWorkersCount) : 0;
+
+                        $chapterUserEarnings += $userShare;
+                        $userRolesInChapter[] = [
+                            "roleId" => $roleId,
+                            "roleName" => $rl['name'],
+                            "rolePercentage" => $rolePct,
+                            "rolePool" => $rolePool,
+                            "coWorkersCount" => $coWorkersCount,
+                            "userEarnings" => round($userShare)
+                        ];
+                    }
+                } else {
+                    $matchingSeriesContribs = array_filter($serContributors, function($c) use ($roleId) {
+                        return isset($c['role']) && $c['role'] === $roleId;
+                    });
+                    $matchingUserContrib = array_filter($matchingSeriesContribs, function($c) use ($userId) {
+                        return isset($c['userId']) && $c['userId'] === $userId;
+                    });
+
+                    if (!empty($matchingUserContrib)) {
+                        $coWorkersCount = count($matchingSeriesContribs);
+                        $rolePct = (float)($rl['percentage'] ?? 0);
+                        $rolePool = $chapterTotalSalesAmount * ($rolePct / 100);
+                        $userShare = $coWorkersCount > 0 ? ($rolePool / $coWorkersCount) : 0;
+
+                        $chapterUserEarnings += $userShare;
+                        $userRolesInChapter[] = [
+                            "roleId" => $roleId,
+                            "roleName" => $rl['name'],
+                            "rolePercentage" => $rolePct,
+                            "rolePool" => $rolePool,
+                            "coWorkersCount" => $coWorkersCount,
+                            "userEarnings" => round($userShare)
+                        ];
+                    }
+                }
+            }
+
+            if ($chapterUserEarnings > 0 || !empty($userRolesInChapter)) {
+                $grandTotalEarnings += $chapterUserEarnings;
+                $grandTotalSalesCount += $salesCount;
+
+                if (!isset($seriesBreakdownMap[$sId])) {
+                    $seriesBreakdownMap[$sId] = [
+                        "seriesId" => $sId,
+                        "seriesTitle" => $series['title'],
+                        "cover" => $series['cover'] ?? '',
+                        "seriesEarnings" => 0,
+                        "chapters" => []
+                    ];
+                }
+
+                $seriesBreakdownMap[$sId]["seriesEarnings"] += $chapterUserEarnings;
+                $seriesBreakdownMap[$sId]["chapters"][] = [
+                    "chapterId" => $ch['id'],
+                    "chapterNumber" => $ch['number'],
+                    "chapterTitle" => $ch['title'],
+                    "salesCount" => $salesCount,
+                    "chapterTotalSales" => $chapterTotalSalesAmount,
+                    "userRoles" => $userRolesInChapter,
+                    "chapterUserEarnings" => round($chapterUserEarnings)
+                ];
+            }
+        }
+
+        sendResponse([
+            "user" => $userObj,
+            "selectedMonth" => $targetMonth,
+            "totalEarnings" => round($grandTotalEarnings),
+            "totalSalesCount" => $grandTotalSalesCount,
+            "seriesBreakdown" => array_values($seriesBreakdownMap)
+        ]);
     } catch (Exception $e) {
         sendResponse(["error" => $e->getMessage()], 500);
     }

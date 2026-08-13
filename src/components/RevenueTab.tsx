@@ -120,6 +120,34 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
   const [editingChapterId, setEditingChapterId] = useState<string | null>(null);
   const [chapterAssignments, setChapterAssignments] = useState<Record<string, string[]>>({});
 
+  // Contributor Earnings Inspector Modal States
+  const [inspectUser, setInspectUser] = useState<{ id: string; name: string } | null>(null);
+  const [inspectMonth, setInspectMonth] = useState<string>(new Date().toISOString().slice(0, 7));
+  const [inspectData, setInspectData] = useState<any | null>(null);
+  const [loadingInspect, setLoadingInspect] = useState<boolean>(false);
+
+  const handleInspectContributor = async (userId: string, userName?: string, month?: string) => {
+    const m = month || inspectMonth;
+    setInspectUser({ id: userId, name: userName || "همکار" });
+    setLoadingInspect(true);
+    try {
+      const res = await apiClient.get(`/api/admin/contributor-earnings/${userId}?month=${m}`);
+      setInspectData(res);
+    } catch (err: any) {
+      console.error("Error fetching contributor earnings:", err);
+      setInspectData({ error: err.message || "خطا در دریافت اطلاعات" });
+    } finally {
+      setLoadingInspect(false);
+    }
+  };
+
+  const handleInspectMonthChange = (newMonth: string) => {
+    setInspectMonth(newMonth);
+    if (inspectUser) {
+      handleInspectContributor(inspectUser.id, inspectUser.name, newMonth);
+    }
+  };
+
   // Settlement Form States
   const [showSettleModal, setShowSettleModal] = useState(false);
   const [settleAmount, setSettleAmount] = useState("");
@@ -418,12 +446,12 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
         `/api/series/${selectedSeries.id}/chapters/${chapterId}/contributors`,
         { contributors: chapterAssignments }
       );
-      if (res.id) {
+      if (res.success || res.id) {
         alert("دست‌اندرکاران و سهم پرداختی چپتر با موفقیت ثبت شد.");
         setEditingChapterId(null);
         fetchSalesSummary(selectedSeries.id);
       } else {
-        alert("ثبت تغییرات با خطا مواجه شد.");
+        alert("ثبت تغییرات با خطا مواجه شد: " + (res.error || "خطای ناشناخته"));
       }
     } catch (err: any) {
       alert("خطا: " + err.message);
@@ -915,9 +943,17 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {selectedSeries.contributors && selectedSeries.contributors.length > 0 ? (
                   selectedSeries.contributors.map(c => (
-                    <div key={c.userId} className="bg-black/50 p-3 rounded-xl border border-white/5 flex items-center justify-between text-xs">
+                    <div key={c.userId} className="bg-black/50 p-3 rounded-xl border border-white/5 flex items-center justify-between text-xs hover:border-indigo-500/30 transition-all">
                       <div>
-                        <span className="font-bold text-white block">{c.displayName || c.email}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleInspectContributor(c.userId, c.displayName || c.email)}
+                          className="font-bold text-white hover:text-indigo-300 transition-colors flex items-center gap-1.5 text-right group"
+                          title="مشاهده کارنامه مالی و سود ماهانه همکار"
+                        >
+                          <span>{c.displayName || c.email}</span>
+                          <TrendingUp size={13} className="text-emerald-400 group-hover:scale-110 transition-transform" />
+                        </button>
                         <span className="text-[10px] text-zinc-400 block mt-0.5">
                           نقش: <span className="text-[var(--color-asura-accent-light)] font-bold">{c.role === 'translator' ? 'مترجم' : c.role === 'editor' ? 'ادیتور' : c.role === 'cleaner' ? 'کلینر' : c.role}</span>
                         </span>
@@ -993,10 +1029,22 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                                 <div key={r.id} className="bg-black/60 px-2.5 py-1 rounded-lg border border-white/5 flex items-center gap-1.5">
                                   <span className="text-zinc-400 font-bold">{r.name}:</span>
                                   {assigned.length > 0 ? (
-                                    assigned.map((uid: string) => {
+                                    assigned.map((uid: string, idx: number) => {
                                       const member = staff.find(s => s.id === uid);
-                                      return member ? member.displayName || member.email : uid;
-                                    }).join(", ")
+                                      const name = member ? (member.displayName || member.email) : uid;
+                                      return (
+                                        <button
+                                          key={uid}
+                                          type="button"
+                                          onClick={() => handleInspectContributor(uid, name)}
+                                          className="text-indigo-300 hover:text-white font-bold transition-colors hover:underline flex items-center gap-0.5"
+                                          title="مشاهده سود ماهانه"
+                                        >
+                                          {name}
+                                          {idx < assigned.length - 1 ? "، " : ""}
+                                        </button>
+                                      );
+                                    })
                                   ) : (
                                     <span className="text-zinc-500 italic">پیش‌فرض اثر</span>
                                   )}
@@ -1213,6 +1261,180 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
           </div>
         </div>
       </div>
+
+      {/* Contributor Monthly Earnings Inspector Modal */}
+      {inspectUser && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-950 border border-indigo-500/30 rounded-2xl max-w-2xl w-full p-6 space-y-6 shadow-2xl dir-rtl max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-black">
+                  <TrendingUp size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white flex items-center gap-2">
+                    کارنامه مالی و سود ماهانه همکار: <span className="text-indigo-400">{inspectUser.name}</span>
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">ریز درآمد، تعداد فروش و سهم پرداختی به تفکیک اثر و چپتر</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setInspectUser(null)}
+                className="text-zinc-400 hover:text-white p-2 rounded-xl hover:bg-white/5 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Month Filter Selector */}
+            <div className="flex items-center justify-between bg-black/40 p-3 rounded-xl border border-white/5">
+              <span className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
+                <Coins size={14} className="text-amber-400" />
+                انتخاب بازه زمانی / ماه گزارش:
+              </span>
+              <div className="flex items-center gap-2">
+                <select
+                  value={inspectMonth}
+                  onChange={e => handleInspectMonthChange(e.target.value)}
+                  className="bg-zinc-900 border border-white/10 text-xs font-bold text-white rounded-lg px-3 py-1.5 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value={new Date().toISOString().slice(0, 7)}>این ماه (جاری)</option>
+                  {Array.from({ length: 5 }).map((_, idx) => {
+                    const d = new Date();
+                    d.setMonth(d.getMonth() - (idx + 1));
+                    const val = d.toISOString().slice(0, 7);
+                    return <option key={val} value={val}>ماه {val}</option>;
+                  })}
+                  <option value="all">کل زمان‌ها (مجموع)</option>
+                </select>
+                <button
+                  onClick={() => handleInspectContributor(inspectUser.id, inspectUser.name)}
+                  className="p-1.5 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-lg transition-colors"
+                  title="به‌روزرسانی داده‌ها"
+                >
+                  <RefreshCw size={14} className={loadingInspect ? "animate-spin" : ""} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body / Contents */}
+            <div className="flex-1 overflow-y-auto space-y-5 pr-1">
+              {loadingInspect ? (
+                <div className="flex flex-col items-center justify-center py-12 space-y-3">
+                  <div className="w-8 h-8 border-3 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+                  <span className="text-xs text-zinc-400 font-bold">در حال محاسبه و استخراج کارنامه مالی همکار...</span>
+                </div>
+              ) : inspectData && !inspectData.error ? (
+                <>
+                  {/* Top KPI Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 p-3.5 rounded-xl text-right">
+                      <span className="text-[11px] font-bold text-emerald-400 block">درآمد و سود خالص همکار</span>
+                      <span className="text-lg font-black font-mono text-emerald-300 block mt-1">
+                        {(inspectData.totalEarnings || 0).toLocaleString("fa-IR")} <span className="text-xs font-normal">تومان</span>
+                      </span>
+                    </div>
+
+                    <div className="bg-indigo-500/10 border border-indigo-500/20 p-3.5 rounded-xl text-right">
+                      <span className="text-[11px] font-bold text-indigo-400 block">تعداد کل فروش چپترها</span>
+                      <span className="text-lg font-black font-mono text-indigo-300 block mt-1">
+                        {(inspectData.totalSalesCount || 0).toLocaleString("fa-IR")} <span className="text-xs font-normal">تراکنش</span>
+                      </span>
+                    </div>
+
+                    <div className="bg-amber-500/10 border border-amber-500/20 p-3.5 rounded-xl text-right">
+                      <span className="text-[11px] font-bold text-amber-400 block">تعداد آثار درآمدزا</span>
+                      <span className="text-lg font-black font-mono text-amber-300 block mt-1">
+                        {(inspectData.seriesBreakdown?.length || 0).toLocaleString("fa-IR")} <span className="text-xs font-normal">اثر</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Series & Chapter Detailed Breakdown */}
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-black text-white flex items-center gap-2">
+                      <BookOpen size={14} className="text-indigo-400" />
+                      جزئیات سهم پرداختی به تفکیک آثار و چپترها:
+                    </h4>
+
+                    {inspectData.seriesBreakdown && inspectData.seriesBreakdown.length > 0 ? (
+                      inspectData.seriesBreakdown.map((sb: any) => (
+                        <div key={sb.seriesId} className="bg-black/50 border border-white/10 rounded-xl p-4 space-y-3">
+                          <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+                            <div className="flex items-center gap-3">
+                              {sb.cover ? (
+                                <img src={sb.cover} alt={sb.seriesTitle} className="w-9 h-11 object-cover rounded-md border border-white/10" />
+                              ) : (
+                                <div className="w-9 h-11 bg-zinc-800 rounded-md border border-white/10 flex items-center justify-center text-zinc-500 text-[10px]">کاور</div>
+                              )}
+                              <div>
+                                <h5 className="text-xs font-black text-white">{sb.seriesTitle}</h5>
+                                <span className="text-[10px] text-zinc-400">تعداد چپترهای درآمدزا: {sb.chapters.length}</span>
+                              </div>
+                            </div>
+                            <div className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-lg border border-emerald-500/20 font-mono">
+                              مجموع سهم اثر: {(sb.seriesEarnings || 0).toLocaleString("fa-IR")} تومان
+                            </div>
+                          </div>
+
+                          {/* Chapters table/list */}
+                          <div className="space-y-2">
+                            {sb.chapters.map((ch: any) => (
+                              <div key={ch.chapterId} className="bg-zinc-900/80 p-2.5 rounded-lg border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                                <div className="flex items-center gap-2.5">
+                                  <span className="bg-indigo-500/20 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded text-[11px]">
+                                    چپتر {ch.chapterNumber}
+                                  </span>
+                                  <span className="text-[11px] text-zinc-400">
+                                    فروش: <span className="text-white font-mono">{ch.salesCount}</span> بار ({ch.chapterTotalSales.toLocaleString("fa-IR")} تومان)
+                                  </span>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {ch.userRoles.map((ur: any, idx: number) => (
+                                    <span key={idx} className="bg-white/5 px-2 py-0.5 rounded border border-white/5 text-[10px] text-zinc-300">
+                                      نقش: <strong className="text-indigo-300">{ur.roleName}</strong> ({ur.rolePercentage}٪)
+                                      {ur.coWorkersCount > 1 && <span className="text-amber-400 mr-1">(تقسیم بین {ur.coWorkersCount} نفر)</span>}
+                                    </span>
+                                  ))}
+                                  <span className="text-emerald-400 font-mono font-black text-xs mr-auto sm:mr-0">
+                                    +{(ch.chapterUserEarnings || 0).toLocaleString("fa-IR")} تومان
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8 bg-black/30 rounded-xl border border-white/5 text-xs text-zinc-400 space-y-1">
+                        <AlertTriangle size={20} className="mx-auto text-amber-400 mb-2 opacity-60" />
+                        <p>هیچ درآمد یا فروش ثبت‌شده‌ای برای این همکار در این بازه زمانی یافت نشد.</p>
+                        <p className="text-[11px] text-zinc-500">پس از خرید چپترها توسط کاربران، سود مربوطه به‌صورت خودکار بر اساس درصد نقش‌ها محاسبه خواهد شد.</p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-8 text-xs text-red-400">
+                  {inspectData?.error || "خطا در بارگذاری اطلاعات مالکیتی همکار"}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-3 border-t border-white/10 flex justify-end">
+              <button
+                onClick={() => setInspectUser(null)}
+                className="px-5 py-2 bg-white/10 hover:bg-white/15 text-white text-xs font-bold rounded-xl transition-colors"
+              >
+                بستن پنجره
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

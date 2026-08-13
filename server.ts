@@ -2451,6 +2451,175 @@ async function startServer() {
     }
   });
 
+  app.get("/api/admin/contributor-earnings/:userId", requireAdmin, async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const targetMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
+
+      const userObj = await dbManager.getUserById(userId);
+      if (!userObj) {
+        return res.status(404).json({ error: "کاربر یافت نشد." });
+      }
+
+      let rolesList = [
+        { id: "editor", name: "ادیتور", percentage: 30 },
+        { id: "translator", name: "مترجم", percentage: 20 },
+        { id: "cleaner", name: "کلینر", percentage: 30 },
+        { id: "website", name: "وبسایت", percentage: 20 }
+      ];
+      try {
+        const savedRoles = await dbManager.getSetting("revenue_roles");
+        if (savedRoles) rolesList = savedRoles;
+      } catch (e) {}
+
+      let allPurchases: any[] = [];
+      if (dbManager.isPostgres) {
+        const query = targetMonth !== 'all'
+          ? "SELECT * FROM purchased_chapters WHERE created_at LIKE $1"
+          : "SELECT * FROM purchased_chapters";
+        const params = targetMonth !== 'all' ? [`${targetMonth}%`] : [];
+        const { rows } = await (dbManager as any).pool.query(query, params);
+        allPurchases = rows;
+      } else {
+        const raw = dbManager.localData.purchased_chapters || [];
+        allPurchases = targetMonth !== 'all'
+          ? raw.filter((p: any) => p.createdAt && p.createdAt.startsWith(targetMonth))
+          : raw;
+      }
+
+      const chapterSales: Record<string, number> = {};
+      allPurchases.forEach((p: any) => {
+        chapterSales[p.chapterId] = (chapterSales[p.chapterId] || 0) + 1;
+      });
+
+      if (Object.keys(chapterSales).length === 0) {
+        return res.json({
+          user: { id: userObj.id, displayName: userObj.displayName, email: userObj.email, role: userObj.role },
+          selectedMonth: targetMonth,
+          totalEarnings: 0,
+          totalSalesCount: 0,
+          seriesBreakdown: []
+        });
+      }
+
+      const chapterIds = Object.keys(chapterSales);
+      const chapters: any[] = [];
+      for (const cid of chapterIds) {
+        const foundCh = await dbManager.getChapterById('', cid);
+        if (foundCh) chapters.push(foundCh);
+      }
+
+      const seriesMap: Record<string, any> = {};
+      for (const ch of chapters) {
+        if (ch.seriesId && !seriesMap[ch.seriesId]) {
+          const s = await dbManager.getSeriesById(ch.seriesId);
+          if (s) seriesMap[ch.seriesId] = s;
+        }
+      }
+
+      const price = 400;
+      const seriesBreakdownMap: Record<string, any> = {};
+      let grandTotalEarnings = 0;
+      let grandTotalSalesCount = 0;
+
+      for (const ch of chapters) {
+        const series = seriesMap[ch.seriesId];
+        if (!series) continue;
+
+        const salesCount = chapterSales[ch.id] || 0;
+        const chapterTotalSalesAmount = salesCount * price;
+
+        const chContributors = ch.contributors || {};
+        const serContributors = series.contributors || [];
+
+        const userRolesInChapter: any[] = [];
+        let chapterUserEarnings = 0;
+
+        for (const rl of rolesList) {
+          const roleId = rl.id;
+          if (roleId === 'website') continue;
+
+          const assignedStaffIds = chContributors[roleId];
+
+          if (Array.isArray(assignedStaffIds)) {
+            if (assignedStaffIds.includes(userId)) {
+              const coWorkersCount = assignedStaffIds.length;
+              const rolePct = Number(rl.percentage || 0);
+              const rolePool = chapterTotalSalesAmount * (rolePct / 100);
+              const userShare = coWorkersCount > 0 ? (rolePool / coWorkersCount) : 0;
+
+              chapterUserEarnings += userShare;
+              userRolesInChapter.push({
+                roleId,
+                roleName: rl.name,
+                rolePercentage: rolePct,
+                rolePool,
+                coWorkersCount,
+                userEarnings: Math.round(userShare)
+              });
+            }
+          } else {
+            const matchingSeriesContribs = serContributors.filter((c: any) => c.role === roleId);
+            const matchingUserContrib = matchingSeriesContribs.filter((c: any) => c.userId === userId);
+
+            if (matchingUserContrib.length > 0) {
+              const coWorkersCount = matchingSeriesContribs.length;
+              const rolePct = Number(rl.percentage || 0);
+              const rolePool = chapterTotalSalesAmount * (rolePct / 100);
+              const userShare = coWorkersCount > 0 ? (rolePool / coWorkersCount) : 0;
+
+              chapterUserEarnings += userShare;
+              userRolesInChapter.push({
+                roleId,
+                roleName: rl.name,
+                rolePercentage: rolePct,
+                rolePool,
+                coWorkersCount,
+                userEarnings: Math.round(userShare)
+              });
+            }
+          }
+        }
+
+        if (chapterUserEarnings > 0 || userRolesInChapter.length > 0) {
+          grandTotalEarnings += chapterUserEarnings;
+          grandTotalSalesCount += salesCount;
+
+          if (!seriesBreakdownMap[series.id]) {
+            seriesBreakdownMap[series.id] = {
+              seriesId: series.id,
+              seriesTitle: series.title,
+              cover: series.cover || '',
+              seriesEarnings: 0,
+              chapters: []
+            };
+          }
+
+          seriesBreakdownMap[series.id].seriesEarnings += chapterUserEarnings;
+          seriesBreakdownMap[series.id].chapters.push({
+            chapterId: ch.id,
+            chapterNumber: ch.number,
+            chapterTitle: ch.title,
+            salesCount,
+            chapterTotalSales: chapterTotalSalesAmount,
+            userRoles: userRolesInChapter,
+            chapterUserEarnings: Math.round(chapterUserEarnings)
+          });
+        }
+      }
+
+      res.json({
+        user: { id: userObj.id, displayName: userObj.displayName, email: userObj.email, role: userObj.role },
+        selectedMonth: targetMonth,
+        totalEarnings: Math.round(grandTotalEarnings),
+        totalSalesCount: grandTotalSalesCount,
+        seriesBreakdown: Object.values(seriesBreakdownMap)
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // -----------------------------------------------------------------
   // 9. WALLET & TRANSACTION API
   // -----------------------------------------------------------------
