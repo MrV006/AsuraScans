@@ -14,6 +14,18 @@ import nodemailer from "nodemailer";
 import { generateSeoHtml } from "./server/seo";
 import { uploadFileToFtp, uploadBatchFilesToFtp, testFtpConnection } from "./server/ftpStorage";
 import { organizeAllFiles, sanitizeFolderName } from "./server/organizer";
+import {
+  securityHeadersMiddleware,
+  sanitizeInputMiddleware,
+  authRateLimiter,
+  financialRateLimiter,
+  contentInteractionRateLimiter,
+  generalApiRateLimiter,
+  isPathSafe,
+  sanitizeSafeFileName,
+  validateFileBuffer,
+  inspectZipArchiveSafely
+} from "./server/security";
 
 async function startServer() {
   const app = express();
@@ -184,10 +196,16 @@ async function startServer() {
     });
   });
 
-  app.use(express.json());
+  // Core Security & Protection Middlewares
+  app.use(securityHeadersMiddleware);
+  app.use(express.json({ limit: "25mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "25mb" }));
+  app.use(sanitizeInputMiddleware);
+
   app.use("/uploads", express.static(uploadsDir));
 
-  // Explicitly set UTF-8 encoding headers on all API responses
+  // Global API Rate Limiting & Explicit UTF-8 encoding
+  app.use("/api", generalApiRateLimiter);
   app.use("/api", (req, res, next) => {
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     next();
@@ -511,7 +529,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/users", async (req, res) => {
+  app.post("/api/users", authRateLimiter, async (req, res) => {
     try {
       const user = await dbManager.createOrUpdateUser(req.body);
       io.emit("users:updated", { userId: user.id });
@@ -1479,7 +1497,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/chapters/:chapterId/comments", async (req, res) => {
+  app.post("/api/chapters/:chapterId/comments", contentInteractionRateLimiter, async (req, res) => {
     try {
       const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.body.userId) as string;
       let initialStatus: 'pending' | 'approved' = 'pending';
@@ -1565,7 +1583,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/comments/:id/react", async (req, res) => {
+  app.post("/api/comments/:id/react", contentInteractionRateLimiter, async (req, res) => {
     try {
       const { userId, type } = req.body;
       const updated = await dbManager.toggleCommentReaction(req.params.id, userId, type);
@@ -2004,7 +2022,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/reports", async (req, res) => {
+  app.post("/api/reports", contentInteractionRateLimiter, async (req, res) => {
     try {
       const saved = await dbManager.saveReport(req.body);
       io.emit("reports:updated");
@@ -2224,7 +2242,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/settle-website-revenue", requireAdmin, async (req, res) => {
+  app.post("/api/admin/settle-website-revenue", requireAdmin, financialRateLimiter, async (req, res) => {
     try {
       const { amount, description } = req.body;
       const deductAmount = Math.floor(Number(amount));
@@ -2456,7 +2474,7 @@ async function startServer() {
       const { userId } = req.params;
       const targetMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
 
-      const userObj = await dbManager.getUserById(userId);
+      const userObj = await dbManager.getUser(userId);
       if (!userObj) {
         return res.status(404).json({ error: "کاربر یافت نشد." });
       }
@@ -2468,20 +2486,20 @@ async function startServer() {
         { id: "website", name: "وبسایت", percentage: 20 }
       ];
       try {
-        const savedRoles = await dbManager.getSetting("revenue_roles");
+        const savedRoles = await dbManager.getSettings("revenue_roles");
         if (savedRoles) rolesList = savedRoles;
       } catch (e) {}
 
       let allPurchases: any[] = [];
-      if (dbManager.isPostgres) {
+      if (dbManager.isUsingMySQL && dbManager.pool) {
         const query = targetMonth !== 'all'
-          ? "SELECT * FROM purchased_chapters WHERE created_at LIKE $1"
+          ? "SELECT * FROM purchased_chapters WHERE createdAt LIKE ?"
           : "SELECT * FROM purchased_chapters";
         const params = targetMonth !== 'all' ? [`${targetMonth}%`] : [];
-        const { rows } = await (dbManager as any).pool.query(query, params);
-        allPurchases = rows;
+        const [rows] = await dbManager.pool.execute(query, params);
+        allPurchases = rows as any[];
       } else {
-        const raw = dbManager.localData.purchased_chapters || [];
+        const raw = (dbManager as any).localData?.purchased_chapters || [];
         allPurchases = targetMonth !== 'all'
           ? raw.filter((p: any) => p.createdAt && p.createdAt.startsWith(targetMonth))
           : raw;
@@ -2647,7 +2665,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/wallet/charge", async (req, res) => {
+  app.post("/api/wallet/charge", financialRateLimiter, async (req, res) => {
     try {
       const requesterUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
       if (!requesterUid) {
@@ -2717,7 +2735,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/settlement/request", async (req, res) => {
+  app.post("/api/settlement/request", financialRateLimiter, async (req, res) => {
     try {
       const requesterUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
       if (!requesterUid) return res.status(401).json({ error: "Unauthorized" });
@@ -2787,7 +2805,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/chapters/purchase", async (req, res) => {
+  app.post("/api/chapters/purchase", financialRateLimiter, async (req, res) => {
     try {
       const { userId, seriesId, chapterId } = req.body;
       if (!userId || !seriesId || !chapterId) {
@@ -2797,13 +2815,45 @@ async function startServer() {
       const resolved = await resolveSeriesAndChapter(seriesId, chapterId);
       const result = await dbManager.purchaseChapter(userId, resolved.seriesId, resolved.chapterId);
       if (result.success) {
-        // Emit wallet update and purchase update
+        // Emit wallet update and purchase update for buyer
         io.emit(`wallet:updated:${userId}`, { userId, balance: result.newBalance });
         io.emit(`chapter:purchased:${userId}:${resolved.chapterId}`, { purchased: true });
-        res.json({ success: true, balance: result.newBalance });
+
+        // Emit wallet updates to all distributed contributors
+        if (result.distributedUsers && Array.isArray(result.distributedUsers)) {
+          result.distributedUsers.forEach(u => {
+            io.emit(`wallet:updated:${u.userId}`, { userId: u.userId, balance: u.newBalance });
+            io.emit(`notification:new:${u.userId}`);
+          });
+        }
+
+        // Emit wallet update to Admin
+        if (result.adminUser) {
+          io.emit(`wallet:updated:${result.adminUser.id}`, { userId: result.adminUser.id, balance: result.adminUser.newBalance });
+          io.emit(`notification:new:${result.adminUser.id}`);
+        }
+
+        // Global socket updates for real-time panels
+        io.emit("revenue:updated");
+        io.emit("transactions:updated");
+        io.emit("wallet:any_update");
+
+        res.json({ success: true, balance: result.newBalance, result });
       } else {
         res.status(400).json({ error: result.error });
       }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/revenue/sync-unpaid-purchases", requireAdmin, financialRateLimiter, async (req, res) => {
+    try {
+      const syncResult = await dbManager.syncUnpaidPurchases();
+      io.emit("revenue:updated");
+      io.emit("transactions:updated");
+      io.emit("wallet:any_update");
+      res.json(syncResult);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2848,6 +2898,14 @@ function resolveTargetUploadDir(baseUploadsDir: string, reqBody: any, reqQuery: 
 
   const relPrefix = parts.join("/");
   const targetDir = path.join(baseUploadsDir, ...parts);
+
+  // Path Traversal Defense: Ensure targetDir cannot escape baseUploadsDir
+  if (!isPathSafe(baseUploadsDir, targetDir)) {
+    return {
+      targetDir: path.join(baseUploadsDir, "general"),
+      relPrefix: "general"
+    };
+  }
 
   return { targetDir, relPrefix };
 }
@@ -2916,7 +2974,7 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
     try {
       const files = (req.files || []) as Express.Multer.File[];
       if (!files || files.length === 0) {
-        return res.status(400).json({ error: "No files uploaded." });
+        return res.status(400).json({ error: "فایلی برای آپلود انتخاب نشده است." });
       }
 
       const { targetDir, relPrefix } = resolveTargetUploadDir(uploadsDir, req.body, req.query);
@@ -2933,15 +2991,16 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
 
       const itemsToUpload: { buffer: Buffer; fileName: string }[] = [];
 
-      const allowedExtensions = [".webp", ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".zip", ".rar", ".7z", ".docx", ".doc", ".pdf", ".txt", ".rtf"];
-
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const ext = path.extname(file.originalname).toLowerCase();
         
-        if (!allowedExtensions.includes(ext)) {
-          return res.status(400).json({ error: `پسوند فایل '${file.originalname}' مجاز نیست. پسوندهای مجاز: ${allowedExtensions.join(", ")}` });
+        // 1. Binary Magic Bytes & Anti-Executable Verification
+        const validation = validateFileBuffer(file.buffer, file.originalname, file.mimetype);
+        if (!validation.isValid) {
+          return res.status(400).json({ error: validation.error || `فایل '${file.originalname}' غیرمجاز است.` });
         }
+
+        const ext = path.extname(file.originalname).toLowerCase();
 
         const isDoc = [".doc", ".docx", ".pdf", ".txt", ".rtf"].includes(ext) || 
                       file.mimetype.includes("word") || 
@@ -2949,7 +3008,7 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
                       file.mimetype.includes("text/");
 
         if (isDoc) {
-          const safeName = `doc-${Date.now()}-${Math.floor(Math.random() * 1000000)}${ext || '.docx'}`;
+          const safeName = sanitizeSafeFileName(`doc-${Date.now()}-${Math.floor(Math.random() * 1000000)}${ext || '.docx'}`);
           itemsToUpload.push({ buffer: file.buffer, fileName: safeName });
           continue;
         }
@@ -2959,15 +3018,17 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
                       file.mimetype === "application/x-zip-compressed";
         
         if (isZip) {
-          const zip = new JSZip();
-          const zipContents = await zip.loadAsync(file.buffer);
-          
-          const filenames = Object.keys(zipContents.files).filter(p => {
-            const entry = zipContents.files[p];
-            return !entry.dir && p.match(/\.(jpe?g|png|webp|gif|bmp)$/i) && !p.includes("__MACOSX");
-          });
+          // 2. Safe Zip-Slip & Zip-Bomb Inspection
+          const zipInspection = await inspectZipArchiveSafely(file.buffer);
+          if (!zipInspection.isValid) {
+            return res.status(400).json({ error: zipInspection.error || "خطا در بررسی فایل فشرده." });
+          }
 
-          if (filenames.length > 0) {
+          if (zipInspection.imageEntries.length > 0) {
+            const zip = new JSZip();
+            const zipContents = await zip.loadAsync(file.buffer);
+            
+            const filenames = zipInspection.imageEntries;
             filenames.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
 
             const extracted = await Promise.all(
@@ -2982,29 +3043,44 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
               const chunk = extracted.slice(idx, idx + chunkSize);
               const processedChunk = await Promise.all(
                 chunk.map(async (rawBuf, cIdx) => {
-                  const webpBuf = await sharp(rawBuf)
-                    .webp({ quality: 75, effort: 2 })
-                    .toBuffer();
-                  const globalIdx = idx + cIdx;
-                  const pageNum = String(globalIdx + 1).padStart(3, '0');
-                  const fileName = `page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`;
-                  return { buffer: webpBuf, fileName };
+                  try {
+                    const webpBuf = await sharp(rawBuf)
+                      .webp({ quality: 75, effort: 2 })
+                      .toBuffer();
+                    const globalIdx = idx + cIdx;
+                    const pageNum = String(globalIdx + 1).padStart(3, '0');
+                    const fileName = sanitizeSafeFileName(`page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`);
+                    return { buffer: webpBuf, fileName };
+                  } catch (imgErr: any) {
+                    // Fallback to original raw buffer if Sharp conversion fails on custom raw image
+                    const globalIdx = idx + cIdx;
+                    const pageNum = String(globalIdx + 1).padStart(3, '0');
+                    const fileName = sanitizeSafeFileName(`page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.png`);
+                    return { buffer: rawBuf, fileName };
+                  }
                 })
               );
               itemsToUpload.push(...processedChunk);
             }
           } else {
-            const safeName = `archive-${Date.now()}-${Math.floor(Math.random() * 1000000)}.zip`;
+            const safeName = sanitizeSafeFileName(`archive-${Date.now()}-${Math.floor(Math.random() * 1000000)}.zip`);
             itemsToUpload.push({ buffer: file.buffer, fileName: safeName });
           }
         } else {
-          const webpBuf = await sharp(file.buffer)
-            .webp({ quality: 75, effort: 2 })
-            .toBuffer();
+          try {
+            const webpBuf = await sharp(file.buffer)
+              .webp({ quality: 75, effort: 2 })
+              .toBuffer();
 
-          const pageNum = String(i + 1).padStart(3, '0');
-          const fileName = `page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`;
-          itemsToUpload.push({ buffer: webpBuf, fileName });
+            const pageNum = String(i + 1).padStart(3, '0');
+            const fileName = sanitizeSafeFileName(`page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`);
+            itemsToUpload.push({ buffer: webpBuf, fileName });
+          } catch (imgErr) {
+            const pageNum = String(i + 1).padStart(3, '0');
+            const safeExt = ext || ".jpg";
+            const fileName = sanitizeSafeFileName(`page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}${safeExt}`);
+            itemsToUpload.push({ buffer: file.buffer, fileName });
+          }
         }
       }
 

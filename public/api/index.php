@@ -6,11 +6,16 @@
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
-// CORS Headers
+// Security & CORS Headers
+@header_remove("X-Powered-By");
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Headers: Content-Type, x-admin-uid, x-user-uid, Authorization");
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
 header("Content-Type: application/json; charset=UTF-8");
+header("X-Content-Type-Options: nosniff");
+header("X-Frame-Options: SAMEORIGIN");
+header("X-XSS-Protection: 1; mode=block");
+header("Referrer-Policy: strict-origin-when-cross-origin");
 
 if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
     exit(0);
@@ -45,10 +50,33 @@ ensureSchema($pdo);
 // Helper Functions
 // -----------------------------------------------------------------
 
+function sanitizePhpInput($data, $depth = 0) {
+    if ($depth > 10) return $data;
+    if (is_string($data)) {
+        // Strip null bytes and dangerous script tags
+        $clean = str_replace(chr(0), '', $data);
+        $clean = preg_replace('/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/i', '', $clean);
+        return $clean;
+    }
+    if (is_array($data)) {
+        $sanitized = [];
+        foreach ($data as $k => $v) {
+            // Guard against prototype injection keys
+            if ($k === '__proto__' || $k === 'constructor' || $k === 'prototype') continue;
+            $sanitized[$k] = sanitizePhpInput($v, $depth + 1);
+        }
+        return $sanitized;
+    }
+    return $data;
+}
+
 function getJsonInput() {
     $raw = file_get_contents('php://input');
     $decoded = json_decode($raw, true);
-    return is_array($decoded) ? $decoded : [];
+    if (!is_array($decoded)) {
+        return [];
+    }
+    return sanitizePhpInput($decoded);
 }
 
 function sendResponse($data, $status = 200) {
@@ -2387,66 +2415,389 @@ if ($method === 'GET' && matchRoute('/users/:userId/purchases/:seriesId/:chapter
     sendResponse(["purchased" => (bool)$res]);
 }
 
-// 53. PURCHASE CHAPTER
+// 53. PURCHASE CHAPTER (WITH DYNAMIC REVENUE DISTRIBUTION & COMMISSIONS)
 if ($method === 'POST' && $sub_path === '/chapters/purchase') {
     $user = getUserFromHeaders($pdo);
-    if (!$user) sendResponse(["error" => "کاربر یافت نشد."], 401);
-    
     $input = getJsonInput();
+    $userId = $user ? $user['id'] : (isset($input['userId']) ? $input['userId'] : null);
+    
+    if (!$userId) {
+        sendResponse(["error" => "کاربر یافت نشد."], 401);
+    }
+    
     $seriesId = isset($input['seriesId']) ? $input['seriesId'] : null;
     $chapterId = isset($input['chapterId']) ? $input['chapterId'] : null;
     $price = (int)(isset($input['price']) ? $input['price'] : 400);
     
     if (!$seriesId || !$chapterId) {
-        sendResponse(["error" => "چپتر نامعتبر است."], 400);
+        sendResponse(["error" => "شناسه چپتر یا مانهوا نامعتبر است."], 400);
     }
     
+    // Fetch Series Info
+    $stmtSeries = $pdo->prepare("SELECT * FROM series WHERE id = ? LIMIT 1");
+    $stmtSeries->execute([$seriesId]);
+    $series = $stmtSeries->fetch(PDO::FETCH_ASSOC);
+    $seriesTitle = $series ? ($series['title'] ?: 'مانهوا') : 'مانهوا';
+    $seriesContribs = ($series && !empty($series['contributors'])) ? json_decode($series['contributors'], true) : [];
+    if (!is_array($seriesContribs)) $seriesContribs = [];
+
+    // Fetch Chapter Info
+    $stmtCh = $pdo->prepare("SELECT * FROM chapters WHERE (id = ? OR number = ?) AND (seriesId = ? OR seriesId IS NULL) LIMIT 1");
+    $stmtCh->execute([$chapterId, $chapterId, $seriesId]);
+    $chapter = $stmtCh->fetch(PDO::FETCH_ASSOC);
+    $chapterNumber = $chapter ? ($chapter['number'] ?? 1) : 1;
+    $chContribs = ($chapter && !empty($chapter['contributors'])) ? json_decode($chapter['contributors'], true) : [];
+    if (!is_array($chContribs)) $chContribs = [];
+
     // Check if already purchased
-    $stmtCheck = $pdo->prepare("SELECT id FROM purchased_chapters WHERE userId = ? AND seriesId = ? AND chapterId = ?");
-    $stmtCheck->execute([$user['id'], $seriesId, $chapterId]);
+    $stmtCheck = $pdo->prepare("SELECT id FROM purchased_chapters WHERE userId = ? AND seriesId = ? AND (chapterId = ? OR chapterNumber = ?)");
+    $stmtCheck->execute([$userId, $seriesId, $chapterId, $chapterNumber]);
     if ($stmtCheck->fetch()) {
-        sendResponse(["success" => true, "balance" => $user['walletBalance']]);
+        $stmtCurr = $pdo->prepare("SELECT walletBalance FROM users WHERE id = ?");
+        $stmtCurr->execute([$userId]);
+        $currUser = $stmtCurr->fetch();
+        sendResponse(["success" => true, "balance" => (int)($currUser['walletBalance'] ?? 0)]);
     }
     
-    // Begin transaction
+    // Begin database transaction for safe atomic balance operations
     $pdo->beginTransaction();
     try {
-        $stmtUser = $pdo->prepare("SELECT displayName, walletBalance FROM users WHERE id = ? FOR UPDATE");
-        $stmtUser->execute([$user['id']]);
-        $uData = $stmtUser->fetch();
+        $stmtUser = $pdo->prepare("SELECT id, displayName, email, walletBalance FROM users WHERE id = ? FOR UPDATE");
+        $stmtUser->execute([$userId]);
+        $uData = $stmtUser->fetch(PDO::FETCH_ASSOC);
+        if (!$uData) {
+            $pdo->rollBack();
+            sendResponse(["error" => "کاربر یافت نشد."], 404);
+        }
         
-        $balance = $uData['walletBalance'] ?: 0;
+        $balance = (int)($uData['walletBalance'] ?? 0);
         if ($balance < $price) {
             $pdo->rollBack();
-            sendResponse(["error" => "اعتبار کافی در کیف پول وجود ندارد. لطفا ابتدا حساب خود را شارژ کنید."], 400);
+            sendResponse(["error" => "موجودی کیف پول شما کافی نیست. لطفا برای ادامه مطالعه ابتدا حساب خود را شارژ کنید."], 400);
         }
         
         $newBalance = $balance - $price;
         $stmtUpdate = $pdo->prepare("UPDATE users SET walletBalance = ? WHERE id = ?");
-        $stmtUpdate->execute([$newBalance, $user['id']]);
+        $stmtUpdate->execute([$newBalance, $userId]);
         
-        // Record transaction
-        $tid = 'tx-' . round(microtime(true) * 1000);
-        $stmtTx = $pdo->prepare("INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName) VALUES (?, ?, ?, ?, 'purchase', 'خرید چپتر', ?, ?)");
+        $now = date('Y-m-d H:i:s');
+        $tid = 'tx-' . round(microtime(true) * 1000) . '-' . rand(100, 999);
+        $buyerDesc = "خرید چپتر {$chapterNumber} از مانهوا/مانگای {$seriesTitle}";
+        $stmtTx = $pdo->prepare("INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, 'purchase', ?, 'system', 'سیستم', ?)");
         $stmtTx->execute([
             $tid,
-            $user['id'],
-            $uData['displayName'],
+            $userId,
+            $uData['displayName'] ?: $uData['email'],
             -$price,
-            $user['id'],
-            $uData['displayName']
+            $buyerDesc,
+            $now
         ]);
         
-        // Record purchase
-        $pid = 'purchase-' . round(microtime(true) * 1000);
-        $stmtPur = $pdo->prepare("INSERT INTO purchased_chapters (id, userId, seriesId, chapterId) VALUES (?, ?, ?, ?)");
-        $stmtPur->execute([$pid, $user['id'], $seriesId, $chapterId]);
+        // Record purchase with chapterNumber
+        $pid = 'pc-' . round(microtime(true) * 1000) . '-' . rand(100, 999);
+        $stmtPur = $pdo->prepare("INSERT INTO purchased_chapters (id, userId, seriesId, chapterId, chapterNumber, createdAt) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmtPur->execute([$pid, $userId, $seriesId, $chapter ? $chapter['id'] : $chapterId, $chapterNumber, $now]);
+        
+        // Load Revenue Roles Setting
+        $stmtRoles = $pdo->prepare("SELECT val FROM settings WHERE id = 'revenue_roles'");
+        $stmtRoles->execute();
+        $rolesRow = $stmtRoles->fetch(PDO::FETCH_ASSOC);
+        $rolesSetting = ($rolesRow && !empty($rolesRow['val'])) ? json_decode($rolesRow['val'], true) : [
+            ["id" => "editor", "name" => "ادیتور", "percentage" => 30],
+            ["id" => "translator", "name" => "مترجم", "percentage" => 20],
+            ["id" => "cleaner", "name" => "کلینر", "percentage" => 30],
+            ["id" => "website", "name" => "وبسایت", "percentage" => 20]
+        ];
+
+        // Dynamic revenue distribution to team members
+        $userDistMap = []; // userId => ['amount' => int, 'roles' => []]
+
+        foreach ($rolesSetting as $r) {
+            $roleId = $r['id'] ?? '';
+            $roleName = $r['name'] ?? $roleId;
+            $percentage = (int)($r['percentage'] ?? 0);
+            if ($roleId === 'website') continue;
+
+            $rawAssigned = $chContribs[$roleId] ?? ($chContribs[strtolower($roleId)] ?? null);
+            if (!$rawAssigned && $roleId === 'translator') $rawAssigned = $chContribs['trans'] ?? null;
+            if (!$rawAssigned && $roleId === 'editor') $rawAssigned = $chContribs['edit'] ?? null;
+            if (!$rawAssigned && $roleId === 'cleaner') $rawAssigned = $chContribs['clean'] ?? null;
+
+            $assignedUserIds = [];
+            if ($rawAssigned) {
+                if (is_array($rawAssigned)) {
+                    foreach ($rawAssigned as $item) {
+                        if (is_string($item) && trim($item)) {
+                            $assignedUserIds[] = trim($item);
+                        } elseif (is_array($item) && (!empty($item['id']) || !empty($item['userId']))) {
+                            $assignedUserIds[] = $item['id'] ?? $item['userId'];
+                        }
+                    }
+                } elseif (is_string($rawAssigned) && trim($rawAssigned)) {
+                    $assignedUserIds[] = trim($rawAssigned);
+                }
+            }
+
+            // Fallback to series-level contributors
+            if (empty($assignedUserIds) && !empty($seriesContribs)) {
+                foreach ($seriesContribs as $sc) {
+                    $matchRole = ($sc['role'] === $roleId) || 
+                        ($roleId === 'translator' && $sc['role'] === 'trans') || 
+                        ($roleId === 'editor' && $sc['role'] === 'edit') || 
+                        ($roleId === 'cleaner' && $sc['role'] === 'clean');
+                    $isApproved = empty($sc['status']) || $sc['status'] === 'approved';
+                    if ($matchRole && $isApproved && (!empty($sc['userId']) || !empty($sc['id']))) {
+                        $assignedUserIds[] = $sc['userId'] ?? $sc['id'];
+                    }
+                }
+            }
+
+            if (!empty($assignedUserIds)) {
+                $rolePool = floor($price * ($percentage / 100));
+                $sharePerUser = floor($rolePool / count($assignedUserIds));
+                if ($sharePerUser > 0) {
+                    foreach ($assignedUserIds as $uid) {
+                        if (!isset($userDistMap[$uid])) {
+                            $userDistMap[$uid] = ['amount' => 0, 'roles' => []];
+                        }
+                        $userDistMap[$uid]['amount'] += $sharePerUser;
+                        if (!in_array($roleName, $userDistMap[$uid]['roles'])) {
+                            $userDistMap[$uid]['roles'][] = $roleName;
+                        }
+                    }
+                }
+            }
+        }
+
+        $totalDistributed = 0;
+        foreach ($userDistMap as $d) {
+            $totalDistributed += $d['amount'];
+        }
+        $adminProfit = $price - $totalDistributed;
+
+        // Credit each contributor
+        foreach ($userDistMap as $cUserId => $info) {
+            $stmtC = $pdo->prepare("SELECT id, displayName, email, walletBalance FROM users WHERE id = ? OR email = ? LIMIT 1");
+            $stmtC->execute([$cUserId, $cUserId]);
+            $cUser = $stmtC->fetch(PDO::FETCH_ASSOC);
+            if ($cUser) {
+                $newCBal = (int)($cUser['walletBalance'] ?? 0) + $info['amount'];
+                $stmtCUp = $pdo->prepare("UPDATE users SET walletBalance = ? WHERE id = ?");
+                $stmtCUp->execute([$newCBal, $cUser['id']]);
+
+                $cTid = 'tx-' . round(microtime(true) * 1000) . '-' . rand(100, 999);
+                $rolesStr = implode(' و ', $info['roles']);
+                $cDesc = "سهم مشارکت به عنوان {$rolesStr} در فروش چپتر {$chapterNumber} از مانهوا/مانگای {$seriesTitle}";
+                $stmtCTx = $pdo->prepare("INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, 'credit', ?, 'system', 'سیستم', ?)");
+                $stmtCTx->execute([$cTid, $cUser['id'], $cUser['displayName'] ?: $cUser['email'], $info['amount'], $cDesc, $now]);
+
+                // Notification
+                $notifId = 'notif-' . round(microtime(true) * 1000) . '-' . rand(100, 999);
+                $notifTitle = "واریز سود فروش چپتر";
+                $notifBody = "مبلغ " . number_format($info['amount']) . " تومان بابت سهم مشارکت ({$rolesStr}) در فروش چپتر {$chapterNumber} مانهوای «{$seriesTitle}» به کیف پول شما افزوده شد.";
+                $stmtNotif = $pdo->prepare("INSERT INTO notifications (id, userId, type, title, body, link, isRead, createdAt) VALUES (?, ?, 'system', ?, ?, '/profile', 0, ?)");
+                $stmtNotif->execute([$notifId, $cUser['id'], $notifTitle, $notifBody, $now]);
+            }
+        }
+
+        // Credit site profit to Admin
+        $stmtAdmin = $pdo->prepare("SELECT id, displayName, email, walletBalance FROM users WHERE role IN ('admin', 'super_admin', 'superadmin') OR email IN ('amirrezaveisi45@gmail.com', 'Mr.V@admin.com') ORDER BY (CASE WHEN email = 'amirrezaveisi45@gmail.com' THEN 1 WHEN role = 'super_admin' THEN 2 ELSE 3 END) LIMIT 1");
+        $stmtAdmin->execute();
+        $adminUser = $stmtAdmin->fetch(PDO::FETCH_ASSOC);
+        if ($adminUser) {
+            $newAdminBal = (int)($adminUser['walletBalance'] ?? 0) + $adminProfit;
+            $stmtAUp = $pdo->prepare("UPDATE users SET walletBalance = ? WHERE id = ?");
+            $stmtAUp->execute([$newAdminBal, $adminUser['id']]);
+
+            $aTid = 'tx-' . round(microtime(true) * 1000) . '-' . rand(100, 999);
+            $aDesc = "سود سهم وبسایت از فروش چپتر {$chapterNumber} از مانهوا/مانگای {$seriesTitle}";
+            $stmtATx = $pdo->prepare("INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, 'credit', ?, 'system', 'سیستم', ?)");
+            $stmtATx->execute([$aTid, $adminUser['id'], $adminUser['displayName'] ?: $adminUser['email'], $adminProfit, $aDesc, $now]);
+        }
+
+        // Update website_revenue setting
+        $stmtRev = $pdo->prepare("SELECT val FROM settings WHERE id = 'website_revenue'");
+        $stmtRev->execute();
+        $revRow = $stmtRev->fetch(PDO::FETCH_ASSOC);
+        $currRev = ($revRow && !empty($revRow['val'])) ? json_decode($revRow['val'], true) : ["totalEarned" => 0];
+        $currRev['totalEarned'] = (int)($currRev['totalEarned'] ?? 0) + $adminProfit;
+        $revJson = json_encode($currRev, JSON_UNESCAPED_UNICODE);
+        
+        $stmtSaveRev = $pdo->prepare("INSERT INTO settings (id, val) VALUES ('website_revenue', ?) ON DUPLICATE KEY UPDATE val = VALUES(val)");
+        $stmtSaveRev->execute([$revJson]);
         
         $pdo->commit();
-        sendResponse(["success" => true, "balance" => $newBalance]);
+        sendResponse([
+            "success" => true,
+            "balance" => $newBalance,
+            "totalDistributed" => $totalDistributed,
+            "adminProfit" => $adminProfit
+        ]);
     } catch (Exception $e) {
         $pdo->rollBack();
-        sendResponse(["error" => "خطا در انجام تراکنش: " . $e->getMessage()], 500);
+        sendResponse(["error" => "خطا در انجام تراکنش و تقسیم سود: " . $e->getMessage()], 500);
+    }
+}
+
+// ADMIN SYNC UNPAID PURCHASES (AUTO REVENUE RECOVERY)
+if ($method === 'POST' && $sub_path === '/admin/revenue/sync-unpaid-purchases') {
+    requireAdmin($pdo);
+    try {
+        $price = 400;
+        $stmtRoles = $pdo->prepare("SELECT val FROM settings WHERE id = 'revenue_roles'");
+        $stmtRoles->execute();
+        $rolesRow = $stmtRoles->fetch(PDO::FETCH_ASSOC);
+        $rolesSetting = ($rolesRow && !empty($rolesRow['val'])) ? json_decode($rolesRow['val'], true) : [
+            ["id" => "editor", "name" => "ادیتور", "percentage" => 30],
+            ["id" => "translator", "name" => "مترجم", "percentage" => 20],
+            ["id" => "cleaner", "name" => "کلینر", "percentage" => 30],
+            ["id" => "website", "name" => "وبسایت", "percentage" => 20]
+        ];
+
+        $stmtPurchases = $pdo->prepare("SELECT * FROM purchased_chapters ORDER BY createdAt ASC");
+        $stmtPurchases->execute();
+        $allPurchases = $stmtPurchases->fetchAll(PDO::FETCH_ASSOC);
+
+        $stmtCredits = $pdo->prepare("SELECT * FROM wallet_transactions WHERE type = 'credit'");
+        $stmtCredits->execute();
+        $allCredits = $stmtCredits->fetchAll(PDO::FETCH_ASSOC);
+
+        $repairedCount = 0;
+        $totalToContrib = 0;
+        $totalToAdmin = 0;
+        $details = [];
+
+        foreach ($allPurchases as $p) {
+            $stmtS = $pdo->prepare("SELECT * FROM series WHERE id = ? LIMIT 1");
+            $stmtS->execute([$p['seriesId']]);
+            $series = $stmtS->fetch(PDO::FETCH_ASSOC);
+            $seriesTitle = $series ? ($series['title'] ?: 'مانهوا') : 'مانهوا';
+
+            $stmtC = $pdo->prepare("SELECT * FROM chapters WHERE (id = ? OR number = ?) AND (seriesId = ? OR seriesId IS NULL) LIMIT 1");
+            $stmtC->execute([$p['chapterId'], $p['chapterNumber'] ?? 1, $p['seriesId']]);
+            $chapter = $stmtC->fetch(PDO::FETCH_ASSOC);
+            $chapNum = $chapter ? ($chapter['number'] ?? 1) : ($p['chapterNumber'] ?? 1);
+
+            $alreadyCredited = false;
+            foreach ($allCredits as $tx) {
+                if (!empty($tx['description']) && strpos($tx['description'], "فروش چپتر {$chapNum}") !== false) {
+                    if (strpos($tx['description'], $seriesTitle) !== false || ($series && strpos($tx['description'], $series['id']) !== false)) {
+                        $alreadyCredited = true;
+                        break;
+                    }
+                }
+            }
+
+            if ($alreadyCredited) continue;
+
+            $chContribs = ($chapter && !empty($chapter['contributors'])) ? json_decode($chapter['contributors'], true) : [];
+            $serContribs = ($series && !empty($series['contributors'])) ? json_decode($series['contributors'], true) : [];
+
+            $userDistMap = [];
+            foreach ($rolesSetting as $r) {
+                $roleId = $r['id'] ?? '';
+                $roleName = $r['name'] ?? $roleId;
+                $percentage = (int)($r['percentage'] ?? 0);
+                if ($roleId === 'website') continue;
+
+                $rawAssigned = $chContribs[$roleId] ?? ($chContribs[strtolower($roleId)] ?? null);
+                if (!$rawAssigned && $roleId === 'translator') $rawAssigned = $chContribs['trans'] ?? null;
+                if (!$rawAssigned && $roleId === 'editor') $rawAssigned = $chContribs['edit'] ?? null;
+                if (!$rawAssigned && $roleId === 'cleaner') $rawAssigned = $chContribs['clean'] ?? null;
+
+                $assignedUserIds = [];
+                if ($rawAssigned) {
+                    if (is_array($rawAssigned)) {
+                        foreach ($rawAssigned as $item) {
+                            if (is_string($item) && trim($item)) $assignedUserIds[] = trim($item);
+                            elseif (is_array($item) && (!empty($item['id']) || !empty($item['userId']))) $assignedUserIds[] = $item['id'] ?? $item['userId'];
+                        }
+                    } elseif (is_string($rawAssigned) && trim($rawAssigned)) {
+                        $assignedUserIds[] = trim($rawAssigned);
+                    }
+                }
+
+                if (empty($assignedUserIds) && !empty($serContribs)) {
+                    foreach ($serContribs as $sc) {
+                        $matchRole = ($sc['role'] === $roleId) || ($roleId === 'translator' && $sc['role'] === 'trans') || ($roleId === 'editor' && $sc['role'] === 'edit') || ($roleId === 'cleaner' && $sc['role'] === 'clean');
+                        $isApproved = empty($sc['status']) || $sc['status'] === 'approved';
+                        if ($matchRole && $isApproved && (!empty($sc['userId']) || !empty($sc['id']))) {
+                            $assignedUserIds[] = $sc['userId'] ?? $sc['id'];
+                        }
+                    }
+                }
+
+                if (!empty($assignedUserIds)) {
+                    $rolePool = floor($price * ($percentage / 100));
+                    $sharePerUser = floor($rolePool / count($assignedUserIds));
+                    if ($sharePerUser > 0) {
+                        foreach ($assignedUserIds as $uid) {
+                            if (!isset($userDistMap[$uid])) $userDistMap[$uid] = ['amount' => 0, 'roles' => []];
+                            $userDistMap[$uid]['amount'] += $sharePerUser;
+                            if (!in_array($roleName, $userDistMap[$uid]['roles'])) $userDistMap[$uid]['roles'][] = $roleName;
+                        }
+                    }
+                }
+            }
+
+            $purchaseDist = 0;
+            foreach ($userDistMap as $d) $purchaseDist += $d['amount'];
+            $purchaseAdmin = $price - $purchaseDist;
+            $txDate = $p['createdAt'] ?? date('Y-m-d H:i:s');
+
+            foreach ($userDistMap as $cUserId => $info) {
+                $stmtC = $pdo->prepare("SELECT id, displayName, email, walletBalance FROM users WHERE id = ? OR email = ? LIMIT 1");
+                $stmtC->execute([$cUserId, $cUserId]);
+                $cUser = $stmtC->fetch(PDO::FETCH_ASSOC);
+                if ($cUser) {
+                    $newCBal = (int)($cUser['walletBalance'] ?? 0) + $info['amount'];
+                    $pdo->prepare("UPDATE users SET walletBalance = ? WHERE id = ?")->execute([$newCBal, $cUser['id']]);
+
+                    $cTid = 'tx-sync-' . round(microtime(true) * 1000) . '-' . rand(100, 999);
+                    $rolesStr = implode(' و ', $info['roles']);
+                    $cDesc = "سهم مشارکت به عنوان {$rolesStr} در فروش چپتر {$chapNum} از مانهوا/مانگای {$seriesTitle} (تسویه سیستمی)";
+                    $pdo->prepare("INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, 'credit', ?, 'system', 'سیستم', ?)")
+                        ->execute([$cTid, $cUser['id'], $cUser['displayName'] ?: $cUser['email'], $info['amount'], $cDesc, $txDate]);
+                    $totalToContrib += $info['amount'];
+                }
+            }
+
+            $stmtAdmin = $pdo->prepare("SELECT id, displayName, email, walletBalance FROM users WHERE role IN ('admin', 'super_admin', 'superadmin') OR email IN ('amirrezaveisi45@gmail.com', 'Mr.V@admin.com') ORDER BY (CASE WHEN email = 'amirrezaveisi45@gmail.com' THEN 1 WHEN role = 'super_admin' THEN 2 ELSE 3 END) LIMIT 1");
+            $stmtAdmin->execute();
+            $adminUser = $stmtAdmin->fetch(PDO::FETCH_ASSOC);
+            if ($adminUser) {
+                $newAdminBal = (int)($adminUser['walletBalance'] ?? 0) + $purchaseAdmin;
+                $pdo->prepare("UPDATE users SET walletBalance = ? WHERE id = ?")->execute([$newAdminBal, $adminUser['id']]);
+
+                $aTid = 'tx-sync-' . round(microtime(true) * 1000) . '-' . rand(100, 999);
+                $aDesc = "سود سهم وبسایت از فروش چپتر {$chapNum} از مانهوا/مانگای {$seriesTitle} (تسویه سیستمی)";
+                $pdo->prepare("INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, 'credit', ?, 'system', 'سیستم', ?)")
+                    ->execute([$aTid, $adminUser['id'], $adminUser['displayName'] ?: $adminUser['email'], $purchaseAdmin, $aDesc, $txDate]);
+                $totalToAdmin += $purchaseAdmin;
+            }
+
+            $stmtRev = $pdo->prepare("SELECT val FROM settings WHERE id = 'website_revenue'");
+            $stmtRev->execute();
+            $revRow = $stmtRev->fetch(PDO::FETCH_ASSOC);
+            $currRev = ($revRow && !empty($revRow['val'])) ? json_decode($revRow['val'], true) : ["totalEarned" => 0];
+            $currRev['totalEarned'] = (int)($currRev['totalEarned'] ?? 0) + $purchaseAdmin;
+            $pdo->prepare("INSERT INTO settings (id, val) VALUES ('website_revenue', ?) ON DUPLICATE KEY UPDATE val = VALUES(val)")
+                ->execute([json_encode($currRev, JSON_UNESCAPED_UNICODE)]);
+
+            $repairedCount++;
+            $details[] = "چپتر {$chapNum} مانهوای {$seriesTitle}: {$purchaseDist} تومان به کادر، {$purchaseAdmin} تومان به وبسایت";
+        }
+
+        sendResponse([
+            "success" => true,
+            "totalPurchases" => count($allPurchases),
+            "repairedPurchases" => $repairedCount,
+            "totalDistributedToContributors" => $totalToContrib,
+            "totalCreditedToWebsite" => $totalToAdmin,
+            "details" => $details
+        ]);
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
     }
 }
 

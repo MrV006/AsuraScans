@@ -3143,7 +3143,16 @@ class DatabaseManager {
     userId: string,
     seriesId: string,
     chapterId: string
-  ): Promise<{ success: boolean; error?: string; newBalance?: number }> {
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    newBalance?: number;
+    totalDistributed?: number;
+    adminProfit?: number;
+    buyerId?: string;
+    distributedUsers?: { userId: string; roleLabel: string; amount: number; newBalance: number }[];
+    adminUser?: { id: string; newBalance: number };
+  }> {
     const user = await this.getUser(userId);
     if (!user) {
       return { success: false, error: 'کاربر یافت نشد' };
@@ -3174,42 +3183,81 @@ class DatabaseManager {
     const now = new Date().toISOString();
 
     // Calculate dynamic revenue distribution
-    const rolesSetting = await this.getSettings('revenue_roles') || [
+    let rolesSetting: any[] = [
       { id: 'editor', name: 'ادیتور', percentage: 30 },
       { id: 'translator', name: 'مترجم', percentage: 20 },
       { id: 'cleaner', name: 'کلینر', percentage: 30 },
       { id: 'website', name: 'وبسایت', percentage: 20 }
     ];
+    try {
+      const savedRoles = await this.getSettings('revenue_roles');
+      if (Array.isArray(savedRoles) && savedRoles.length > 0) {
+        rolesSetting = savedRoles;
+      }
+    } catch (e) {}
+
+    // Normalize chapter & series contributors
+    let chContribs: any = chapter.contributors;
+    if (typeof chContribs === 'string') {
+      try { chContribs = JSON.parse(chContribs); } catch (e) { chContribs = {}; }
+    }
+    if (!chContribs || typeof chContribs !== 'object') chContribs = {};
+
+    let serContribs: any = series?.contributors;
+    if (typeof serContribs === 'string') {
+      try { serContribs = JSON.parse(serContribs); } catch (e) { serContribs = []; }
+    }
+    if (!Array.isArray(serContribs)) serContribs = [];
 
     const distribution: { userId: string; roleLabel: string; amount: number }[] = [];
 
     for (const r of rolesSetting) {
       if (r.id === 'website') continue;
       
+      let rawAssigned: any = chContribs[r.id] || chContribs[r.id.toLowerCase()];
+      if (!rawAssigned && r.id === 'translator') rawAssigned = chContribs['trans'];
+      if (!rawAssigned && r.id === 'editor') rawAssigned = chContribs['edit'];
+      if (!rawAssigned && r.id === 'cleaner') rawAssigned = chContribs['clean'];
+
       let assignedUserIds: string[] = [];
-      
-      // Check chapter-level contributors
-      if (chapter.contributors && Array.isArray(chapter.contributors[r.id]) && chapter.contributors[r.id].length > 0) {
-        assignedUserIds = chapter.contributors[r.id];
-      } else {
-        // Fall back to approved series-level contributors
-        const approvedContributors = series?.contributors || [];
-        assignedUserIds = approvedContributors
-          .filter((c: any) => c.status === 'approved' && c.role === r.id)
-          .map((c: any) => c.userId);
+      if (rawAssigned) {
+        if (Array.isArray(rawAssigned)) {
+          assignedUserIds = rawAssigned.map((item: any) => typeof item === 'string' ? item : (item?.id || item?.userId || '')).filter(Boolean);
+        } else if (typeof rawAssigned === 'string' && rawAssigned.trim()) {
+          assignedUserIds = [rawAssigned.trim()];
+        } else if (typeof rawAssigned === 'object' && (rawAssigned.id || rawAssigned.userId)) {
+          assignedUserIds = [rawAssigned.id || rawAssigned.userId];
+        }
+      }
+
+      // Fall back to approved series-level contributors if no chapter-level assignment for this role
+      if (assignedUserIds.length === 0 && serContribs.length > 0) {
+        assignedUserIds = serContribs
+          .filter((c: any) => {
+            const roleMatch = c.role === r.id || 
+              (r.id === 'translator' && c.role === 'trans') || 
+              (r.id === 'editor' && c.role === 'edit') || 
+              (r.id === 'cleaner' && c.role === 'clean');
+            const isApproved = !c.status || c.status === 'approved';
+            return roleMatch && isApproved;
+          })
+          .map((c: any) => c.userId || c.id)
+          .filter(Boolean);
       }
 
       if (assignedUserIds.length > 0) {
-        const roleShareTotal = Math.floor(price * (r.percentage / 100));
+        const roleShareTotal = Math.floor(price * ((r.percentage || 0) / 100));
         const sharePerUser = Math.floor(roleShareTotal / assignedUserIds.length);
         
-        assignedUserIds.forEach((uid: string) => {
-          distribution.push({ userId: uid, roleLabel: r.name, amount: sharePerUser });
-        });
+        if (sharePerUser > 0) {
+          assignedUserIds.forEach((uid: string) => {
+            distribution.push({ userId: uid, roleLabel: r.name, amount: sharePerUser });
+          });
+        }
       }
     }
 
-    // Group by userId
+    // Group distribution by userId
     const userDistributionMap: Record<string, { amount: number; roles: string[] }> = {};
     distribution.forEach(d => {
       if (!userDistributionMap[d.userId]) {
@@ -3227,62 +3275,84 @@ class DatabaseManager {
     });
 
     const adminProfit = price - totalDistributed;
+    const distributedUsersResult: { userId: string; roleLabel: string; amount: number; newBalance: number }[] = [];
+    let adminResultUser: { id: string; newBalance: number } | undefined = undefined;
 
     if (this.isUsingMySQL && this.pool) {
       const conn = await this.pool.getConnection();
       try {
         await conn.beginTransaction();
 
-        // Deduct balance from user
+        // 1. Deduct balance from buyer
         await conn.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newBalance, userId]);
 
-        // Insert transaction log for purchaser
+        // 2. Insert transaction log for purchaser
         const description = `خرید چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
         await conn.execute(
           'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [transId, userId, user.displayName, -price, 'purchase', description, 'system', 'سیستم', now]
+          [transId, userId, user.displayName || user.email, -price, 'purchase', description, 'system', 'سیستم', now]
         );
 
-        // Insert purchased chapter record with chapterNumber
+        // 3. Insert purchased chapter record with chapterNumber
         await conn.execute(
           'INSERT INTO purchased_chapters (id, userId, seriesId, chapterId, chapterNumber, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
           [purchaseId, userId, seriesId, chapterId, chapter.number, now]
         );
 
-        // Credit contributors
+        // 4. Credit contributors
         for (const [contribUserId, info] of Object.entries(userDistributionMap)) {
-          const [contribRows] = await conn.execute('SELECT * FROM users WHERE id = ?', [contribUserId]);
+          const [contribRows] = await conn.execute('SELECT * FROM users WHERE id = ? OR email = ? LIMIT 1', [contribUserId, contribUserId]);
           const contribUser = (contribRows as any[])[0];
           if (contribUser) {
             const newContribBalance = (contribUser.walletBalance || 0) + info.amount;
-            await conn.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newContribBalance, contribUserId]);
+            await conn.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newContribBalance, contribUser.id]);
             
             const contribTransId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
             const rolesStr = info.roles.join(' و ');
             const desc = `سهم مشارکت به عنوان ${rolesStr} در فروش چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
             await conn.execute(
               'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-              [contribTransId, contribUserId, contribUser.displayName, info.amount, 'credit', desc, 'system', 'سیستم', now]
+              [contribTransId, contribUser.id, contribUser.displayName || contribUser.email, info.amount, 'credit', desc, 'system', 'سیستم', now]
             );
+
+            // Add notification for contributor
+            const notifId = `notif-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+            const notifTitle = 'واریز سود فروش چپتر';
+            const notifBody = `مبلغ ${info.amount.toLocaleString('fa-IR')} تومان بابت سهم مشارکت (${rolesStr}) در فروش چپتر ${chapter.number} مانهوای «${seriesTitle}» به کیف پول شما افزوده شد.`;
+            await conn.execute(
+              'INSERT INTO notifications (id, userId, type, title, body, link, isRead, createdAt) VALUES (?, ?, ?, ?, ?, ?, 0, ?)',
+              [notifId, contribUser.id, 'system', notifTitle, notifBody, '/profile', now]
+            );
+
+            distributedUsersResult.push({
+              userId: contribUser.id,
+              roleLabel: rolesStr,
+              amount: info.amount,
+              newBalance: newContribBalance
+            });
           }
         }
 
-        // Credit site profit to Global Admin
-        const [adminRows] = await conn.execute("SELECT * FROM users WHERE role = 'admin' OR email = 'amirrezaveisi45@gmail.com' LIMIT 1");
+        // 5. Credit site profit to Global Admin
+        const [adminRows] = await conn.execute(
+          "SELECT * FROM users WHERE role IN ('admin', 'super_admin', 'superadmin') OR email IN ('amirrezaveisi45@gmail.com', 'Mr.V@admin.com') ORDER BY (CASE WHEN email = 'amirrezaveisi45@gmail.com' THEN 1 WHEN role = 'super_admin' THEN 2 ELSE 3 END) LIMIT 1"
+        );
         const adminUser = (adminRows as any[])[0];
         if (adminUser) {
           const newAdminBalance = (adminUser.walletBalance || 0) + adminProfit;
           await conn.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newAdminBalance, adminUser.id]);
           
           const adminTransId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-          const desc = `سود سایت از فروش چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
+          const desc = `سود سهم وبسایت از فروش چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
           await conn.execute(
             'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [adminTransId, adminUser.id, adminUser.displayName, adminProfit, 'credit', desc, 'system', 'سیستم', now]
+            [adminTransId, adminUser.id, adminUser.displayName || adminUser.email, adminProfit, 'credit', desc, 'system', 'سیستم', now]
           );
+
+          adminResultUser = { id: adminUser.id, newBalance: newAdminBalance };
         }
 
-        // Update website_revenue setting
+        // 6. Update website_revenue setting
         const [revRows] = await conn.execute('SELECT * FROM settings WHERE id = ?', ['website_revenue']);
         const revR = (revRows as any[])[0];
         let currentRev = revR ? JSON.parse(revR.val) : { totalEarned: 0 };
@@ -3319,7 +3389,7 @@ class DatabaseManager {
       this.localData.wallet_transactions.push({
         id: transId,
         userId,
-        userName: user.displayName,
+        userName: user.displayName || user.email,
         amount: -price,
         type: 'purchase',
         description,
@@ -3342,7 +3412,7 @@ class DatabaseManager {
 
       // Credit contributors
       for (const [contribUserId, info] of Object.entries(userDistributionMap)) {
-        const contribUserIdx = this.localData.users.findIndex(u => u.id === contribUserId);
+        const contribUserIdx = this.localData.users.findIndex(u => u.id === contribUserId || u.email === contribUserId);
         if (contribUserIdx >= 0) {
           const contribUser = this.localData.users[contribUserIdx];
           const newContribBalance = (contribUser.walletBalance || 0) + info.amount;
@@ -3353,8 +3423,8 @@ class DatabaseManager {
           const desc = `سهم مشارکت به عنوان ${rolesStr} در فروش چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
           this.localData.wallet_transactions.push({
             id: contribTransId,
-            userId: contribUserId,
-            userName: contribUser.displayName,
+            userId: contribUser.id,
+            userName: contribUser.displayName || contribUser.email,
             amount: info.amount,
             type: 'credit',
             description: desc,
@@ -3362,22 +3432,42 @@ class DatabaseManager {
             creatorName: 'سیستم',
             createdAt: now
           });
+
+          // Add notification
+          await this.addNotification(
+            contribUser.id,
+            'system',
+            'واریز سود فروش چپتر',
+            `مبلغ ${info.amount.toLocaleString('fa-IR')} تومان بابت سهم مشارکت (${rolesStr}) در فروش چپتر ${chapter.number} مانهوای «${seriesTitle}» به کیف پول شما افزوده شد.`,
+            '/profile'
+          );
+
+          distributedUsersResult.push({
+            userId: contribUser.id,
+            roleLabel: rolesStr,
+            amount: info.amount,
+            newBalance: newContribBalance
+          });
         }
       }
 
       // Credit site profit to Global Admin
-      const adminUserIdx = this.localData.users.findIndex(u => u.role === 'admin' || u.email === 'amirrezaveisi45@gmail.com');
+      const adminUserIdx = this.localData.users.findIndex(u => 
+        (u.roles && (u.roles.includes('super_admin') || u.roles.includes('admin'))) ||
+        (u.role as string) === 'admin' || (u.role as string) === 'super_admin' || (u.role as string) === 'superadmin' || 
+        u.email === 'amirrezaveisi45@gmail.com' || u.email === 'Mr.V@admin.com'
+      );
       if (adminUserIdx >= 0) {
         const adminUser = this.localData.users[adminUserIdx];
         const newAdminBalance = (adminUser.walletBalance || 0) + adminProfit;
         this.localData.users[adminUserIdx].walletBalance = newAdminBalance;
         
         const adminTransId = `tx-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-        const desc = `سود سایت از فروش چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
+        const desc = `سود سهم وبسایت از فروش چپتر ${chapter.number} از مانهوا/مانگای ${seriesTitle}`;
         this.localData.wallet_transactions.push({
           id: adminTransId,
           userId: adminUser.id,
-          userName: adminUser.displayName,
+          userName: adminUser.displayName || adminUser.email,
           amount: adminProfit,
           type: 'credit',
           description: desc,
@@ -3385,6 +3475,8 @@ class DatabaseManager {
           creatorName: 'سیستم',
           createdAt: now
         });
+
+        adminResultUser = { id: adminUser.id, newBalance: newAdminBalance };
       }
 
       // Update website_revenue setting local
@@ -3396,7 +3488,271 @@ class DatabaseManager {
       this.saveLocalData();
     }
 
-    return { success: true, newBalance };
+    return {
+      success: true,
+      newBalance,
+      totalDistributed,
+      adminProfit,
+      buyerId: userId,
+      distributedUsers: distributedUsersResult,
+      adminUser: adminResultUser
+    };
+  }
+
+  async syncUnpaidPurchases(): Promise<{
+    success: boolean;
+    totalPurchases: number;
+    repairedPurchases: number;
+    totalDistributedToContributors: number;
+    totalCreditedToWebsite: number;
+    details: string[];
+  }> {
+    const price = 400;
+    let rolesSetting: any[] = [
+      { id: 'editor', name: 'ادیتور', percentage: 30 },
+      { id: 'translator', name: 'مترجم', percentage: 20 },
+      { id: 'cleaner', name: 'کلینر', percentage: 30 },
+      { id: 'website', name: 'وبسایت', percentage: 20 }
+    ];
+    try {
+      const savedRoles = await this.getSettings('revenue_roles');
+      if (Array.isArray(savedRoles) && savedRoles.length > 0) {
+        rolesSetting = savedRoles;
+      }
+    } catch (e) {}
+
+    let allPurchases: any[] = [];
+    let allTransactions: any[] = [];
+
+    if (this.isUsingMySQL && this.pool) {
+      const [pRows] = await this.pool.execute('SELECT * FROM purchased_chapters ORDER BY createdAt ASC');
+      allPurchases = pRows as any[];
+      const [tRows] = await this.pool.execute("SELECT * FROM wallet_transactions WHERE type = 'credit'");
+      allTransactions = tRows as any[];
+    } else {
+      allPurchases = this.localData.purchased_chapters || [];
+      allTransactions = (this.localData.wallet_transactions || []).filter(t => t.type === 'credit');
+    }
+
+    let repairedPurchases = 0;
+    let totalDistributedToContributors = 0;
+    let totalCreditedToWebsite = 0;
+    const details: string[] = [];
+
+    for (const p of allPurchases) {
+      const series = await this.getSeriesById(p.seriesId);
+      const chapter = await this.getChapterById(p.seriesId, p.chapterId);
+      const seriesTitle = series?.title || 'مانهوا';
+      const chapNum = chapter?.number || p.chapterNumber || 1;
+
+      // Check if credit transaction already exists for this chapter purchase
+      const hasExistingCredit = allTransactions.some(tx => 
+        tx.description && 
+        tx.description.includes(`فروش چپتر ${chapNum}`) && 
+        (tx.description.includes(seriesTitle) || (series && tx.description.includes(series.id)))
+      );
+
+      if (hasExistingCredit) {
+        continue;
+      }
+
+      // Need to distribute profit for this purchase!
+      let chContribs: any = chapter?.contributors;
+      if (typeof chContribs === 'string') {
+        try { chContribs = JSON.parse(chContribs); } catch (e) { chContribs = {}; }
+      }
+      if (!chContribs || typeof chContribs !== 'object') chContribs = {};
+
+      let serContribs: any = series?.contributors;
+      if (typeof serContribs === 'string') {
+        try { serContribs = JSON.parse(serContribs); } catch (e) { serContribs = []; }
+      }
+      if (!Array.isArray(serContribs)) serContribs = [];
+
+      const distribution: { userId: string; roleLabel: string; amount: number }[] = [];
+
+      for (const r of rolesSetting) {
+        if (r.id === 'website') continue;
+        
+        let rawAssigned: any = chContribs[r.id] || chContribs[r.id.toLowerCase()];
+        if (!rawAssigned && r.id === 'translator') rawAssigned = chContribs['trans'];
+        if (!rawAssigned && r.id === 'editor') rawAssigned = chContribs['edit'];
+        if (!rawAssigned && r.id === 'cleaner') rawAssigned = chContribs['clean'];
+
+        let assignedUserIds: string[] = [];
+        if (rawAssigned) {
+          if (Array.isArray(rawAssigned)) {
+            assignedUserIds = rawAssigned.map((item: any) => typeof item === 'string' ? item : (item?.id || item?.userId || '')).filter(Boolean);
+          } else if (typeof rawAssigned === 'string' && rawAssigned.trim()) {
+            assignedUserIds = [rawAssigned.trim()];
+          } else if (typeof rawAssigned === 'object' && (rawAssigned.id || rawAssigned.userId)) {
+            assignedUserIds = [rawAssigned.id || rawAssigned.userId];
+          }
+        }
+
+        if (assignedUserIds.length === 0 && serContribs.length > 0) {
+          assignedUserIds = serContribs
+            .filter((c: any) => {
+              const roleMatch = c.role === r.id || 
+                (r.id === 'translator' && c.role === 'trans') || 
+                (r.id === 'editor' && c.role === 'edit') || 
+                (r.id === 'cleaner' && c.role === 'clean');
+              const isApproved = !c.status || c.status === 'approved';
+              return roleMatch && isApproved;
+            })
+            .map((c: any) => c.userId || c.id)
+            .filter(Boolean);
+        }
+
+        if (assignedUserIds.length > 0) {
+          const roleShareTotal = Math.floor(price * ((r.percentage || 0) / 100));
+          const sharePerUser = Math.floor(roleShareTotal / assignedUserIds.length);
+          if (sharePerUser > 0) {
+            assignedUserIds.forEach((uid: string) => {
+              distribution.push({ userId: uid, roleLabel: r.name, amount: sharePerUser });
+            });
+          }
+        }
+      }
+
+      const userDistributionMap: Record<string, { amount: number; roles: string[] }> = {};
+      distribution.forEach(d => {
+        if (!userDistributionMap[d.userId]) {
+          userDistributionMap[d.userId] = { amount: 0, roles: [] };
+        }
+        userDistributionMap[d.userId].amount += d.amount;
+        if (!userDistributionMap[d.userId].roles.includes(d.roleLabel)) {
+          userDistributionMap[d.userId].roles.push(d.roleLabel);
+        }
+      });
+
+      let purchaseDistributed = 0;
+      Object.values(userDistributionMap).forEach(d => {
+        purchaseDistributed += d.amount;
+      });
+
+      const purchaseAdminProfit = price - purchaseDistributed;
+      const txDate = p.createdAt || new Date().toISOString();
+
+      if (this.isUsingMySQL && this.pool) {
+        for (const [contribUserId, info] of Object.entries(userDistributionMap)) {
+          const [contribRows] = await this.pool.execute('SELECT * FROM users WHERE id = ? OR email = ? LIMIT 1', [contribUserId, contribUserId]);
+          const contribUser = (contribRows as any[])[0];
+          if (contribUser) {
+            const newContribBalance = (contribUser.walletBalance || 0) + info.amount;
+            await this.pool.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newContribBalance, contribUser.id]);
+            
+            const contribTransId = `tx-sync-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+            const rolesStr = info.roles.join(' و ');
+            const desc = `سهم مشارکت به عنوان ${rolesStr} در فروش چپتر ${chapNum} از مانهوا/مانگای ${seriesTitle} (تسویه سیستمی)`;
+            await this.pool.execute(
+              'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              [contribTransId, contribUser.id, contribUser.displayName || contribUser.email, info.amount, 'credit', desc, 'system', 'سیستم', txDate]
+            );
+            totalDistributedToContributors += info.amount;
+          }
+        }
+
+        const [adminRows] = await this.pool.execute(
+          "SELECT * FROM users WHERE role IN ('admin', 'super_admin', 'superadmin') OR email IN ('amirrezaveisi45@gmail.com', 'Mr.V@admin.com') ORDER BY (CASE WHEN email = 'amirrezaveisi45@gmail.com' THEN 1 WHEN role = 'super_admin' THEN 2 ELSE 3 END) LIMIT 1"
+        );
+        const adminUser = (adminRows as any[])[0];
+        if (adminUser) {
+          const newAdminBalance = (adminUser.walletBalance || 0) + purchaseAdminProfit;
+          await this.pool.execute('UPDATE users SET walletBalance = ? WHERE id = ?', [newAdminBalance, adminUser.id]);
+          
+          const adminTransId = `tx-sync-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+          const desc = `سود سهم وبسایت از فروش چپتر ${chapNum} از مانهوا/مانگای ${seriesTitle} (تسویه سیستمی)`;
+          await this.pool.execute(
+            'INSERT INTO wallet_transactions (id, userId, userName, amount, type, description, creatorId, creatorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [adminTransId, adminUser.id, adminUser.displayName || adminUser.email, purchaseAdminProfit, 'credit', desc, 'system', 'سیستم', txDate]
+          );
+          totalCreditedToWebsite += purchaseAdminProfit;
+        }
+
+        // Update website_revenue setting
+        const [revRows] = await this.pool.execute('SELECT * FROM settings WHERE id = ?', ['website_revenue']);
+        const revR = (revRows as any[])[0];
+        let currentRev = revR ? JSON.parse(revR.val) : { totalEarned: 0 };
+        currentRev.totalEarned = (currentRev.totalEarned || 0) + purchaseAdminProfit;
+        const revValStr = JSON.stringify(currentRev);
+        if (revR) {
+          await this.pool.execute('UPDATE settings SET val = ? WHERE id = ?', [revValStr, 'website_revenue']);
+        } else {
+          await this.pool.execute('INSERT INTO settings (id, val) VALUES (?, ?)', ['website_revenue', revValStr]);
+        }
+      } else {
+        // Local DB
+        for (const [contribUserId, info] of Object.entries(userDistributionMap)) {
+          const contribUserIdx = this.localData.users.findIndex(u => u.id === contribUserId || u.email === contribUserId);
+          if (contribUserIdx >= 0) {
+            const contribUser = this.localData.users[contribUserIdx];
+            const newContribBalance = (contribUser.walletBalance || 0) + info.amount;
+            this.localData.users[contribUserIdx].walletBalance = newContribBalance;
+            
+            const contribTransId = `tx-sync-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+            const rolesStr = info.roles.join(' و ');
+            const desc = `سهم مشارکت به عنوان ${rolesStr} در فروش چپتر ${chapNum} از مانهوا/مانگای ${seriesTitle} (تسویه سیستمی)`;
+            this.localData.wallet_transactions.push({
+              id: contribTransId,
+              userId: contribUser.id,
+              userName: contribUser.displayName || contribUser.email,
+              amount: info.amount,
+              type: 'credit',
+              description: desc,
+              creatorId: 'system',
+              creatorName: 'سیستم',
+              createdAt: txDate
+            });
+            totalDistributedToContributors += info.amount;
+          }
+        }
+
+        const adminUserIdx = this.localData.users.findIndex(u => 
+          (u.roles && (u.roles.includes('super_admin') || u.roles.includes('admin'))) ||
+          (u.role as string) === 'admin' || (u.role as string) === 'super_admin' || (u.role as string) === 'superadmin' || 
+          u.email === 'amirrezaveisi45@gmail.com' || u.email === 'Mr.V@admin.com'
+        );
+        if (adminUserIdx >= 0) {
+          const adminUser = this.localData.users[adminUserIdx];
+          const newAdminBalance = (adminUser.walletBalance || 0) + purchaseAdminProfit;
+          this.localData.users[adminUserIdx].walletBalance = newAdminBalance;
+          
+          const adminTransId = `tx-sync-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+          const desc = `سود سهم وبسایت از فروش چپتر ${chapNum} از مانهوا/مانگای ${seriesTitle} (تسویه سیستمی)`;
+          this.localData.wallet_transactions.push({
+            id: adminTransId,
+            userId: adminUser.id,
+            userName: adminUser.displayName || adminUser.email,
+            amount: purchaseAdminProfit,
+            type: 'credit',
+            description: desc,
+            creatorId: 'system',
+            creatorName: 'سیستم',
+            createdAt: txDate
+          });
+          totalCreditedToWebsite += purchaseAdminProfit;
+        }
+
+        if (!this.localData.settings.website_revenue) {
+          this.localData.settings.website_revenue = { totalEarned: 0 };
+        }
+        this.localData.settings.website_revenue.totalEarned = (this.localData.settings.website_revenue.totalEarned || 0) + purchaseAdminProfit;
+        this.saveLocalData();
+      }
+
+      repairedPurchases++;
+      details.push(`چپتر ${chapNum} مانهوای ${seriesTitle}: ${purchaseDistributed.toLocaleString('fa-IR')} تومان به کادر، ${purchaseAdminProfit.toLocaleString('fa-IR')} تومان به وبسایت`);
+    }
+
+    return {
+      success: true,
+      totalPurchases: allPurchases.length,
+      repairedPurchases,
+      totalDistributedToContributors,
+      totalCreditedToWebsite,
+      details
+    };
   }
 
   async backupAllData(): Promise<any> {

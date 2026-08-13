@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { apiClient } from "../lib/apiClient";
+import { apiClient, getSocketInstance } from "../lib/apiClient";
 import {
   PieChart,
   Pie,
@@ -33,7 +33,17 @@ import {
   Check,
   ShieldCheck,
   Edit3,
-  ChevronLeft
+  ChevronLeft,
+  Printer,
+  Copy,
+  CheckCheck,
+  Sparkles,
+  Calculator,
+  HelpCircle,
+  Award,
+  Wallet,
+  Zap,
+  RotateCw
 } from "lucide-react";
 import { Series } from "../lib/types";
 
@@ -121,15 +131,29 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
   const [chapterAssignments, setChapterAssignments] = useState<Record<string, string[]>>({});
 
   // Contributor Earnings Inspector Modal States
-  const [inspectUser, setInspectUser] = useState<{ id: string; name: string } | null>(null);
+  const [inspectUser, setInspectUser] = useState<{ id: string; name: string; email?: string; role?: string } | null>(null);
   const [inspectMonth, setInspectMonth] = useState<string>(new Date().toISOString().slice(0, 7));
   const [inspectData, setInspectData] = useState<any | null>(null);
   const [loadingInspect, setLoadingInspect] = useState<boolean>(false);
+  const [inspectViewMode, setInspectViewMode] = useState<"breakdown" | "slip">("breakdown");
+  const [inspectSearchQuery, setInspectSearchQuery] = useState<string>("");
+  const [copiedSlip, setCopiedSlip] = useState<boolean>(false);
+
+  // Staff Section Filters
+  const [staffSearchQuery, setStaffSearchQuery] = useState<string>("");
+  const [staffRoleFilter, setStaffRoleFilter] = useState<string>("all");
 
   const handleInspectContributor = async (userId: string, userName?: string, month?: string) => {
     const m = month || inspectMonth;
-    setInspectUser({ id: userId, name: userName || "همکار" });
+    const foundStaff = staff.find(s => s.id === userId);
+    setInspectUser({
+      id: userId,
+      name: userName || (foundStaff?.displayName || foundStaff?.email || "همکار"),
+      email: foundStaff?.email,
+      role: foundStaff?.role
+    });
     setLoadingInspect(true);
+    setCopiedSlip(false);
     try {
       const res = await apiClient.get(`/api/admin/contributor-earnings/${userId}?month=${m}`);
       setInspectData(res);
@@ -148,11 +172,53 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
     }
   };
 
+  const handleCopySlip = () => {
+    if (!inspectData || !inspectUser) return;
+    const monthLabel = inspectMonth === 'all' ? 'مجموع کل دوره‌ها' : `ماه ${inspectMonth}`;
+    const total = (inspectData.totalEarnings || 0).toLocaleString("fa-IR");
+    const totalSales = (inspectData.totalSalesCount || 0).toLocaleString("fa-IR");
+    
+    let text = `📋 فیش تسویه مالی و کارنامه سود همکار:\n`;
+    text += `👤 نام: ${inspectUser.name}\n`;
+    if (inspectUser.email) text += `📧 ایمیل: ${inspectUser.email}\n`;
+    text += `📅 دوره گزارش: ${monthLabel}\n`;
+    text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    text += `💰 مجموع درآمد خالص: ${total} تومان\n`;
+    text += `🛒 تعداد کل فروش‌ها: ${totalSales} بار\n`;
+    text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    text += `📚 ریز سهم آثار:\n`;
+
+    if (inspectData.seriesBreakdown && inspectData.seriesBreakdown.length > 0) {
+      inspectData.seriesBreakdown.forEach((sb: any, idx: number) => {
+        text += `${idx + 1}. ${sb.seriesTitle} (${sb.chapters.length} چپتر): ${(sb.seriesEarnings || 0).toLocaleString("fa-IR")} تومان\n`;
+      });
+    } else {
+      text += `هیچ فروشی در این بازه ثبت نشده است.\n`;
+    }
+    text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    text += `⚡ سامانه مدیریت مالی مانگاتا / آسورا`;
+
+    navigator.clipboard.writeText(text);
+    setCopiedSlip(true);
+    setTimeout(() => setCopiedSlip(false), 2500);
+  };
+
   // Settlement Form States
   const [showSettleModal, setShowSettleModal] = useState(false);
   const [settleAmount, setSettleAmount] = useState("");
   const [settleDescription, setSettleDescription] = useState("");
   const [submittingSettle, setSubmittingSettle] = useState(false);
+
+  // Smart Revenue Recovery & Auto-Sync States
+  const [syncingPurchases, setSyncingPurchases] = useState(false);
+  const [syncResult, setSyncResult] = useState<{
+    success?: boolean;
+    totalPurchases?: number;
+    repairedPurchases?: number;
+    totalDistributedToContributors?: number;
+    totalCreditedToWebsite?: number;
+    details?: string[];
+  } | null>(null);
 
   // Activity Logs States
   const [activityLogs, setActivityLogs] = useState<any[]>([]);
@@ -169,12 +235,53 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
     }
   }, [seriesList]);
 
+  // Real-time Socket Event Listeners
+  useEffect(() => {
+    const socket = getSocketInstance();
+    const handleLiveRevenueUpdate = () => {
+      fetchWebsiteRevenue();
+      if (selectedSeries) {
+        fetchSalesSummary(selectedSeries.id);
+      }
+    };
+    socket.on("revenue:updated", handleLiveRevenueUpdate);
+    socket.on("transactions:updated", handleLiveRevenueUpdate);
+    socket.on("wallet:any_update", handleLiveRevenueUpdate);
+
+    return () => {
+      socket.off("revenue:updated", handleLiveRevenueUpdate);
+      socket.off("transactions:updated", handleLiveRevenueUpdate);
+      socket.off("wallet:any_update", handleLiveRevenueUpdate);
+    };
+  }, [selectedSeries]);
+
   // Fetch sales summary when selected series changes
   useEffect(() => {
     if (selectedSeries) {
       fetchSalesSummary(selectedSeries.id);
     }
   }, [selectedSeries]);
+
+  const handleSyncPurchases = async () => {
+    setSyncingPurchases(true);
+    setSyncResult(null);
+    try {
+      const res = await apiClient.post("/api/admin/revenue/sync-unpaid-purchases", {});
+      if (res && res.success) {
+        setSyncResult(res);
+        fetchWebsiteRevenue();
+        if (selectedSeries) {
+          fetchSalesSummary(selectedSeries.id);
+        }
+      } else {
+        alert("خطا در همگام‌سازی: " + (res?.error || "خطای ناشناخته"));
+      }
+    } catch (err: any) {
+      alert("خطا در اجرای تسویه خودکار: " + err.message);
+    } finally {
+      setSyncingPurchases(false);
+    }
+  };
 
   const fetchWebsiteRevenue = async () => {
     setLoadingRevenue(true);
@@ -587,6 +694,204 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
             <span>پرسنل و اعضای کادر تولید آماده تخصیص به آثار</span>
           </div>
         </div>
+      </div>
+
+      {/* SECTION: Smart Auto-Recovery & Revenue Health */}
+      <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/5 to-purple-500/10 border border-amber-500/20 rounded-2xl p-5 shadow-lg relative overflow-hidden">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="p-3 bg-amber-500/20 rounded-xl text-amber-400 shrink-0">
+              <Zap size={22} className="animate-pulse" />
+            </div>
+            <div>
+              <h4 className="text-sm font-black text-white flex items-center gap-2">
+                سیستم هوشمند پایش و تسویه خودکار خریدهای چپتر
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
+                  فعال و بلادرنگ
+                </span>
+              </h4>
+              <p className="text-xs text-zinc-300 mt-1 max-w-2xl leading-relaxed">
+                هر خرید چپتر به صورت خودکار بین مترجم، ادیتور، کلینر و صندوق وبسایت تقسیم و بلافاصله به کیف پول‌ها واریز می‌شود. چنانچه خریدی در گذشته ثبت شده باشد اما به هر دلیل سود آن تقسیم نشده، با کلیک بر روی دکمه مقابل سیستم به صورت خودکار تمام خریدها را بررسی و مبالغ معوق را با دقت ریالی واریز می‌نماید.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleSyncPurchases}
+            disabled={syncingPurchases}
+            className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-black text-xs rounded-xl shadow-lg hover:shadow-orange-500/20 transition-all flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
+          >
+            <RotateCw size={15} className={syncingPurchases ? "animate-spin" : ""} />
+            {syncingPurchases ? "در حال پایش و تسویه خودکار..." : "پایش و تسویه خریدهای معوق"}
+          </button>
+        </div>
+
+        {/* Sync Results Box */}
+        {syncResult && (
+          <div className="mt-4 pt-4 border-t border-amber-500/20 bg-black/40 rounded-xl p-4 space-y-2">
+            <div className="flex items-center gap-2 text-xs font-black text-emerald-400">
+              <CheckCircle2 size={16} />
+              <span>نتیجه پایش و همگام‌سازی:</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-zinc-300">
+              <div className="bg-white/5 p-2.5 rounded-lg">
+                <span className="text-[10px] text-zinc-400 block">کل خریدهای ثبت‌شده</span>
+                <span className="text-sm font-black text-white font-mono">{syncResult.totalPurchases || 0}</span>
+              </div>
+              <div className="bg-white/5 p-2.5 rounded-lg">
+                <span className="text-[10px] text-zinc-400 block">خریدهای تسویه‌شده جدید</span>
+                <span className="text-sm font-black text-amber-400 font-mono">{syncResult.repairedPurchases || 0}</span>
+              </div>
+              <div className="bg-white/5 p-2.5 rounded-lg">
+                <span className="text-[10px] text-zinc-400 block">واریز شده به اعضای کادر</span>
+                <span className="text-sm font-black text-emerald-400 font-mono">{(syncResult.totalDistributedToContributors || 0).toLocaleString("fa-IR")} ت</span>
+              </div>
+              <div className="bg-white/5 p-2.5 rounded-lg">
+                <span className="text-[10px] text-zinc-400 block">واریز شده به صندوق وبسایت</span>
+                <span className="text-sm font-black text-blue-400 font-mono">{(syncResult.totalCreditedToWebsite || 0).toLocaleString("fa-IR")} ت</span>
+              </div>
+            </div>
+            {syncResult.details && syncResult.details.length > 0 && (
+              <div className="mt-2 text-[11px] text-zinc-400 max-h-32 overflow-y-auto space-y-1">
+                {syncResult.details.map((d, i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-zinc-300">
+                    <span className="text-emerald-400">•</span>
+                    <span>{d}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* SECTION: Staff Members & Monthly Contributor Profit Center */}
+      <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 shadow-xl space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-white/5 pb-4 gap-3">
+          <div>
+            <h3 className="text-base font-black text-white flex items-center gap-2">
+              <Award className="text-amber-400" size={18} />
+              کادر دست‌اندرکاران و بررسی سود ماهانه اعضا
+            </h3>
+            <p className="text-xs text-zinc-400 mt-1">
+              با کلیک روی دکمه یا نام هر همکار، کارنامه مالی، ریز سود ماهانه، فیش تسویه و درآمد کسب‌شده از هر چپتر و اثر را مشاهده نمایید.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Role Filter Chips */}
+            <div className="flex items-center bg-black/40 p-1 rounded-xl border border-white/5 text-xs">
+              <button
+                type="button"
+                onClick={() => setStaffRoleFilter("all")}
+                className={`px-3 py-1 rounded-lg font-bold transition-colors ${staffRoleFilter === "all" ? "bg-white/15 text-white" : "text-zinc-400 hover:text-white"}`}
+              >
+                همه ({staff.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStaffRoleFilter("translator")}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${staffRoleFilter === "translator" ? "bg-blue-500/20 text-blue-300 border border-blue-500/30" : "text-zinc-400 hover:text-white"}`}
+              >
+                مترجمین
+              </button>
+              <button
+                type="button"
+                onClick={() => setStaffRoleFilter("editor")}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${staffRoleFilter === "editor" ? "bg-purple-500/20 text-purple-300 border border-purple-500/30" : "text-zinc-400 hover:text-white"}`}
+              >
+                ادیتورها
+              </button>
+              <button
+                type="button"
+                onClick={() => setStaffRoleFilter("cleaner")}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-colors ${staffRoleFilter === "cleaner" ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "text-zinc-400 hover:text-white"}`}
+              >
+                کلینرها
+              </button>
+            </div>
+
+            {/* Staff Search Input */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="جستجوی نام یا ایمیل همکار..."
+                value={staffSearchQuery}
+                onChange={e => setStaffSearchQuery(e.target.value)}
+                className="bg-black/50 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 pr-8 w-48 sm:w-56"
+              />
+              <Search className="absolute right-2.5 top-2 text-zinc-500 pointer-events-none" size={14} />
+            </div>
+          </div>
+        </div>
+
+        {/* Staff Members List Cards */}
+        {staff.length === 0 ? (
+          <div className="text-center py-8 text-xs text-zinc-500 italic bg-black/20 rounded-xl border border-white/5">
+            هنوز عضوی در کادر دست‌اندرکاران (با نقش ادیتور، مترجم، کلینر یا ادمین) ثبت نشده است.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {staff
+              .filter(member => {
+                const matchSearch =
+                  !staffSearchQuery.trim() ||
+                  (member.displayName || "").toLowerCase().includes(staffSearchQuery.toLowerCase()) ||
+                  (member.email || "").toLowerCase().includes(staffSearchQuery.toLowerCase());
+                const matchRole =
+                  staffRoleFilter === "all" ||
+                  (member.role || "").toLowerCase() === staffRoleFilter.toLowerCase();
+                return matchSearch && matchRole;
+              })
+              .map(member => {
+                const roleFa =
+                  member.role === "translator" ? "مترجم" :
+                  member.role === "editor" ? "ادیتور" :
+                  member.role === "cleaner" ? "کلینر" :
+                  member.role === "admin" ? "مدیر" :
+                  member.role === "superadmin" ? "مدیر ارشد" : member.role;
+
+                const roleColor =
+                  member.role === "translator" ? "bg-blue-500/10 text-blue-300 border-blue-500/30" :
+                  member.role === "editor" ? "bg-purple-500/10 text-purple-300 border-purple-500/30" :
+                  member.role === "cleaner" ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" :
+                  "bg-amber-500/10 text-amber-300 border-amber-500/30";
+
+                return (
+                  <div
+                    key={member.id}
+                    className="bg-black/40 hover:bg-black/60 border border-white/5 hover:border-indigo-500/30 rounded-xl p-3.5 space-y-3 transition-all flex flex-col justify-between group shadow-md"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-600/30 to-purple-600/30 border border-white/10 flex items-center justify-center font-black text-xs text-white uppercase shrink-0">
+                        {(member.displayName || member.email || "U").slice(0, 2)}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="font-bold text-white text-xs block truncate" title={member.displayName || member.email}>
+                          {member.displayName || member.email}
+                        </span>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className={`text-[10px] px-2 py-0.5 rounded-md border font-bold ${roleColor}`}>
+                            {roleFa}
+                          </span>
+                          <span className="text-[10px] text-zinc-500 font-mono truncate">{member.email}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleInspectContributor(member.id, member.displayName || member.email)}
+                      className="w-full bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-200 hover:text-white border border-indigo-500/30 rounded-lg py-1.5 px-3 text-xs font-bold transition-all flex items-center justify-center gap-1.5 group-hover:border-indigo-500/50"
+                    >
+                      <TrendingUp size={13} className="text-emerald-400" />
+                      مشاهده سود و کارنامه ماهانه
+                    </button>
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
 
       {/* SECTION 1: System Predefined Roles & Percentages */}
@@ -1265,35 +1570,77 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
       {/* Contributor Monthly Earnings Inspector Modal */}
       {inspectUser && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-950 border border-indigo-500/30 rounded-2xl max-w-2xl w-full p-6 space-y-6 shadow-2xl dir-rtl max-h-[90vh] flex flex-col">
+          <div className="bg-zinc-950 border border-indigo-500/30 rounded-2xl max-w-3xl w-full p-6 space-y-5 shadow-2xl dir-rtl max-h-[92vh] flex flex-col">
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-white/10 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-black">
-                  <TrendingUp size={20} />
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-black shrink-0">
+                  <TrendingUp size={22} />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-white flex items-center gap-2">
-                    کارنامه مالی و سود ماهانه همکار: <span className="text-indigo-400">{inspectUser.name}</span>
-                  </h3>
-                  <p className="text-xs text-zinc-400 mt-0.5">ریز درآمد، تعداد فروش و سهم پرداختی به تفکیک اثر و چپتر</p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-black text-white">
+                      کارنامه مالی و سود ماهانه: <span className="text-indigo-400">{inspectUser.name}</span>
+                    </h3>
+                    {inspectUser.role && (
+                      <span className="text-[10px] px-2 py-0.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 rounded-md font-bold">
+                        {inspectUser.role === 'translator' ? 'مترجم' : inspectUser.role === 'editor' ? 'ادیتور' : inspectUser.role === 'cleaner' ? 'کلینر' : inspectUser.role}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    بررسی تفکیکی درآمد حاصل از فروش چپترها، درصد سهم نقش‌ها و صدور فیش تسویه
+                  </p>
                 </div>
               </div>
               <button
-                onClick={() => setInspectUser(null)}
+                onClick={() => {
+                  setInspectUser(null);
+                  setInspectSearchQuery("");
+                }}
                 className="text-zinc-400 hover:text-white p-2 rounded-xl hover:bg-white/5 transition-colors"
+                title="بستن پنجره"
               >
                 <X size={20} />
               </button>
             </div>
 
-            {/* Month Filter Selector */}
-            <div className="flex items-center justify-between bg-black/40 p-3 rounded-xl border border-white/5">
-              <span className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
-                <Coins size={14} className="text-amber-400" />
-                انتخاب بازه زمانی / ماه گزارش:
-              </span>
+            {/* Controls Bar: View Mode Switcher + Month Selector */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-black/40 p-3 rounded-xl border border-white/5">
+              {/* Tab Selector */}
+              <div className="flex items-center bg-black/60 p-1 rounded-xl border border-white/5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setInspectViewMode("breakdown")}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+                    inspectViewMode === "breakdown"
+                      ? "bg-indigo-600 text-white shadow-md"
+                      : "text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <BookOpen size={13} />
+                  ریز عملکرد و چپترها
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInspectViewMode("slip")}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all flex items-center gap-1.5 ${
+                    inspectViewMode === "slip"
+                      ? "bg-emerald-600 text-white shadow-md"
+                      : "text-zinc-400 hover:text-white"
+                  }`}
+                >
+                  <FileText size={13} />
+                  فیش و رسید تسویه
+                </button>
+              </div>
+
+              {/* Month Selector */}
               <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-zinc-400 flex items-center gap-1">
+                  <Coins size={13} className="text-amber-400" />
+                  دوره:
+                </span>
                 <select
                   value={inspectMonth}
                   onChange={e => handleInspectMonthChange(e.target.value)}
@@ -1310,10 +1657,10 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                 </select>
                 <button
                   onClick={() => handleInspectContributor(inspectUser.id, inspectUser.name)}
-                  className="p-1.5 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-lg transition-colors"
+                  className="p-2 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-lg transition-colors"
                   title="به‌روزرسانی داده‌ها"
                 >
-                  <RefreshCw size={14} className={loadingInspect ? "animate-spin" : ""} />
+                  <RefreshCw size={13} className={loadingInspect ? "animate-spin" : ""} />
                 </button>
               </div>
             </div>
@@ -1321,100 +1668,249 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
             {/* Modal Body / Contents */}
             <div className="flex-1 overflow-y-auto space-y-5 pr-1">
               {loadingInspect ? (
-                <div className="flex flex-col items-center justify-center py-12 space-y-3">
-                  <div className="w-8 h-8 border-3 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
+                <div className="flex flex-col items-center justify-center py-16 space-y-3">
+                  <div className="w-9 h-9 border-3 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin"></div>
                   <span className="text-xs text-zinc-400 font-bold">در حال محاسبه و استخراج کارنامه مالی همکار...</span>
                 </div>
               ) : inspectData && !inspectData.error ? (
                 <>
                   {/* Top KPI Cards */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="bg-emerald-500/10 border border-emerald-500/20 p-3.5 rounded-xl text-right">
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl text-right">
                       <span className="text-[11px] font-bold text-emerald-400 block">درآمد و سود خالص همکار</span>
-                      <span className="text-lg font-black font-mono text-emerald-300 block mt-1">
+                      <span className="text-xl font-black font-mono text-emerald-300 block mt-1">
                         {(inspectData.totalEarnings || 0).toLocaleString("fa-IR")} <span className="text-xs font-normal">تومان</span>
                       </span>
+                      <span className="text-[10px] text-zinc-400 block mt-1">قابل تسویه و محاسبه‌شده</span>
                     </div>
 
-                    <div className="bg-indigo-500/10 border border-indigo-500/20 p-3.5 rounded-xl text-right">
+                    <div className="bg-indigo-500/10 border border-indigo-500/20 p-4 rounded-xl text-right">
                       <span className="text-[11px] font-bold text-indigo-400 block">تعداد کل فروش چپترها</span>
-                      <span className="text-lg font-black font-mono text-indigo-300 block mt-1">
+                      <span className="text-xl font-black font-mono text-indigo-300 block mt-1">
                         {(inspectData.totalSalesCount || 0).toLocaleString("fa-IR")} <span className="text-xs font-normal">تراکنش</span>
                       </span>
+                      <span className="text-[10px] text-zinc-400 block mt-1">در کلیه آثار منتسب</span>
                     </div>
 
-                    <div className="bg-amber-500/10 border border-amber-500/20 p-3.5 rounded-xl text-right">
-                      <span className="text-[11px] font-bold text-amber-400 block">تعداد آثار درآمدزا</span>
-                      <span className="text-lg font-black font-mono text-amber-300 block mt-1">
+                    <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl text-right">
+                      <span className="text-[11px] font-bold text-amber-400 block">تعداد آثار فعال همکار</span>
+                      <span className="text-xl font-black font-mono text-amber-300 block mt-1">
                         {(inspectData.seriesBreakdown?.length || 0).toLocaleString("fa-IR")} <span className="text-xs font-normal">اثر</span>
                       </span>
+                      <span className="text-[10px] text-zinc-400 block mt-1">دارای چپتر درآمدزا</span>
                     </div>
                   </div>
 
-                  {/* Series & Chapter Detailed Breakdown */}
-                  <div className="space-y-4">
-                    <h4 className="text-xs font-black text-white flex items-center gap-2">
-                      <BookOpen size={14} className="text-indigo-400" />
-                      جزئیات سهم پرداختی به تفکیک آثار و چپترها:
-                    </h4>
+                  {/* VIEW 1: Detailed Breakdown View */}
+                  {inspectViewMode === "breakdown" && (
+                    <div className="space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <h4 className="text-xs font-black text-white flex items-center gap-2">
+                          <BookOpen size={14} className="text-indigo-400" />
+                          جزئیات سهم پرداختی به تفکیک آثار و چپترها:
+                        </h4>
 
-                    {inspectData.seriesBreakdown && inspectData.seriesBreakdown.length > 0 ? (
-                      inspectData.seriesBreakdown.map((sb: any) => (
-                        <div key={sb.seriesId} className="bg-black/50 border border-white/10 rounded-xl p-4 space-y-3">
-                          <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
-                            <div className="flex items-center gap-3">
-                              {sb.cover ? (
-                                <img src={sb.cover} alt={sb.seriesTitle} className="w-9 h-11 object-cover rounded-md border border-white/10" />
-                              ) : (
-                                <div className="w-9 h-11 bg-zinc-800 rounded-md border border-white/10 flex items-center justify-center text-zinc-500 text-[10px]">کاور</div>
-                              )}
-                              <div>
-                                <h5 className="text-xs font-black text-white">{sb.seriesTitle}</h5>
-                                <span className="text-[10px] text-zinc-400">تعداد چپترهای درآمدزا: {sb.chapters.length}</span>
-                              </div>
-                            </div>
-                            <div className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-lg border border-emerald-500/20 font-mono">
-                              مجموع سهم اثر: {(sb.seriesEarnings || 0).toLocaleString("fa-IR")} تومان
-                            </div>
+                        {inspectData.seriesBreakdown && inspectData.seriesBreakdown.length > 1 && (
+                          <div className="relative">
+                            <input
+                              type="text"
+                              placeholder="فیلتر نام اثر یا چپتر..."
+                              value={inspectSearchQuery}
+                              onChange={e => setInspectSearchQuery(e.target.value)}
+                              className="bg-black/50 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 pr-7 w-48"
+                            />
+                            <Search className="absolute right-2 top-1.5 text-zinc-500 pointer-events-none" size={12} />
                           </div>
+                        )}
+                      </div>
 
-                          {/* Chapters table/list */}
-                          <div className="space-y-2">
-                            {sb.chapters.map((ch: any) => (
-                              <div key={ch.chapterId} className="bg-zinc-900/80 p-2.5 rounded-lg border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                                <div className="flex items-center gap-2.5">
-                                  <span className="bg-indigo-500/20 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded text-[11px]">
-                                    چپتر {ch.chapterNumber}
-                                  </span>
-                                  <span className="text-[11px] text-zinc-400">
-                                    فروش: <span className="text-white font-mono">{ch.salesCount}</span> بار ({ch.chapterTotalSales.toLocaleString("fa-IR")} تومان)
-                                  </span>
+                      {/* Formula calculation notice */}
+                      <div className="bg-indigo-950/30 border border-indigo-500/20 rounded-xl p-3 text-[11px] text-zinc-300 flex items-center gap-2">
+                        <Calculator size={16} className="text-indigo-400 shrink-0" />
+                        <span>
+                          <strong>فرمول محاسبه سود همکار:</strong> (تعداد فروش چپتر × ۴۰۰ تومان قیمت پایه) × (درصد سهم نقش ÷ تعداد همکاران منتسب به آن نقش)
+                        </span>
+                      </div>
+
+                      {inspectData.seriesBreakdown && inspectData.seriesBreakdown.length > 0 ? (
+                        inspectData.seriesBreakdown
+                          .filter((sb: any) =>
+                            !inspectSearchQuery.trim() ||
+                            sb.seriesTitle.toLowerCase().includes(inspectSearchQuery.toLowerCase()) ||
+                            sb.chapters.some((ch: any) => String(ch.chapterNumber).includes(inspectSearchQuery))
+                          )
+                          .map((sb: any) => (
+                            <div key={sb.seriesId} className="bg-black/50 border border-white/10 rounded-xl p-4 space-y-3">
+                              <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+                                <div className="flex items-center gap-3">
+                                  {sb.cover ? (
+                                    <img src={sb.cover} alt={sb.seriesTitle} className="w-9 h-12 object-cover rounded-md border border-white/10 shadow" />
+                                  ) : (
+                                    <div className="w-9 h-12 bg-zinc-800 rounded-md border border-white/10 flex items-center justify-center text-zinc-500 text-[10px]">کاور</div>
+                                  )}
+                                  <div>
+                                    <h5 className="text-xs font-black text-white">{sb.seriesTitle}</h5>
+                                    <span className="text-[10px] text-zinc-400">تعداد چپترهای درآمدزا: {sb.chapters.length}</span>
+                                  </div>
                                 </div>
-
-                                <div className="flex flex-wrap items-center gap-2">
-                                  {ch.userRoles.map((ur: any, idx: number) => (
-                                    <span key={idx} className="bg-white/5 px-2 py-0.5 rounded border border-white/5 text-[10px] text-zinc-300">
-                                      نقش: <strong className="text-indigo-300">{ur.roleName}</strong> ({ur.rolePercentage}٪)
-                                      {ur.coWorkersCount > 1 && <span className="text-amber-400 mr-1">(تقسیم بین {ur.coWorkersCount} نفر)</span>}
-                                    </span>
-                                  ))}
-                                  <span className="text-emerald-400 font-mono font-black text-xs mr-auto sm:mr-0">
-                                    +{(ch.chapterUserEarnings || 0).toLocaleString("fa-IR")} تومان
-                                  </span>
+                                <div className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-lg border border-emerald-500/20 font-mono">
+                                  سهم کل اثر: {(sb.seriesEarnings || 0).toLocaleString("fa-IR")} تومان
                                 </div>
                               </div>
-                            ))}
+
+                              {/* Chapters table/list */}
+                              <div className="space-y-2">
+                                {sb.chapters.map((ch: any) => (
+                                  <div key={ch.chapterId} className="bg-zinc-900/80 p-3 rounded-lg border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs hover:border-white/10 transition-colors">
+                                    <div className="flex items-center gap-2.5">
+                                      <span className="bg-indigo-500/20 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded text-[11px]">
+                                        چپتر {ch.chapterNumber}
+                                      </span>
+                                      <span className="text-[11px] text-zinc-400">
+                                        فروش: <span className="text-white font-mono">{ch.salesCount}</span> بار ({ch.chapterTotalSales.toLocaleString("fa-IR")} ت)
+                                      </span>
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      {ch.userRoles.map((ur: any, idx: number) => (
+                                        <span key={idx} className="bg-white/5 px-2 py-0.5 rounded border border-white/5 text-[10px] text-zinc-300">
+                                          نقش: <strong className="text-indigo-300">{ur.roleName}</strong> ({ur.rolePercentage}٪)
+                                          {ur.coWorkersCount > 1 && <span className="text-amber-400 mr-1">(تقسیم بین {ur.coWorkersCount} نفر)</span>}
+                                        </span>
+                                      ))}
+                                      <span className="text-emerald-400 font-mono font-black text-xs mr-auto sm:mr-0 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                        +{(ch.chapterUserEarnings || 0).toLocaleString("fa-IR")} تومان
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))
+                      ) : (
+                        <div className="text-center py-8 bg-black/30 rounded-xl border border-white/5 text-xs text-zinc-400 space-y-1">
+                          <AlertTriangle size={20} className="mx-auto text-amber-400 mb-2 opacity-60" />
+                          <p>هیچ درآمد یا فروش ثبت‌شده‌ای برای این همکار در این بازه زمانی یافت نشد.</p>
+                          <p className="text-[11px] text-zinc-500">پس از خرید چپترها توسط کاربران، سود مربوطه به‌صورت خودکار بر اساس درصد نقش‌ها محاسبه خواهد شد.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* VIEW 2: Printable Pay Slip View */}
+                  {inspectViewMode === "slip" && (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-black text-white flex items-center gap-2">
+                          <FileText size={14} className="text-emerald-400" />
+                          فیش تسویه حساب و رسید رسمی ماهانه همکار
+                        </h4>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleCopySlip}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                              copiedSlip
+                                ? "bg-emerald-600 text-white"
+                                : "bg-white/10 hover:bg-white/15 text-zinc-200"
+                            }`}
+                          >
+                            {copiedSlip ? <CheckCheck size={13} /> : <Copy size={13} />}
+                            {copiedSlip ? "متن فیش کپی شد!" : "کپی متن گزارش برای تلگرام"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => window.print()}
+                            className="px-3 py-1.5 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/30 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5"
+                          >
+                            <Printer size={13} />
+                            چاپ فیش
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Official Pay Slip Document */}
+                      <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-5 text-right font-sans shadow-lg">
+                        {/* Slip Header */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/10 pb-4 gap-3">
+                          <div>
+                            <span className="text-base font-black text-white flex items-center gap-2">
+                              ⚡ مانگاتا / آسورا اسکَن - فیش تسویه مالی همکار
+                            </span>
+                            <span className="text-[11px] text-zinc-400 block mt-0.5">
+                              شناسه سیستم: <span className="font-mono text-zinc-300">{inspectUser.id}</span>
+                            </span>
+                          </div>
+                          <div className="text-left">
+                            <span className="text-xs font-bold text-zinc-300 block">
+                              دوره مالی: <span className="font-mono text-indigo-300">{inspectMonth === 'all' ? 'کل زمان‌ها' : inspectMonth}</span>
+                            </span>
+                            <span className="text-[10px] text-zinc-500 block font-mono">
+                              تاریخ استخراج: {new Date().toLocaleDateString("fa-IR")}
+                            </span>
                           </div>
                         </div>
-                      ))
-                    ) : (
-                      <div className="text-center py-8 bg-black/30 rounded-xl border border-white/5 text-xs text-zinc-400 space-y-1">
-                        <AlertTriangle size={20} className="mx-auto text-amber-400 mb-2 opacity-60" />
-                        <p>هیچ درآمد یا فروش ثبت‌شده‌ای برای این همکار در این بازه زمانی یافت نشد.</p>
-                        <p className="text-[11px] text-zinc-500">پس از خرید چپترها توسط کاربران، سود مربوطه به‌صورت خودکار بر اساس درصد نقش‌ها محاسبه خواهد شد.</p>
+
+                        {/* Recipient Details */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-black/40 p-3.5 rounded-xl border border-white/5 text-xs">
+                          <div>
+                            <span className="text-zinc-400">نام و نام‌خانوادگی همکار: </span>
+                            <strong className="text-white">{inspectUser.name}</strong>
+                          </div>
+                          {inspectUser.email && (
+                            <div>
+                              <span className="text-zinc-400">ایمیل ثبت‌شده: </span>
+                              <strong className="text-zinc-200 font-mono">{inspectUser.email}</strong>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Itemized Table */}
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-right text-xs">
+                            <thead>
+                              <tr className="border-b border-white/10 text-zinc-400 bg-black/50">
+                                <th className="p-2.5 font-black">ردیف</th>
+                                <th className="p-2.5 font-black">نام اثر</th>
+                                <th className="p-2.5 font-black">تعداد چپتر</th>
+                                <th className="p-2.5 font-black">مبلغ سهم ناخالص همکار</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-white/5">
+                              {inspectData.seriesBreakdown && inspectData.seriesBreakdown.length > 0 ? (
+                                inspectData.seriesBreakdown.map((sb: any, idx: number) => (
+                                  <tr key={sb.seriesId} className="hover:bg-white/5 transition-colors">
+                                    <td className="p-2.5 font-mono text-zinc-400">{idx + 1}</td>
+                                    <td className="p-2.5 font-bold text-white">{sb.seriesTitle}</td>
+                                    <td className="p-2.5 font-mono text-zinc-300">{sb.chapters.length} چپتر</td>
+                                    <td className="p-2.5 font-mono font-bold text-emerald-400">
+                                      {(sb.seriesEarnings || 0).toLocaleString("fa-IR")} تومان
+                                    </td>
+                                  </tr>
+                                ))
+                              ) : (
+                                <tr>
+                                  <td colSpan={4} className="p-4 text-center text-zinc-500 italic">
+                                    درآمدی در این دوره برای همکار ثبت نشده است.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Grand Total Banner */}
+                        <div className="bg-emerald-950/40 border border-emerald-500/30 p-4 rounded-xl flex items-center justify-between">
+                          <span className="text-xs font-black text-emerald-300">
+                            مجموع کل مبلغ قابل پرداخت به همکار:
+                          </span>
+                          <span className="text-2xl font-black font-mono text-emerald-400">
+                            {(inspectData.totalEarnings || 0).toLocaleString("fa-IR")} <span className="text-xs font-normal">تومان</span>
+                          </span>
+                        </div>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="text-center py-8 text-xs text-red-400">
@@ -1426,7 +1922,10 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
             {/* Modal Footer */}
             <div className="pt-3 border-t border-white/10 flex justify-end">
               <button
-                onClick={() => setInspectUser(null)}
+                onClick={() => {
+                  setInspectUser(null);
+                  setInspectSearchQuery("");
+                }}
                 className="px-5 py-2 bg-white/10 hover:bg-white/15 text-white text-xs font-bold rounded-xl transition-colors"
               >
                 بستن پنجره
