@@ -264,10 +264,11 @@ export const apiClient = {
     return res.json();
   },
 
-  async incrementChapterViews(seriesId: string, id: string) {
+  async incrementChapterViews(seriesId: string, id: string, userId?: string) {
     const res = await fetch(`${API_URL}/api/series/${seriesId}/chapters/${id}/view`, {
       method: 'POST',
-      headers: this.getHeaders()
+      headers: this.getHeaders(),
+      body: JSON.stringify({ userId })
     });
     return res.json();
   },

@@ -40,6 +40,7 @@ export default function App() {
               <Route path="/support" element={<Support />} />
               <Route path="/terms" element={<Terms />} />
               <Route path="/privacy" element={<Privacy />} />
+              <Route path="*" element={<Home />} />
             </Routes>
             <CompleteProfileModal />
           </BrowserRouter>

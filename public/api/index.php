@@ -240,6 +240,14 @@ function ensureSchema($pdo) {
             status VARCHAR(20) DEFAULT 'pending',
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+        "CREATE TABLE IF NOT EXISTS chapter_views_log (
+            id VARCHAR(100) PRIMARY KEY,
+            userId VARCHAR(100) NOT NULL,
+            seriesId VARCHAR(100) NOT NULL,
+            chapterId VARCHAR(100) NOT NULL,
+            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_user_chap_view (userId, chapterId)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
         "CREATE TABLE IF NOT EXISTS notifications (
             id VARCHAR(100) PRIMARY KEY,
             userId VARCHAR(100) NOT NULL,
@@ -1257,15 +1265,44 @@ if ($method === 'PUT' && matchRoute('/series/:seriesId/chapters/:id/approve', $s
     sendResponse(["success" => true]);
 }
 
-// 26. INCREMENT CHAPTER VIEWS
+// 26. INCREMENT CHAPTER VIEWS (DEDUPLICATED PER USER)
 if ($method === 'POST' && matchRoute('/series/:seriesId/chapters/:id/view', $sub_path, $params)) {
-    $stmt = $pdo->prepare("UPDATE chapters SET views = views + 1 WHERE seriesId = ? AND id = ?");
-    $stmt->execute([$params['seriesId'], $params['id']]);
+    $input = getJsonInput();
+    $user = getUserFromHeaders($pdo);
+    $userId = isset($input['userId']) && !empty($input['userId']) ? $input['userId'] : ($user ? $user['id'] : null);
+    
+    if (!$userId) {
+        $ip = $_SERVER['REMOTE_ADDR'] ?? 'anon';
+        $userId = 'visitor_' . md5($ip);
+    }
+    
+    $seriesId = $params['seriesId'];
+    $chapterId = $params['id'];
+    
+    // Check if already viewed
+    $stmtCheck = $pdo->prepare("SELECT id FROM chapter_views_log WHERE userId = ? AND chapterId = ?");
+    $stmtCheck->execute([$userId, $chapterId]);
+    $alreadyViewed = $stmtCheck->fetch();
+    
+    if (!$alreadyViewed) {
+        // Log view
+        $logId = 'cv_' . round(microtime(true) * 1000) . '_' . rand(1000, 9999);
+        $stmtInsert = $pdo->prepare("INSERT IGNORE INTO chapter_views_log (id, userId, seriesId, chapterId) VALUES (?, ?, ?, ?)");
+        $stmtInsert->execute([$logId, $userId, $seriesId, $chapterId]);
+        
+        // Increment chapter views
+        $stmt = $pdo->prepare("UPDATE chapters SET views = views + 1 WHERE seriesId = ? AND id = ?");
+        $stmt->execute([$seriesId, $chapterId]);
+        
+        // Increment series views
+        $stmtS = $pdo->prepare("UPDATE series SET views = views + 1 WHERE id = ?");
+        $stmtS->execute([$seriesId]);
+    }
     
     $stmtSelect = $pdo->prepare("SELECT views FROM chapters WHERE id = ?");
-    $stmtSelect->execute([$params['id']]);
+    $stmtSelect->execute([$chapterId]);
     $res = $stmtSelect->fetch();
-    sendResponse(["views" => (int)$res['views']]);
+    sendResponse(["views" => (int)($res['views'] ?? 0)]);
 }
 
 // 27. SUBMIT CHAPTER WORK (TRANSLATION/EDIT)
@@ -2509,6 +2546,68 @@ if ($method === 'POST' && $sub_path === '/admin/upload') {
     }
     
     sendResponse(["success" => true, "urls" => $urls]);
+}
+
+// ADMIN DB STATUS
+if ($method === 'GET' && $sub_path === '/admin/db-status') {
+    requireAdmin($pdo);
+    try {
+        $startTime = microtime(true);
+        $stmt = $pdo->query("SELECT 1");
+        $stmt->fetch();
+        $latencyMs = round((microtime(true) - $startTime) * 1000, 2);
+
+        $stmtName = $pdo->query("SELECT DATABASE() as dbname, @@character_set_database as charset, @@collation_database as collation");
+        $dbInfo = $stmtName->fetch();
+
+        $tables = ['users', 'series', 'chapters', 'comments', 'bookmarks', 'history', 'ratings', 'reports', 'settings', 'wallet_transactions', 'purchased_chapters', 'chapter_views_log'];
+        $tableCounts = [];
+        foreach ($tables as $tbl) {
+            try {
+                $cStmt = $pdo->query("SELECT COUNT(*) as count FROM `$tbl`");
+                $cRow = $cStmt->fetch();
+                $tableCounts[$tbl] = (int)($cRow['count'] ?? 0);
+            } catch (Exception $e) {
+                $tableCounts[$tbl] = 0;
+            }
+        }
+
+        sendResponse([
+            "connected" => true,
+            "isUsingMySQL" => true,
+            "database" => $dbInfo['dbname'] ?? DB_NAME,
+            "charset" => $dbInfo['charset'] ?? 'utf8mb4',
+            "collation" => $dbInfo['collation'] ?? 'utf8mb4_unicode_ci',
+            "latencyMs" => $latencyMs,
+            "tableCounts" => $tableCounts,
+            "statusText" => "دیتابیس MySQL فعال و متصل است (" . ($dbInfo['charset'] ?? 'utf8mb4') . ")"
+        ]);
+    } catch (Exception $e) {
+        sendResponse([
+            "connected" => false,
+            "isUsingMySQL" => true,
+            "error" => $e->getMessage(),
+            "statusText" => "خطا در ارتباط با دیتابیس: " . $e->getMessage()
+        ], 500);
+    }
+}
+
+// ADMIN FIX CHARSET
+if ($method === 'POST' && $sub_path === '/admin/fix-charset') {
+    requireAdmin($pdo);
+    try {
+        $dbname = DB_NAME;
+        $pdo->exec("ALTER DATABASE `$dbname` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $tables = ['users', 'series', 'chapters', 'comments', 'bookmarks', 'history', 'ratings', 'reports', 'settings', 'wallet_transactions', 'purchased_chapters', 'chapter_views_log'];
+        foreach ($tables as $tbl) {
+            try {
+                $pdo->exec("ALTER TABLE `$tbl` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+            } catch (Exception $e) {}
+        }
+        sendResponse(["success" => true, "message" => "انکودینگ دیتابیس به utf8mb4_unicode_ci تغییر یافت."]);
+    } catch (Exception $e) {
+        sendResponse(["error" => "خطا در اصلاح انکودینگ: " . $e->getMessage()], 500);
+    }
 }
 
 // Fallback Route if not matched

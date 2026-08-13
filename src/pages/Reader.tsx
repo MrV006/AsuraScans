@@ -2,8 +2,8 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSeriesOverview } from '../hooks/useSeries';
 import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../hooks/useUserActivity';
-import { ChevronLeft, ChevronRight, Menu, Home, ArrowUp, Settings as SettingsIcon, Flag, AlertTriangle, X, Check, Send } from 'lucide-react';
-import React, { useState, useEffect, useRef } from 'react';
+import { ChevronLeft, ChevronRight, Menu, Home, ArrowUp, Settings as SettingsIcon, Flag, AlertTriangle, X, Check, Send, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import { apiClient, getSocketInstance } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 import { ReaderSkeleton } from '../components/Skeletons';
@@ -64,10 +64,152 @@ export const sortMangaImages = (images: string[]): string[] => {
   return [...images].sort(naturalCompare);
 };
 
-interface ImageQueueState {
-  status: 'idle' | 'loading' | 'retrying' | 'loaded' | 'error_network' | 'error_host';
-  retryCount: number;
-  elapsedSeconds: number;
+interface MangaImageProps {
+  key?: React.Key;
+  src: string;
+  index: number;
+  totalImages: number;
+  onReportRequest?: (pageNum: number) => void;
+  seriesId?: string;
+  chapterId?: string;
+  chapterNumber?: number;
+  seriesTitle?: string;
+}
+
+// Independent, high-performance image component with auto-retry and non-blocking parallel loading
+function MangaImage({
+  src,
+  index,
+  totalImages,
+  onReportRequest,
+  seriesId,
+  chapterId,
+  chapterNumber,
+  seriesTitle
+}: MangaImageProps) {
+  const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const [retryCount, setRetryCount] = useState(0);
+  const [currentSrc, setCurrentSrc] = useState(src);
+  const [autoReported, setAutoReported] = useState(false);
+
+  // Reset image state if URL changes
+  useEffect(() => {
+    setStatus('loading');
+    setRetryCount(0);
+    setCurrentSrc(src);
+    setAutoReported(false);
+  }, [src]);
+
+  const handleLoad = () => {
+    setStatus('loaded');
+  };
+
+  const handleError = () => {
+    if (retryCount < 3) {
+      const nextRetry = retryCount + 1;
+      setRetryCount(nextRetry);
+      const separator = src.includes('?') ? '&' : '?';
+      setTimeout(() => {
+        setCurrentSrc(`${src}${separator}retry=${Date.now()}`);
+      }, 1200);
+    } else {
+      setStatus('error');
+      // Auto-report persistent host errors once to the admin panel
+      if (!autoReported && seriesId && chapterId) {
+        setAutoReported(true);
+        const uid = localStorage.getItem('asura_user_id') || 'guest';
+        apiClient.submitReport({
+          id: `host-err-${seriesId}-${chapterId}-img${index + 1}-${Date.now()}`,
+          userId: uid,
+          userName: 'سیستم خودمختار ریدر',
+          title: `🚨 عدم بارگذاری تصویر ${index + 1} در چپتر ${chapterNumber || ''}`,
+          content: `تصویر شماره ${index + 1} از ${totalImages} در اثر "${seriesTitle || ''}" (چپتر ${chapterNumber || ''}) پس از ۳ بار تلاش بارگذاری نشد.\nآدرس تصویر: ${src}`
+        }).catch(err => console.error("Auto report error:", err));
+      }
+    }
+  };
+
+  const handleManualRetry = () => {
+    setStatus('loading');
+    setRetryCount(0);
+    const separator = src.includes('?') ? '&' : '?';
+    setCurrentSrc(`${src}${separator}retry=${Date.now()}`);
+  };
+
+  return (
+    <div 
+      className="reader-image-wrapper w-full relative flex flex-col justify-center items-center"
+      style={{ minHeight: status === 'loaded' ? 'auto' : '260px' }}
+    >
+      {/* Loading Placeholder Spinner */}
+      {status === 'loading' && (
+        <div className="w-full flex flex-col items-center justify-center bg-[#111217]/60 border border-white/5 rounded-2xl py-10 px-6 min-h-[260px] my-1 shadow-inner font-sans animate-pulse" dir="rtl">
+          <div className="w-10 h-10 border-3 border-zinc-700 border-t-[var(--color-asura-accent)] rounded-full animate-spin mb-3"></div>
+          <p className="text-zinc-300 text-xs font-bold mb-1">
+            در حال دریافت و بارگذاری تصویر {(index + 1).toLocaleString('fa-IR')} از {totalImages.toLocaleString('fa-IR')}...
+          </p>
+          {retryCount > 0 && (
+            <p className="text-[11px] text-amber-400 font-medium">
+              تلاش مجدد ({retryCount.toLocaleString('fa-IR')} از ۳)...
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Error Card for Failed Image */}
+      {status === 'error' && (
+        <div className="w-full flex flex-col items-center justify-center bg-red-500/10 border border-red-500/25 rounded-2xl p-6 min-h-[260px] my-1 text-center shadow-xl font-sans" dir="rtl">
+          <div className="w-12 h-12 bg-red-500/20 border border-red-500/30 rounded-2xl flex items-center justify-center text-red-400 mb-3">
+            <AlertTriangle size={24} />
+          </div>
+          <h3 className="text-xs font-black text-red-300 mb-1">
+            خطا در بارگذاری تصویر {(index + 1).toLocaleString('fa-IR')}
+          </h3>
+          <p className="text-[11px] text-zinc-400 max-w-sm leading-relaxed mb-4">
+            امکان دریافت این تصویر از سرور هاست فراهم نشد. می‌توانید مجدداً تلاش کنید یا خرابی را گزارش دهید.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              onClick={handleManualRetry}
+              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-black text-xs rounded-xl transition-all shadow-md flex items-center gap-1.5"
+            >
+              <RefreshCw size={14} />
+              <span>تلاش مجدد</span>
+            </button>
+            {onReportRequest && (
+              <button
+                onClick={() => onReportRequest(index + 1)}
+                className="px-3.5 py-2 bg-white/10 hover:bg-white/15 text-zinc-300 font-bold text-xs rounded-xl transition-all border border-white/5 flex items-center gap-1.5"
+              >
+                <Flag size={13} />
+                <span>گزارش خرابی</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Actual HTML Image Element */}
+      <div className={`relative w-full overflow-hidden select-none ${status === 'loaded' ? 'block' : 'hidden'}`}>
+        <img 
+          src={currentSrc} 
+          alt={`Page ${index + 1}`} 
+          onLoad={handleLoad}
+          onError={handleError}
+          loading={index < 4 ? 'eager' : 'lazy'}
+          className="object-contain block w-full mx-auto select-none pointer-events-none transition-opacity duration-300"
+          referrerPolicy="no-referrer"
+        />
+        {/* Anti-copy copyright shield */}
+        <div 
+          className="absolute inset-0 z-20 cursor-default select-none bg-transparent"
+          onContextMenu={(e) => e.preventDefault()}
+          onDragStart={(e) => e.preventDefault()}
+          style={{ userSelect: 'none', WebkitUserSelect: 'none', pointerEvents: 'auto' }}
+        />
+      </div>
+    </div>
+  );
 }
 
 export default function Reader() {
@@ -90,11 +232,6 @@ export default function Reader() {
   const [checkingPurchase, setCheckingPurchase] = useState<boolean>(true);
   const [purchasing, setPurchasing] = useState<boolean>(false);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
-
-  // States for Sequential Image Loading Engine
-  const [activeQueueIndex, setActiveQueueIndex] = useState<number>(0);
-  const [imageStates, setImageStates] = useState<Record<number, ImageQueueState>>({});
-  const [reportedHostErrors, setReportedHostErrors] = useState<Set<number>>(new Set());
 
   // Report Modal state
   const [showReportModal, setShowReportModal] = useState(false);
@@ -152,16 +289,28 @@ export default function Reader() {
     }
   };
 
-  // Reset loading queue and scroll position on chapter/series change
+  const handleBackToSeries = (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    const targetId = seriesId || series?.id || series?.slug;
+    if (targetId && targetId !== 'undefined') {
+      navigate(`/series/${targetId}`);
+    } else {
+      navigate('/');
+    }
+  };
+
+  const handleGoHome = (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    navigate('/');
+  };
+
+  // Reset scroll position and page index on chapter or series change
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' });
-    setActiveQueueIndex(0);
-    setImageStates({});
-    setReportedHostErrors(new Set());
     setActivePageIndex(0);
   }, [chapterId, seriesId]);
 
-  // Anti-Copy copyright protection shortcuts
+  // Anti-Copy copyright protection keyboard shortcuts
   useEffect(() => {
     const preventActions = (e: KeyboardEvent) => {
       if (
@@ -181,211 +330,6 @@ export default function Reader() {
     window.addEventListener('keydown', preventActions);
     return () => window.removeEventListener('keydown', preventActions);
   }, []);
-
-  // Strict Sequential Loading Controller
-  // Images MUST load in top-to-bottom sequence 0, 1, 2, ...
-  // It ignores user fast scrolling and never skips ahead to load future images before current completes.
-  useEffect(() => {
-    if (!sortedImages || sortedImages.length === 0 || !isPurchased) return;
-    if (activeQueueIndex < 0 || activeQueueIndex >= sortedImages.length) return;
-
-    const currentIndex = activeQueueIndex;
-    const imageUrl = sortedImages[currentIndex];
-
-    // If current index is already loaded, move to next
-    if (imageStates[currentIndex]?.status === 'loaded') {
-      if (activeQueueIndex < sortedImages.length - 1) {
-        setActiveQueueIndex(prev => prev + 1);
-      }
-      return;
-    }
-
-    // If current index is in error state, pause sequence until user retries or skips
-    if (
-      imageStates[currentIndex]?.status === 'error_network' || 
-      imageStates[currentIndex]?.status === 'error_host'
-    ) {
-      return;
-    }
-
-    let isCancelled = false;
-    let timerId: any = null;
-    let elapsed = imageStates[currentIndex]?.elapsedSeconds || 0;
-    let retries = imageStates[currentIndex]?.retryCount || 0;
-
-    setImageStates(prev => ({
-      ...prev,
-      [currentIndex]: {
-        status: retries > 0 ? 'retrying' : 'loading',
-        retryCount: retries,
-        elapsedSeconds: elapsed
-      }
-    }));
-
-    // Ticking timer every 1 sec
-    timerId = setInterval(() => {
-      if (isCancelled) return;
-      elapsed += 1;
-
-      setImageStates(prev => {
-        const cur = prev[currentIndex];
-        if (!cur || cur.status === 'loaded') return prev;
-        return {
-          ...prev,
-          [currentIndex]: {
-            ...cur,
-            elapsedSeconds: elapsed
-          }
-        };
-      });
-
-      if (elapsed >= 20) {
-        clearInterval(timerId);
-        diagnoseAndHandleError(currentIndex, imageUrl);
-      }
-    }, 1000);
-
-    // Diagnosis function when 20s timeout or image load failure occurs
-    const diagnoseAndHandleError = async (idx: number, url: string) => {
-      if (isCancelled) return;
-      let isNetErr = false;
-
-      if (!navigator.onLine) {
-        isNetErr = true;
-      } else {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3000);
-          const res = await fetch(`/api/health?t=${Date.now()}`, {
-            method: 'HEAD',
-            cache: 'no-store',
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
-          if (!res.ok) isNetErr = true;
-        } catch (e) {
-          isNetErr = true;
-        }
-      }
-
-      if (isCancelled) return;
-
-      if (isNetErr) {
-        setImageStates(prev => ({
-          ...prev,
-          [idx]: { status: 'error_network', retryCount: 3, elapsedSeconds: 20 }
-        }));
-      } else {
-        // Host / Server Error!
-        setImageStates(prev => ({
-          ...prev,
-          [idx]: { status: 'error_host', retryCount: 3, elapsedSeconds: 20 }
-        }));
-
-        // Send auto-report to SuperAdmin panel if not already reported in this session
-        if (!reportedHostErrors.has(idx)) {
-          setReportedHostErrors(prev => new Set(prev).add(idx));
-          const uid = user?.uid || localStorage.getItem('asura_user_id') || 'guest';
-          const userName = dbUser?.displayName || user?.displayName || user?.email || 'کاربر میهمان';
-          const title = `🚨 [خطای خودمختار هاست] عدم بارگذاری تصویر ${idx + 1} در چپتر ${chapter?.number || ''}`;
-          const content = 
-            `گزارش سیستم به طور خودکار ثبت شد:\n` +
-            `عنوان اثر: ${series?.title || ''} (شناسه: ${series?.id || ''})\n` +
-            `چپتر: ${chapter?.number || ''} (شناسه: ${chapter?.id || ''})\n` +
-            `شماره تصویر: ${idx + 1} از ${sortedImages.length}\n` +
-            `آدرس فایل تصویر: ${url}\n` +
-            `اطلاعات کاربر: ${userName} (شناسه: ${uid})\n` +
-            `مرورگر/دستگاه: ${navigator.userAgent}\n` +
-            `زمان گزارش: ${new Date().toLocaleString('fa-IR')}`;
-
-          apiClient.submitReport({
-            id: `host-err-${series?.id}-${chapter?.id}-img${idx + 1}-${Date.now()}`,
-            userId: uid,
-            userName: userName,
-            title,
-            content
-          }).catch(err => console.error("Auto host report failed:", err));
-        }
-      }
-    };
-
-    const startImageFetch = (currentRetry: number) => {
-      if (isCancelled) return;
-
-      const img = new Image();
-      const fetchUrl = currentRetry > 0 
-        ? `${imageUrl}${imageUrl.includes('?') ? '&' : '?'}retry=${Date.now()}`
-        : imageUrl;
-
-      img.onload = () => {
-        if (isCancelled) return;
-        clearInterval(timerId);
-        setImageStates(prev => ({
-          ...prev,
-          [currentIndex]: { status: 'loaded', retryCount: currentRetry, elapsedSeconds: elapsed }
-        }));
-        // Move queue to next image!
-        setActiveQueueIndex(prev => prev + 1);
-      };
-
-      img.onerror = () => {
-        if (isCancelled) return;
-        if (elapsed < 20 && currentRetry < 3) {
-          setTimeout(() => {
-            if (!isCancelled && elapsed < 20) {
-              const nextR = currentRetry + 1;
-              setImageStates(prev => ({
-                ...prev,
-                [currentIndex]: {
-                  ...prev[currentIndex],
-                  status: 'retrying',
-                  retryCount: nextR
-                }
-              }));
-              startImageFetch(nextR);
-            }
-          }, 1500);
-        } else {
-          clearInterval(timerId);
-          diagnoseAndHandleError(currentIndex, imageUrl);
-        }
-      };
-
-      img.src = fetchUrl;
-    };
-
-    startImageFetch(retries);
-
-    return () => {
-      isCancelled = true;
-      if (timerId) clearInterval(timerId);
-    };
-  }, [activeQueueIndex, sortedImages, isPurchased]);
-
-  // Adjust active queue index when user changes page in single/double mode
-  useEffect(() => {
-    if (readingMode !== 'vertical' && activePageIndex >= 0) {
-      if (activeQueueIndex < activePageIndex) {
-        setActiveQueueIndex(activePageIndex);
-      }
-    }
-  }, [activePageIndex, readingMode]);
-
-  const handleManualRetry = (idx: number) => {
-    setImageStates(prev => ({
-      ...prev,
-      [idx]: { status: 'loading', retryCount: 0, elapsedSeconds: 0 }
-    }));
-    setActiveQueueIndex(idx);
-  };
-
-  const handleSkipImage = (idx: number) => {
-    setImageStates(prev => ({
-      ...prev,
-      [idx]: { status: 'error_host', retryCount: 3, elapsedSeconds: 20 }
-    }));
-    setActiveQueueIndex(idx + 1);
-  };
 
   const handleReportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -550,13 +494,17 @@ export default function Reader() {
   useEffect(() => {
     if (seriesId && chapterId && chapter && isPurchased) {
       updateHistory(seriesId, chapterId, chapter.number);
-      apiClient.incrementSeriesViews(seriesId)
-        .catch(err => console.error("Error incrementing series views:", err));
 
-      apiClient.incrementChapterViews(seriesId, chapterId)
-        .catch(err => console.error("Error incrementing chapter views:", err));
+      // Deduplicated view increment per chapter per user session
+      const viewedKey = `viewed_chap_${seriesId}_${chapterId}`;
+      const alreadyViewedLocally = localStorage.getItem(viewedKey);
+      if (!alreadyViewedLocally) {
+        localStorage.setItem(viewedKey, '1');
+        apiClient.incrementChapterViews(seriesId, chapterId, user?.uid)
+          .catch(err => console.error("Error incrementing chapter views:", err));
+      }
     }
-  }, [seriesId, chapterId, chapter?.number, updateHistory, isPurchased]);
+  }, [seriesId, chapterId, chapter?.number, updateHistory, isPurchased, user?.uid]);
 
   if (seriesLoading || (user && checkingPurchase)) {
     return <ReaderSkeleton />;
@@ -564,8 +512,32 @@ export default function Reader() {
 
   if (!series || !series.chapters || !chapter) {
     return (
-      <div className="bg-[#0a0a0c] min-h-screen text-zinc-300 flex justify-center items-center font-sans" dir="rtl">
-        چپتر مورد نظر یافت نشد
+      <div className="bg-[#0a0a0c] min-h-screen text-zinc-300 flex items-center justify-center p-4 font-sans" dir="rtl">
+        <div className="max-w-md w-full bg-[#111217] border border-white/10 rounded-2xl p-8 text-center shadow-2xl">
+          <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle size={32} />
+          </div>
+          <h2 className="text-lg font-black text-white mb-2">این صفحه یا چپتر یافت نشد</h2>
+          <p className="text-xs text-zinc-400 mb-6 leading-relaxed">
+            ممکن است این چپتر وجود نداشته باشد یا آدرس ورودی نامعتبر باشد.
+          </p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={handleBackToSeries}
+              className="flex-1 py-2.5 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2"
+            >
+              <ChevronRight size={16} />
+              بازگشت به مانهوا
+            </button>
+            <button
+              onClick={handleGoHome}
+              className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 border border-white/5"
+            >
+              <Home size={16} />
+              صفحه اصلی
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -669,113 +641,9 @@ export default function Reader() {
     );
   }
 
-  // Render individual page component based on image state
-  const renderSingleImageBlock = (img: string, i: number) => {
-    const state = imageStates[i];
-    const isLoaded = state?.status === 'loaded';
-    const isLoading = i === activeQueueIndex && (state?.status === 'loading' || state?.status === 'retrying');
-    const isNetError = state?.status === 'error_network';
-    const isHostError = state?.status === 'error_host';
-
-    return (
-      <div 
-        key={i} 
-        data-index={i} 
-        className="reader-image-wrapper w-full relative flex justify-center items-center"
-        style={{ minHeight: isLoaded ? 'auto' : '350px' }}
-      >
-        {isLoaded && (
-          <div className="relative w-full overflow-hidden select-none">
-            <img 
-              src={img} 
-              alt={`Page ${i + 1}`} 
-              className="object-contain block w-full mx-auto select-none pointer-events-none transition-opacity duration-300"
-              referrerPolicy="no-referrer"
-            />
-            <div 
-              className="absolute inset-0 z-20 cursor-default select-none bg-transparent"
-              onContextMenu={(e) => e.preventDefault()}
-              onDragStart={(e) => e.preventDefault()}
-              style={{ userSelect: 'none', WebkitUserSelect: 'none', pointerEvents: 'auto' }}
-            />
-          </div>
-        )}
-
-        {isLoading && (
-          <div className="w-full flex flex-col items-center justify-center bg-[#111217]/80 backdrop-blur border border-white/5 rounded-2xl py-12 px-6 min-h-[350px] shadow-xl animate-fade-in" dir="rtl">
-            <div className="w-12 h-12 border-4 border-zinc-800 border-t-[var(--color-asura-accent)] rounded-full animate-spin mb-4"></div>
-            <p className="text-white text-xs font-black mb-1.5 font-sans">
-              در حال دریافت و بارگذاری تصویر {(i + 1).toLocaleString('fa-IR')} از {sortedImages.length.toLocaleString('fa-IR')}...
-            </p>
-            <div className="flex items-center gap-2 text-[11px] text-zinc-400 font-bold bg-black/40 px-3.5 py-1 rounded-full border border-white/5">
-              <span>صفحه {i + 1}</span>
-              <span>•</span>
-              <span>{state?.status === 'retrying' ? `تلاش ${state.retryCount} از ۳` : 'در حال ارتباط با سرور'}</span>
-              <span>•</span>
-              <span className="text-amber-400 font-mono">{state?.elapsedSeconds || 0}s / 20s</span>
-            </div>
-          </div>
-        )}
-
-        {isNetError && (
-          <div className="w-full flex flex-col items-center justify-center bg-amber-500/10 border border-amber-500/30 rounded-2xl p-8 min-h-[320px] text-center shadow-xl animate-fade-in" dir="rtl">
-            <div className="w-14 h-14 bg-amber-500/20 border border-amber-500/30 rounded-2xl flex items-center justify-center text-amber-400 mb-4 shadow-inner">
-              <AlertTriangle size={28} />
-            </div>
-            <h3 className="text-sm font-black text-amber-300 mb-2 font-sans">اتصال اینترنت شما ضعیف یا قطع می‌باشد</h3>
-            <p className="text-xs text-zinc-300 max-w-md leading-relaxed mb-6 font-medium">
-              تصویر شماره <strong className="text-white font-bold">{(i + 1).toLocaleString('fa-IR')}</strong> پس از ۲۰ ثانیه تلاش بارگذاری نشد. لطفا وضعیت اینترنت خود را بررسی کرده و مجددا تلاش کنید.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <button
-                onClick={() => handleManualRetry(i)}
-                className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-black font-black text-xs rounded-xl transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2"
-              >
-                تلاش مجدد (Retry)
-              </button>
-              <button
-                onClick={() => handleSkipImage(i)}
-                className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white font-bold text-xs rounded-xl transition-all border border-white/5"
-              >
-                رد شدن و بارگذاری تصویر بعدی
-              </button>
-            </div>
-          </div>
-        )}
-
-        {isHostError && (
-          <div className="w-full flex flex-col items-center justify-center bg-red-500/10 border border-red-500/30 rounded-2xl p-8 min-h-[320px] text-center shadow-xl animate-fade-in" dir="rtl">
-            <div className="w-14 h-14 bg-red-500/20 border border-red-500/30 rounded-2xl flex items-center justify-center text-red-400 mb-4 shadow-inner">
-              <Flag size={28} />
-            </div>
-            <h3 className="text-sm font-black text-red-400 mb-2 font-sans">خطا در دریافت تصویر از سرور هاست</h3>
-            <p className="text-xs text-zinc-300 max-w-md leading-relaxed mb-6 font-medium">
-              فایل تصویر شماره <strong className="text-white font-bold">{(i + 1).toLocaleString('fa-IR')}</strong> روی سرور هاست قابل دسترس نیست. این اشکال به طور خودکار به مدیریت گزارش داده شد.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <button
-                onClick={() => handleManualRetry(i)}
-                className="px-5 py-2.5 bg-red-500 hover:bg-red-600 text-white font-black text-xs rounded-xl transition-all shadow-lg shadow-red-500/20 flex items-center gap-2"
-              >
-                تلاش مجدد بارگذاری
-              </button>
-              <button
-                onClick={() => handleSkipImage(i)}
-                className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white font-bold text-xs rounded-xl transition-all border border-white/5"
-              >
-                رد شدن و بارگذاری تصویر بعدی
-              </button>
-            </div>
-          </div>
-        )}
-
-        {!isLoaded && !isLoading && !isNetError && !isHostError && (
-          <div className="w-full flex items-center justify-center bg-[#111217]/40 border border-white/5 rounded-2xl py-8 px-4 text-zinc-500 text-xs font-bold font-sans">
-            صفحه {(i + 1).toLocaleString('fa-IR')} - در انتظار بارگذاری صفحات قبل...
-          </div>
-        )}
-      </div>
-    );
+  const handleOpenReportForPage = (pageNum: number) => {
+    setReportPageNum(`صفحه ${pageNum}`);
+    setShowReportModal(true);
   };
 
   return (
@@ -790,13 +658,14 @@ export default function Reader() {
       {/* Top Navbar */}
       <div className={`fixed top-0 left-0 right-0 bg-[#0f0f12] border-b border-white/5 z-50 transition-transform duration-300 ${showNav ? 'translate-y-0' : '-translate-y-full'}`}>
         <div className="max-w-4xl mx-auto px-4 h-12 flex items-center justify-between">
-          <Link 
-            to={`/series/${series?.id}`} 
-            className="flex items-center gap-2 hover:text-white transition-colors text-sm font-bold truncate shrink-0 max-w-[40%]"
+          <button 
+            onClick={handleBackToSeries} 
+            className="flex items-center gap-1.5 text-zinc-200 hover:text-white transition-colors text-xs sm:text-sm font-bold truncate shrink-0 max-w-[55%] bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded-lg border border-white/5"
+            title="بازگشت به صفحه مانهوا"
           >
-            <ChevronLeft size={16} />
-            <span className="hidden sm:inline truncate">{series?.title}</span>
-          </Link>
+            <ChevronRight size={18} className="shrink-0 text-amber-400" />
+            <span className="truncate">{series?.title || 'بازگشت به اثر'}</span>
+          </button>
           
           <div className="flex-1 flex justify-center">
             <div className="font-bold text-white bg-white/10 px-3 py-1 rounded text-xs tracking-widest uppercase font-sans">
@@ -806,7 +675,10 @@ export default function Reader() {
 
           <div className="flex items-center gap-3 shrink-0">
             <button
-              onClick={() => setShowReportModal(true)}
+              onClick={() => {
+                setReportPageNum('');
+                setShowReportModal(true);
+              }}
               className="flex items-center gap-1 px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg text-xs font-bold transition-colors"
               title="گزارش خراب بودن تصاویر"
             >
@@ -820,12 +692,13 @@ export default function Reader() {
             >
               <SettingsIcon size={18} />
             </button>
-            <Link 
-              to="/" 
-              className="hover:text-white transition-colors text-zinc-500"
+            <button 
+              onClick={handleGoHome} 
+              className="hover:text-white transition-colors text-zinc-400 p-1.5 rounded-lg hover:bg-white/10 border border-transparent hover:border-white/10"
+              title="صفحه اصلی وبسایت"
             >
               <Home size={18} />
-            </Link>
+            </button>
           </div>
         </div>
 
@@ -939,7 +812,7 @@ export default function Reader() {
         )}
       </div>
 
-      {/* Reader Main Content */}
+      {/* Reader Main Content Area */}
       <div className="pt-4 pb-16 max-w-[800px] mx-auto flex flex-col relative w-full bg-black/20">
         <style>{`
           @media print {
@@ -958,21 +831,45 @@ export default function Reader() {
 
         {sortedImages && sortedImages.length > 0 ? (
           <div className="w-full flex flex-col items-center">
+            {/* Vertical Mode (Webtoon) */}
             {readingMode === 'vertical' && (
               <div 
                  className="flex flex-col justify-center items-center w-full"
                  style={{ gap: `${imageGap}px` }}
               >
-                {sortedImages.map((img, i) => renderSingleImageBlock(img, i))}
+                {sortedImages.map((img, i) => (
+                  <MangaImage
+                    key={`${seriesId}-${chapterId}-${i}-${img}`}
+                    src={img}
+                    index={i}
+                    totalImages={sortedImages.length}
+                    onReportRequest={handleOpenReportForPage}
+                    seriesId={series?.id}
+                    chapterId={chapter?.id}
+                    chapterNumber={chapter?.number}
+                    seriesTitle={series?.title}
+                  />
+                ))}
               </div>
             )}
 
+            {/* Single Page Mode */}
             {readingMode === 'single' && (
               <div className="w-full flex flex-col items-center relative group min-h-[500px] justify-center">
                 <div className="relative max-w-full flex justify-center items-center select-none w-full" style={{ minHeight: '500px' }}>
-                  {renderSingleImageBlock(sortedImages[activePageIndex], activePageIndex)}
+                  <MangaImage
+                    key={`${seriesId}-${chapterId}-${activePageIndex}-${sortedImages[activePageIndex]}`}
+                    src={sortedImages[activePageIndex]}
+                    index={activePageIndex}
+                    totalImages={sortedImages.length}
+                    onReportRequest={handleOpenReportForPage}
+                    seriesId={series?.id}
+                    chapterId={chapter?.id}
+                    chapterNumber={chapter?.number}
+                    seriesTitle={series?.title}
+                  />
                   
-                  {/* Absolute Nav Click Targets */}
+                  {/* Left / Right Nav Click Targets */}
                   <div 
                     onClick={prevPage}
                     className="absolute right-0 top-0 bottom-0 w-1/4 cursor-pointer flex items-center justify-start p-4 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-r from-black/40 to-transparent z-30"
@@ -995,6 +892,7 @@ export default function Reader() {
               </div>
             )}
 
+            {/* Double Page Mode */}
             {readingMode === 'double' && (
               <div className="w-full flex flex-col items-center relative group min-h-[500px] justify-center">
                 <div className="grid grid-cols-2 gap-4 w-full select-none justify-items-center relative" style={{ minHeight: '500px' }}>
@@ -1002,7 +900,17 @@ export default function Reader() {
                   {/* Right hand side: page activePageIndex + 1 (manga RTL) */}
                   {activePageIndex + 1 < sortedImages.length ? (
                     <div className="relative w-full flex justify-center items-center min-h-[500px] overflow-hidden rounded-xl">
-                      {renderSingleImageBlock(sortedImages[activePageIndex + 1], activePageIndex + 1)}
+                      <MangaImage
+                        key={`${seriesId}-${chapterId}-${activePageIndex + 1}-${sortedImages[activePageIndex + 1]}`}
+                        src={sortedImages[activePageIndex + 1]}
+                        index={activePageIndex + 1}
+                        totalImages={sortedImages.length}
+                        onReportRequest={handleOpenReportForPage}
+                        seriesId={series?.id}
+                        chapterId={chapter?.id}
+                        chapterNumber={chapter?.number}
+                        seriesTitle={series?.title}
+                      />
                     </div>
                   ) : (
                     <div className="max-h-[85vh] aspect-[2/3] w-full flex flex-col items-center justify-center bg-[#111217]/30 rounded-xl border border-white/5 text-zinc-600 text-xs font-black p-4 text-center">
@@ -1012,7 +920,17 @@ export default function Reader() {
 
                   {/* Left hand side: page activePageIndex */}
                   <div className="relative w-full flex justify-center items-center min-h-[500px] overflow-hidden rounded-xl">
-                    {renderSingleImageBlock(sortedImages[activePageIndex], activePageIndex)}
+                    <MangaImage
+                      key={`${seriesId}-${chapterId}-${activePageIndex}-${sortedImages[activePageIndex]}`}
+                      src={sortedImages[activePageIndex]}
+                      index={activePageIndex}
+                      totalImages={sortedImages.length}
+                      onReportRequest={handleOpenReportForPage}
+                      seriesId={series?.id}
+                      chapterId={chapter?.id}
+                      chapterNumber={chapter?.number}
+                      seriesTitle={series?.title}
+                    />
                   </div>
                 </div>
 
@@ -1067,10 +985,13 @@ export default function Reader() {
               </button>
             )}
 
-            <Link to={`/series/${series.id}`} className="w-full sm:w-auto px-6 py-2.5 bg-white/5 hover:bg-white/10 border border-white/5 text-white rounded-lg font-bold text-sm uppercase flex items-center justify-center gap-2 transition-colors">
+            <button 
+              onClick={handleBackToSeries} 
+              className="w-full sm:w-auto px-6 py-2.5 bg-white/5 hover:bg-white/10 border border-white/5 text-white rounded-lg font-bold text-sm uppercase flex items-center justify-center gap-2 transition-colors"
+            >
               <Menu size={16} />
-              Index
-            </Link>
+              صفحه مانهوا
+            </button>
 
             {nextChapter ? (
               <Link to={`/reader/${series.id}/${nextChapter.id}`} className="w-full sm:w-auto px-6 py-2.5 bg-white text-black hover:bg-zinc-200 rounded-lg font-bold text-sm uppercase flex items-center justify-center gap-2 transition-colors shadow">

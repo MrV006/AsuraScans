@@ -194,16 +194,13 @@ export default function Admin() {
     if (dailyViews && dailyViews.length > 0) {
       return dailyViews;
     }
-    // Fallback if not loaded
-    const totalViews = seriesList.reduce((acc, curr) => acc + (curr.views || 0), 0);
-    const distribution = [0.12, 0.14, 0.13, 0.15, 0.14, 0.16, 0.16];
     return Array.from({ length: 7 }).map((_, i) => ({
       name: new Date(
         Date.now() - (6 - i) * 24 * 60 * 60 * 1000,
-      ).toLocaleDateString("en-US", { weekday: "short" }),
-      views: Math.floor(totalViews * distribution[i]),
+      ).toLocaleDateString("fa-IR", { weekday: "short" }),
+      views: 0,
     }));
-  }, [dailyViews, seriesList]);
+  }, [dailyViews]);
 
   // activeTab
   const [activeTab, setActiveTab] = useState<

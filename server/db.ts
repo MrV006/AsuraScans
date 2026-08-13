@@ -223,6 +223,7 @@ class DatabaseManager {
     settlement_requests: any[];
     tickets: Ticket[];
     ticket_messages: TicketMessage[];
+    chapter_views_log: any[];
   } = {
     series: [],
     chapters: [],
@@ -238,6 +239,7 @@ class DatabaseManager {
     settlement_requests: [],
     tickets: [],
     ticket_messages: [],
+    chapter_views_log: [],
     settings: {
       global: {
         siteName: 'AsuraClone',
@@ -553,6 +555,14 @@ class DatabaseManager {
           content TEXT NOT NULL,
           attachments TEXT,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+        `CREATE TABLE IF NOT EXISTS chapter_views_log (
+          id VARCHAR(100) PRIMARY KEY,
+          userId VARCHAR(100) NOT NULL,
+          seriesId VARCHAR(100) NOT NULL,
+          chapterId VARCHAR(100) NOT NULL,
+          createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uniq_user_chap_view (userId, chapterId)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
       ];
 
@@ -1649,19 +1659,58 @@ class DatabaseManager {
     return true;
   }
 
-  async incrementChapterViews(seriesId: string, id: string): Promise<number> {
+  async incrementChapterViews(seriesId: string, id: string, userId?: string): Promise<number> {
+    const effectiveUserId = userId || 'anon_visitor';
+
     if (this.isUsingMySQL && this.pool) {
-      await this.pool.execute('UPDATE chapters SET views = views + 1 WHERE seriesId = ? AND id = ?', [seriesId, id]);
+      try {
+        const [rows] = await this.pool.execute(
+          'SELECT id FROM chapter_views_log WHERE userId = ? AND chapterId = ?',
+          [effectiveUserId, id]
+        );
+        const alreadyViewed = (rows as any[]).length > 0;
+
+        if (!alreadyViewed) {
+          const logId = `cv_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+          await this.pool.execute(
+            'INSERT IGNORE INTO chapter_views_log (id, userId, seriesId, chapterId) VALUES (?, ?, ?, ?)',
+            [logId, effectiveUserId, seriesId, id]
+          );
+          await this.pool.execute('UPDATE chapters SET views = views + 1 WHERE seriesId = ? AND id = ?', [seriesId, id]);
+          await this.pool.execute('UPDATE series SET views = views + 1 WHERE id = ?', [seriesId]);
+        }
+      } catch (e) {
+        console.error("Error logging deduplicated view:", e);
+      }
       const ch = await this.getChapterById(seriesId, id);
       return ch ? ch.views : 0;
     }
-    const idx = this.localData.chapters.findIndex(c => c.seriesId === seriesId && c.id === id);
-    if (idx >= 0) {
-      this.localData.chapters[idx].views = (this.localData.chapters[idx].views || 0) + 1;
-      this.saveLocalData();
-      return this.localData.chapters[idx].views;
+
+    // Local Data Fallback
+    if (!this.localData.chapter_views_log) {
+      this.localData.chapter_views_log = [];
     }
-    return 0;
+    const exists = this.localData.chapter_views_log.some((l: any) => l.userId === effectiveUserId && l.chapterId === id);
+    if (!exists) {
+      this.localData.chapter_views_log.push({
+        id: `cv_${Date.now()}`,
+        userId: effectiveUserId,
+        seriesId,
+        chapterId: id,
+        createdAt: new Date().toISOString()
+      });
+      const idx = this.localData.chapters.findIndex(c => c.seriesId === seriesId && c.id === id);
+      if (idx >= 0) {
+        this.localData.chapters[idx].views = (this.localData.chapters[idx].views || 0) + 1;
+      }
+      const sIdx = this.localData.series.findIndex(s => s.id === seriesId);
+      if (sIdx >= 0) {
+        this.localData.series[sIdx].views = (this.localData.series[sIdx].views || 0) + 1;
+      }
+      this.saveLocalData();
+    }
+    const ch = await this.getChapterById(seriesId, id);
+    return ch ? ch.views : 0;
   }
 
   // -----------------------------------------------------------------
@@ -3501,7 +3550,8 @@ class DatabaseManager {
       purchased_chapters: Array.isArray(data.purchased_chapters) ? data.purchased_chapters : [],
       settlement_requests: Array.isArray(data.settlement_requests) ? data.settlement_requests : [],
       tickets: Array.isArray(data.tickets) ? data.tickets : [],
-      ticket_messages: Array.isArray(data.ticket_messages) ? data.ticket_messages : []
+      ticket_messages: Array.isArray(data.ticket_messages) ? data.ticket_messages : [],
+      chapter_views_log: Array.isArray(data.chapter_views_log) ? data.chapter_views_log : []
     };
 
     if (this.isUsingMySQL && this.pool) {
