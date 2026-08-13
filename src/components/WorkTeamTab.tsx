@@ -255,7 +255,10 @@ export default function WorkTeamTab({
         role: activeRole,
         fileUrl: submitFileUrl.trim(),
         note: combinedNote,
-        images: finalImages
+        images: finalImages,
+        isAlsoCleaner,
+        isAlsoEditor,
+        isAlsoTranslator
       });
 
       setSuccessMsg(`کار چپتر ${chapNum} با موفقیت ثبت شد و به همکاران اطلاع‌رسانی گردید.`);

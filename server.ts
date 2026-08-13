@@ -1412,12 +1412,43 @@ async function startServer() {
 
   app.post("/api/series/:seriesId/chapters/:id/submit", async (req, res) => {
     try {
-      const { userId, userName, role, fileUrl, note, images } = req.body;
+      const { userId, userName, role, fileUrl, note, images, isAlsoCleaner, isAlsoEditor, isAlsoTranslator } = req.body;
       const resolved = await resolveSeriesAndChapter(req.params.seriesId, req.params.id);
       const ch = await dbManager.getChapterById(resolved.seriesId, resolved.chapterId);
       if (!ch) return res.status(404).json({ error: "Chapter not found" });
 
+      const series = await dbManager.getSeriesById(resolved.seriesId);
+      if (!series) return res.status(404).json({ error: "Series not found" });
+
+      // Gating: verify that the user is an approved contributor or admin for this series
+      const isSeriesContrib = Array.isArray(series.contributors) && series.contributors.some(
+        (c: any) => c.userId === userId && (c.status === "approved" || !c.status)
+      );
+      const isSuper = userId === 'admin' || userId === 'Mr.V@admin.com';
+      if (!isSeriesContrib && !isSuper) {
+        // Also check if user has admin permission
+        const userObj = await dbManager.getUserById(userId);
+        const roles = userObj?.roles || [userObj?.role || 'user'];
+        const hasAdminRole = roles.includes('admin') || roles.includes('super_admin');
+        if (!hasAdminRole) {
+          return res.status(403).json({ error: "شما عضو تایید شده تیم تولید این اثر نیستید و اجازه ثبت کار ندارید." });
+        }
+      }
+
       const submissions = ch.submissions || [];
+
+      // Duplicate submission conflict check:
+      // If another submission exists for the exact same role by a DIFFERENT user, flag conflict or require admin resolution
+      const existingSameRoleSubmissions = submissions.filter(
+        (s: any) => s.role === role && s.userId && s.userId !== userId
+      );
+
+      if (existingSameRoleSubmissions.length > 0 && !isSuper) {
+        return res.status(409).json({
+          error: `تداخل ثبت: قبلاً برای بخش ${role === 'translator' ? 'ترجمه' : role === 'cleaner' ? 'کلین' : 'ادیت'} این چپتر فایلی توسط همکار دیگری ارسال شده است. جهت جلوگیری از تداخل، کار ثبت نشد تا توسط مدیریت کل تعیین تکلیف شود.`
+        });
+      }
+
       const newSubmission = {
         id: `sub-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
         userId,
@@ -1430,17 +1461,25 @@ async function startServer() {
       submissions.push(newSubmission);
       ch.submissions = submissions;
 
-      // Auto-record this user as the active contributor for this role on this chapter
-      if (role) {
-        if (!ch.contributors) ch.contributors = {};
-        if (!ch.contributors[role]) ch.contributors[role] = [];
-        if (!ch.contributors[role].includes(userId)) {
-          ch.contributors[role].push(userId);
+      // Auto-record this user as the active contributor for this role on this chapter (revenue attribution)
+      if (!ch.contributors) ch.contributors = {};
+
+      const rolesToAssign = [role];
+      if (isAlsoCleaner && !rolesToAssign.includes("cleaner")) rolesToAssign.push("cleaner");
+      if (isAlsoEditor && !rolesToAssign.includes("editor")) rolesToAssign.push("editor");
+      if (isAlsoTranslator && !rolesToAssign.includes("translator")) rolesToAssign.push("translator");
+
+      for (const r of rolesToAssign) {
+        if (r) {
+          if (!ch.contributors[r]) ch.contributors[r] = [];
+          if (!ch.contributors[r].includes(userId)) {
+            ch.contributors[r].push(userId);
+          }
         }
       }
 
       // If the editor is submitting final images, update chapter images and mark as private pending approval
-      if (role === "editor" && Array.isArray(images) && images.length > 0) {
+      if ((role === "editor" || isAlsoEditor) && Array.isArray(images) && images.length > 0) {
         ch.images = images;
         ch.isPending = true;
       }
@@ -1450,7 +1489,6 @@ async function startServer() {
 
       // Trigger real-time notifications for contributors & team members
       try {
-        const series = await dbManager.getSeriesById(saved.seriesId);
         if (series && Array.isArray(series.contributors)) {
           for (const contrib of series.contributors) {
             if (contrib.userId && contrib.userId !== userId) {

@@ -265,7 +265,13 @@ export default function Admin() {
     images: "",
     publishAt: "",
     sortMode: "natural",
+    contributors: {
+      translator: [] as string[],
+      cleaner: [] as string[],
+      editor: [] as string[],
+    }
   });
+  const [chapterUploadSearch, setChapterUploadSearch] = useState("");
 
   const fetchSeries = () => {
     apiClient.getSeries().then(data => {
@@ -692,6 +698,7 @@ export default function Admin() {
         images: imagesArray,
         publishAt: chapterForm.publishAt || null,
         sortMode: chapterForm.sortMode || "natural",
+        contributors: chapterForm.contributors,
       };
 
       await apiClient.saveChapter(chapterForm.seriesId, payload);
@@ -704,6 +711,11 @@ export default function Admin() {
         images: "",
         publishAt: "",
         sortMode: "natural",
+        contributors: {
+          translator: [],
+          cleaner: [],
+          editor: [],
+        },
       });
       fetchChapters();
     } catch (error: any) {
@@ -713,6 +725,7 @@ export default function Admin() {
 
   const handleEditChapterClick = (chapter: any) => {
     setEditingChapterId(chapter.id);
+    const existingContribs = chapter.contributors || {};
     setChapterForm({
       seriesId: chapter.seriesId,
       number: chapter.number.toString(),
@@ -720,6 +733,11 @@ export default function Admin() {
       images: chapter.images.join("\n"),
       publishAt: chapter.publishAt || "",
       sortMode: chapter.sortMode || "natural",
+      contributors: {
+        translator: Array.isArray(existingContribs.translator) ? existingContribs.translator : (existingContribs.translator ? [existingContribs.translator] : []),
+        cleaner: Array.isArray(existingContribs.cleaner) ? existingContribs.cleaner : (existingContribs.cleaner ? [existingContribs.cleaner] : []),
+        editor: Array.isArray(existingContribs.editor) ? existingContribs.editor : (existingContribs.editor ? [existingContribs.editor] : []),
+      }
     });
   };
 
@@ -2718,11 +2736,17 @@ export default function Admin() {
           )}
 
           {activeTab === "chapters" && showChapterTabs && (
-            <form onSubmit={handleAddChapter} className="space-y-6 max-w-3xl">
+            <form onSubmit={handleAddChapter} className="space-y-6 max-w-4xl">
               <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-4">
-                <h2 className="text-xl font-black text-white uppercase">
-                  {editingChapterId ? "Edit Chapter" : "Add Chapter"}
-                </h2>
+                <div>
+                  <h2 className="text-xl font-black text-white uppercase flex items-center gap-2">
+                    <BookOpen className="text-[var(--color-asura-accent)]" size={22} />
+                    {editingChapterId ? "ویرایش و به‌روزرسانی چپتر" : "آپلود و انتشار چپتر جدید"}
+                  </h2>
+                  <p className="text-xs text-zinc-400 mt-1">
+                    اثر مورد نظر را از گالری زیر جستجو و انتخاب کنید و دست‌اندرکاران این چپتر را مشخص نمایید.
+                  </p>
+                </div>
                 {editingChapterId && (
                   <button
                     type="button"
@@ -2733,43 +2757,274 @@ export default function Admin() {
                         number: "",
                         title: "",
                         images: "",
+                        publishAt: "",
                         sortMode: "natural",
+                        contributors: {
+                          translator: [],
+                          cleaner: [],
+                          editor: []
+                        }
                       });
                       setActiveTab("manage_chapters");
                     }}
-                    className="text-xs text-zinc-400 hover:text-white uppercase font-bold tracking-wider"
+                    className="text-xs text-zinc-400 hover:text-white uppercase font-bold tracking-wider px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg"
                   >
-                    Cancel Edit
+                    انصراف از ویرایش
                   </button>
                 )}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">
-                    Select Series
+
+              {/* Enhanced Visual Series Search & Selector */}
+              <div className="bg-black/30 border border-white/10 rounded-2xl p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <label className="text-xs font-black text-zinc-300 flex items-center gap-2">
+                    <Search size={15} className="text-[var(--color-asura-accent)]" />
+                    انتخاب اثر (جستجو میان مانگا و مانهواها)
                   </label>
-                  <select
-                    required
-                    value={chapterForm.seriesId}
-                    onChange={(e) =>
-                      setChapterForm({
-                        ...chapterForm,
-                        seriesId: e.target.value,
-                      })
-                    }
-                    className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-white"
-                  >
-                    <option value="">-- Choose Series --</option>
-                    {seriesList.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.title}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative flex-1 max-w-md">
+                    <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500" size={15} />
+                    <input
+                      type="text"
+                      value={chapterUploadSearch}
+                      onChange={(e) => setChapterUploadSearch(e.target.value)}
+                      placeholder="جستجوی نام اثر، نویسنده یا ژانر..."
+                      className="w-full bg-black/60 border border-white/10 rounded-xl pr-9 pl-4 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-[var(--color-asura-accent)]"
+                    />
+                    {chapterUploadSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setChapterUploadSearch("")}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white text-xs"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {/* Series Visual Cards Carousel / Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 max-h-72 overflow-y-auto p-1 custom-scrollbar">
+                  {seriesList
+                    .filter((s) => {
+                      if (!chapterUploadSearch.trim()) return true;
+                      const q = chapterUploadSearch.toLowerCase();
+                      return (
+                        s.title?.toLowerCase().includes(q) ||
+                        s.author?.toLowerCase().includes(q) ||
+                        s.artist?.toLowerCase().includes(q)
+                      );
+                    })
+                    .map((s) => {
+                      const isSelected = chapterForm.seriesId === s.id;
+                      return (
+                        <div
+                          key={s.id}
+                          onClick={() => {
+                            setChapterForm({
+                              ...chapterForm,
+                              seriesId: s.id,
+                            });
+                            setSelectedSeriesForChapters(s.id);
+                          }}
+                          className={`group relative rounded-xl border p-2 cursor-pointer transition-all flex flex-col items-center text-center ${
+                            isSelected
+                              ? "bg-[var(--color-asura-accent)]/15 border-[var(--color-asura-accent)] ring-2 ring-[var(--color-asura-accent)]/40 scale-[1.02]"
+                              : "bg-black/40 border-white/10 hover:border-white/20 hover:bg-black/60"
+                          }`}
+                        >
+                          <div className="relative w-full aspect-[3/4] rounded-lg overflow-hidden mb-2 bg-zinc-900">
+                            {s.cover ? (
+                              <img
+                                src={s.cover}
+                                alt={s.title}
+                                className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-zinc-600 text-xs font-bold">
+                                بدون کاور
+                              </div>
+                            )}
+                            {isSelected && (
+                              <div className="absolute inset-0 bg-[var(--color-asura-accent)]/30 backdrop-blur-[1px] flex items-center justify-center">
+                                <span className="bg-black/80 text-white rounded-full p-1 shadow-lg">
+                                  <CheckCircle size={18} className="text-[var(--color-asura-accent-light)]" />
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          <span className="text-[11px] font-bold text-white line-clamp-2 w-full leading-tight">
+                            {s.title}
+                          </span>
+                          <span className="text-[9px] text-zinc-500 mt-1">
+                            {s.type || "مانهوا"} • {s.status || "Ongoing"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+
+                {/* Current Selected Series Indicator */}
+                {chapterForm.seriesId ? (
+                  <div className="flex items-center justify-between p-3 bg-[var(--color-asura-accent)]/10 border border-[var(--color-asura-accent)]/30 rounded-xl">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-14 rounded-lg overflow-hidden bg-black flex-shrink-0 border border-white/10">
+                        {seriesList.find((s) => s.id === chapterForm.seriesId)?.cover && (
+                          <img
+                            src={seriesList.find((s) => s.id === chapterForm.seriesId)?.cover}
+                            alt=""
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        )}
+                      </div>
+                      <div>
+                        <div className="text-xs font-black text-white">
+                          {seriesList.find((s) => s.id === chapterForm.seriesId)?.title}
+                        </div>
+                        <div className="text-[10px] text-[var(--color-asura-accent-light)] font-bold mt-0.5">
+                          اثر با موفقیت انتخاب شد
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setChapterForm({ ...chapterForm, seriesId: "" })}
+                      className="text-xs text-zinc-400 hover:text-red-400 font-bold px-2 py-1 bg-white/5 rounded-lg border border-white/10"
+                    >
+                      تغییر اثر
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-xs text-amber-400 font-bold flex items-center gap-2 p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                    <AlertCircle size={15} />
+                    لطفاً یک اثر را از لیست بالا برای آپلود چپتر کلیک و انتخاب نمایید.
+                  </div>
+                )}
+              </div>
+
+              {/* Contributors Attribution for this Chapter */}
+              {chapterForm.seriesId && (
+                <div className="bg-black/30 border border-white/10 rounded-2xl p-5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-xs font-black text-white flex items-center gap-2">
+                        <Users size={16} className="text-[var(--color-asura-accent)]" />
+                        تعیین دست‌اندرکاران این چپتر (تقسیم عادلانه سود و درآمد)
+                      </h3>
+                      <p className="text-[10px] text-zinc-400 mt-0.5">
+                        سود فروش این چپتر مستقیماً به حساب کاربری اعضایی که در زیر مشخص می‌شوند واریز خواهد شد.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Translator Selector */}
+                    <div className="bg-black/40 border border-white/5 rounded-xl p-3.5 space-y-2">
+                      <label className="text-xs font-bold text-amber-400 block">
+                        مترجم (Translator)
+                      </label>
+                      <select
+                        value={chapterForm.contributors?.translator?.[0] || ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setChapterForm({
+                            ...chapterForm,
+                            contributors: {
+                              ...chapterForm.contributors,
+                              translator: val ? [val] : [],
+                            },
+                          });
+                        }}
+                        className="w-full bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
+                      >
+                        <option value="">-- بدون تعیین / پیش‌فرض اثر --</option>
+                        {usersList
+                          .filter((u) => {
+                            const r = u.roles || [u.role];
+                            return r.includes("translator") || r.includes("admin") || r.includes("super_admin") || isSuperAdmin;
+                          })
+                          .map((u) => (
+                            <option key={u.id || u.uid} value={u.id || u.uid}>
+                              {u.displayName || u.email} {u.melliCode ? `(${u.melliCode})` : ""}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    {/* Cleaner Selector */}
+                    <div className="bg-black/40 border border-white/5 rounded-xl p-3.5 space-y-2">
+                      <label className="text-xs font-bold text-blue-400 block">
+                        کلینر (Cleaner)
+                      </label>
+                      <select
+                        value={chapterForm.contributors?.cleaner?.[0] || ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setChapterForm({
+                            ...chapterForm,
+                            contributors: {
+                              ...chapterForm.contributors,
+                              cleaner: val ? [val] : [],
+                            },
+                          });
+                        }}
+                        className="w-full bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
+                      >
+                        <option value="">-- بدون تعیین / پیش‌فرض اثر --</option>
+                        {usersList
+                          .filter((u) => {
+                            const r = u.roles || [u.role];
+                            return r.includes("cleaner") || r.includes("admin") || r.includes("super_admin") || isSuperAdmin;
+                          })
+                          .map((u) => (
+                            <option key={u.id || u.uid} value={u.id || u.uid}>
+                              {u.displayName || u.email} {u.melliCode ? `(${u.melliCode})` : ""}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    {/* Editor Selector */}
+                    <div className="bg-black/40 border border-white/5 rounded-xl p-3.5 space-y-2">
+                      <label className="text-xs font-bold text-purple-400 block">
+                        ادیتور / تایپیست (Editor)
+                      </label>
+                      <select
+                        value={chapterForm.contributors?.editor?.[0] || ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setChapterForm({
+                            ...chapterForm,
+                            contributors: {
+                              ...chapterForm.contributors,
+                              editor: val ? [val] : [],
+                            },
+                          });
+                        }}
+                        className="w-full bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
+                      >
+                        <option value="">-- بدون تعیین / پیش‌فرض اثر --</option>
+                        {usersList
+                          .filter((u) => {
+                            const r = u.roles || [u.role];
+                            return r.includes("editor") || r.includes("admin") || r.includes("super_admin") || isSuperAdmin;
+                          })
+                          .map((u) => (
+                            <option key={u.id || u.uid} value={u.id || u.uid}>
+                              {u.displayName || u.email} {u.melliCode ? `(${u.melliCode})` : ""}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">
-                    Chapter Number
+                    شماره چپتر (Chapter Number)
                   </label>
                   <input
                     required
@@ -2784,7 +3039,7 @@ export default function Admin() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">
-                    Chapter Title (Optional)
+                    عنوان چپتر (اختیاری)
                   </label>
                   <input
                     value={chapterForm.title}
@@ -2796,7 +3051,7 @@ export default function Admin() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">
-                    Publish At (Optional)
+                    زمان انتشار (Publish At - اختیاری)
                   </label>
                   <input
                     type="datetime-local"
@@ -2830,7 +3085,7 @@ export default function Admin() {
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">
-                    Image URLs (One per line)
+                    آدرس و لینک مستقیم تصاویر چپتر (Image URLs - هر لینک در یک سطر)
                   </label>
                   <div className="flex flex-col gap-3">
                     <textarea
@@ -2848,7 +3103,7 @@ export default function Admin() {
                     />
                     <ImageUploader
                       multiple
-                      seriesTitle={seriesList.find((s: any) => s.id === selectedSeriesForChapters)?.title || ""}
+                      seriesTitle={seriesList.find((s: any) => s.id === (chapterForm.seriesId || selectedSeriesForChapters))?.title || ""}
                       chapterNumber={chapterForm.number}
                       onUpload={(urls) =>
                         setChapterForm({
@@ -2879,10 +3134,11 @@ export default function Admin() {
               </div>
               <button
                 type="submit"
-                className="px-8 py-3 flex items-center gap-2 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-bold text-sm uppercase rounded-lg shadow-lg"
+                disabled={!chapterForm.seriesId}
+                className="px-8 py-3 flex items-center gap-2 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] disabled:opacity-50 text-white font-bold text-sm uppercase rounded-lg shadow-lg cursor-pointer"
               >
                 <Plus size={18} />{" "}
-                {editingChapterId ? "Update Chapter" : "Publish Chapter"}
+                {editingChapterId ? "بروزرسانی چپتر" : "انتشار چپتر"}
               </button>
             </form>
           )}
