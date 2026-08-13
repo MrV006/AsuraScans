@@ -190,6 +190,7 @@ function ensureSchema($pdo) {
             views INT DEFAULT 0,
             isPending TINYINT(1) DEFAULT 0,
             submissions TEXT,
+            contributors TEXT,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
@@ -367,6 +368,20 @@ function ensureSchema($pdo) {
     // Migrate chapters table to add sortMode column if not exists
     try {
         $pdo->exec("ALTER TABLE chapters ADD COLUMN sortMode VARCHAR(50) DEFAULT 'natural'");
+    } catch (PDOException $e) {
+        // Ignored if column already exists
+    }
+
+    // Migrate chapters table to add contributors column if not exists
+    try {
+        $pdo->exec("ALTER TABLE chapters ADD COLUMN contributors TEXT");
+    } catch (PDOException $e) {
+        // Ignored if column already exists
+    }
+
+    // Migrate series table to add contributors column if not exists
+    try {
+        $pdo->exec("ALTER TABLE series ADD COLUMN contributors TEXT");
     } catch (PDOException $e) {
         // Ignored if column already exists
     }
@@ -2905,6 +2920,10 @@ if ($method === 'POST' && preg_match('/^\/series\/([^\/]+)\/chapters\/([^\/]+)\/
         if (!$ch) {
             sendResponse(["error" => "چپتر یافت نشد"], 404);
         }
+
+        try {
+            $pdo->exec("ALTER TABLE chapters ADD COLUMN contributors TEXT");
+        } catch (Exception $e) {}
 
         $upStmt = $pdo->prepare("UPDATE chapters SET contributors = ? WHERE id = ?");
         $upStmt->execute([json_encode($contributors, JSON_UNESCAPED_UNICODE), $chapterId]);
