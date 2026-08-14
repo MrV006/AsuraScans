@@ -20,7 +20,8 @@ import {
   BarChart2,
   UserCheck,
   UserPlus,
-  Trash2
+  Trash2,
+  DownloadCloud
 } from "lucide-react";
 import { Series, Chapter } from "../lib/types";
 import { apiClient } from "../lib/apiClient";
@@ -155,24 +156,11 @@ export default function WorkTeamTab({
     setUploadStatus("در حال بارگذاری فایل روی سرور...");
     setErrorMsg("");
 
-    const formData = new FormData();
-    for (let i = 0; i < files.length; i++) {
-      formData.append("files", files[i]);
-    }
-    if (series?.title) {
-      formData.append("seriesTitle", series.title);
-    }
-    if (selectedChapterNumber) {
-      formData.append("chapterNumber", selectedChapterNumber);
-    }
-    formData.append("folderType", "submissions");
-
     try {
-      const res = await apiClient.post("/api/admin/upload", formData, {
-        headers: {
-          'x-admin-uid': user?.uid,
-          'x-user-uid': user?.uid
-        }
+      const res = await apiClient.uploadImages(Array.from(files), user?.uid, {
+        seriesTitle: series?.title,
+        chapterNumber: selectedChapterNumber,
+        folderType: "submissions"
       });
 
       if (res && res.urls && res.urls.length > 0) {
@@ -192,7 +180,7 @@ export default function WorkTeamTab({
         }
       }
     } catch (e: any) {
-      setErrorMsg("بارگذاری فایل با خطا مواجه شد.");
+      setErrorMsg(e.message || "بارگذاری فایل با خطا مواجه شد.");
     } finally {
       setUploadingFile(false);
     }

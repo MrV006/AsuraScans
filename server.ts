@@ -1427,7 +1427,7 @@ async function startServer() {
       const isSuper = userId === 'admin' || userId === 'Mr.V@admin.com';
       if (!isSeriesContrib && !isSuper) {
         // Also check if user has admin permission
-        const userObj = await dbManager.getUserById(userId);
+        const userObj = await dbManager.getUser(userId);
         const roles = userObj?.roles || [userObj?.role || 'user'];
         const hasAdminRole = roles.includes('admin') || roles.includes('super_admin');
         if (!hasAdminRole) {

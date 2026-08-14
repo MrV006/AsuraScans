@@ -171,14 +171,25 @@ export const apiClient = {
         url += `?${queryStr}`;
       }
     }
-    const res = await fetch(url, { headers: this.getHeaders() });
-    return res.json();
+    try {
+      const res = await fetch(url, { headers: this.getHeaders() });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch (e) {
+      console.error("getSeries fetch error:", e);
+      return [];
+    }
   },
 
   async getSeriesById(id: string) {
-    const res = await fetch(`${API_URL}/api/series/${id}`, { headers: this.getHeaders() });
-    if (!res.ok) return null;
-    return res.json();
+    try {
+      const res = await fetch(`${API_URL}/api/series/${id}`, { headers: this.getHeaders() });
+      if (!res.ok) return null;
+      return res.json();
+    } catch {
+      return null;
+    }
   },
 
   async saveSeries(series: any) {
@@ -229,14 +240,24 @@ export const apiClient = {
 
   // CHAPTERS API
   async getChapters(seriesId: string) {
-    const res = await fetch(`${API_URL}/api/series/${seriesId}/chapters`, { headers: this.getHeaders() });
-    return res.json();
+    try {
+      const res = await fetch(`${API_URL}/api/series/${seriesId}/chapters`, { headers: this.getHeaders() });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
   },
 
   async getChapterById(seriesId: string, id: string) {
-    const res = await fetch(`${API_URL}/api/series/${seriesId}/chapters/${id}`, { headers: this.getHeaders() });
-    if (!res.ok) return null;
-    return res.json();
+    try {
+      const res = await fetch(`${API_URL}/api/series/${seriesId}/chapters/${id}`, { headers: this.getHeaders() });
+      if (!res.ok) return null;
+      return res.json();
+    } catch {
+      return null;
+    }
   },
 
   async saveChapter(seriesId: string, chapter: any) {
@@ -499,7 +520,7 @@ export const apiClient = {
     return res.json();
   },
 
-  async uploadImages(files: File[], uid: string, meta?: { seriesTitle?: string; chapterNumber?: string | number; folderType?: string }) {
+  async uploadImages(files: File[], uid?: string, meta?: { seriesTitle?: string; chapterNumber?: string | number; folderType?: string }) {
     const formData = new FormData();
     files.forEach(file => {
       formData.append('files', file);
@@ -520,6 +541,10 @@ export const apiClient = {
       },
       body: formData
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'خطا در آپلود فایل' }));
+      throw new Error(err.error || 'خطا در آپلود فایل.');
+    }
     return res.json();
   },
 

@@ -93,25 +93,41 @@ function MangaImage({
   const [retryCount, setRetryCount] = useState(0);
   const [currentSrc, setCurrentSrc] = useState(src);
   const [autoReported, setAutoReported] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   // Reset image state if primary src URL or reloadKey changes
   useEffect(() => {
+    if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0 && !reloadKey) {
+      setStatus('loaded');
+      return;
+    }
+    const separator = src.includes('?') ? '&' : '?';
+    const newSrc = reloadKey ? `${src}${separator}reload=${reloadKey}` : src;
+    setCurrentSrc(newSrc);
     setStatus('loading');
     setRetryCount(0);
-    const separator = src.includes('?') ? '&' : '?';
-    setCurrentSrc(reloadKey ? `${src}${separator}reload=${Date.now()}` : src);
     setAutoReported(false);
   }, [src, reloadKey]);
 
-  // Watchdog timer: If an image hangs in 'loading' state for too long on a slow/unstable connection (e.g. 9s),
-  // automatically trigger a soft refresh with cache-buster without stopping.
+  // Check on mount or src change if image is already cached/complete
   useEffect(() => {
-    if (status !== 'loading') return;
+    if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
+      setStatus('loaded');
+    }
+  }, [currentSrc]);
+
+  // Watchdog timer: If an image hangs in 'loading' state for too long on a slow/unstable connection
+  useEffect(() => {
+    if (status === 'loaded') return;
 
     const timeoutMs = Math.min(8000 + retryCount * 2500, 20000);
     const timer = setTimeout(() => {
+      if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
+        setStatus('loaded');
+        return;
+      }
       if (status === 'loading') {
-        if (retryCount < 6) {
+        if (retryCount < 5) {
           const nextRetry = retryCount + 1;
           setRetryCount(nextRetry);
           const separator = src.includes('?') ? '&' : '?';
@@ -130,11 +146,11 @@ function MangaImage({
   };
 
   const handleError = () => {
-    if (retryCount < 6) {
+    if (retryCount < 5) {
       const nextRetry = retryCount + 1;
       setRetryCount(nextRetry);
       const separator = src.includes('?') ? '&' : '?';
-      const delay = Math.min(1200 + retryCount * 800, 5000);
+      const delay = Math.min(1000 + retryCount * 800, 4000);
       setTimeout(() => {
         setCurrentSrc(`${src}${separator}retry=${Date.now()}`);
       }, delay);
@@ -149,7 +165,7 @@ function MangaImage({
           userId: uid,
           userName: 'سیستم خودمختار ریدر',
           title: `🚨 عدم بارگذاری تصویر ${index + 1} در چپتر ${chapterNumber || ''}`,
-          content: `تصویر شماره ${index + 1} از ${totalImages} در اثر "${seriesTitle || ''}" (چپتر ${chapterNumber || ''}) پس از ۶ بار تلاش بارگذاری نشد.\nآدرس تصویر: ${src}`
+          content: `تصویر شماره ${index + 1} از ${totalImages} در اثر "${seriesTitle || ''}" (چپتر ${chapterNumber || ''}) پس از ۵ بار تلاش بارگذاری نشد.\nآدرس تصویر: ${src}`
         }).catch(err => console.error("Auto report error:", err));
       }
     }
@@ -164,11 +180,11 @@ function MangaImage({
 
   return (
     <div 
-      className="reader-image-wrapper w-full relative flex flex-col justify-center items-center min-h-[300px]"
+      className="reader-image-wrapper w-full relative flex flex-col justify-center items-center min-h-[200px]"
     >
-      {/* Loading Placeholder Overlay (Does NOT use display:none on img wrapper) */}
+      {/* Loading Placeholder Overlay */}
       {status === 'loading' && (
-        <div className="w-full flex flex-col items-center justify-center bg-[#111217]/80 border border-white/5 rounded-2xl py-12 px-6 min-h-[320px] my-1 shadow-inner font-sans" dir="rtl">
+        <div className="w-full flex flex-col items-center justify-center bg-[#111217]/80 border border-white/5 rounded-2xl py-12 px-6 min-h-[300px] my-1 shadow-inner font-sans animate-fade-in" dir="rtl">
           <div className="relative mb-3">
             <div className="w-10 h-10 border-3 border-zinc-700 border-t-[var(--color-asura-accent)] rounded-full animate-spin"></div>
             <RefreshCw size={14} className="absolute inset-0 m-auto text-[var(--color-asura-accent)] animate-pulse" />
@@ -178,7 +194,7 @@ function MangaImage({
           </p>
           {retryCount > 0 ? (
             <p className="text-[11px] text-amber-400 font-bold bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-lg mt-2 animate-pulse">
-              اختلال اینترنت؛ تلاش مجدد خودکار ({retryCount.toLocaleString('fa-IR')} از ۶)...
+              اختلال اینترنت؛ تلاش مجدد خودکار ({retryCount.toLocaleString('fa-IR')} از ۵)...
             </p>
           ) : (
             <p className="text-[10px] text-zinc-500 font-medium">
@@ -187,7 +203,7 @@ function MangaImage({
           )}
           <button
             onClick={handleManualRetry}
-            className="mt-4 px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white font-bold text-[11px] rounded-xl border border-white/10 transition-all flex items-center gap-1.5"
+            className="mt-4 px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white font-bold text-[11px] rounded-xl border border-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
           >
             <RefreshCw size={12} />
             <span>بازخوانی فوری این تصویر</span>
@@ -197,7 +213,7 @@ function MangaImage({
 
       {/* Error Card for Failed Image */}
       {status === 'error' && (
-        <div className="w-full flex flex-col items-center justify-center bg-red-500/10 border border-red-500/25 rounded-2xl p-6 min-h-[280px] my-1 text-center shadow-xl font-sans" dir="rtl">
+        <div className="w-full flex flex-col items-center justify-center bg-red-500/10 border border-red-500/25 rounded-2xl p-6 min-h-[260px] my-1 text-center shadow-xl font-sans" dir="rtl">
           <div className="w-12 h-12 bg-red-500/20 border border-red-500/30 rounded-2xl flex items-center justify-center text-red-400 mb-3">
             <AlertTriangle size={24} />
           </div>
@@ -210,7 +226,7 @@ function MangaImage({
           <div className="flex flex-wrap items-center justify-center gap-2">
             <button
               onClick={handleManualRetry}
-              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-black text-xs rounded-xl transition-all shadow-md flex items-center gap-1.5"
+              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-black text-xs rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
             >
               <RefreshCw size={14} />
               <span>تلاش مجدد و بازخوانی تصویر</span>
@@ -218,7 +234,7 @@ function MangaImage({
             {onReportRequest && (
               <button
                 onClick={() => onReportRequest(index + 1)}
-                className="px-3.5 py-2 bg-white/10 hover:bg-white/15 text-zinc-300 font-bold text-xs rounded-xl transition-all border border-white/5 flex items-center gap-1.5"
+                className="px-3.5 py-2 bg-white/10 hover:bg-white/15 text-zinc-300 font-bold text-xs rounded-xl transition-all border border-white/5 flex items-center gap-1.5 cursor-pointer"
               >
                 <Flag size={13} />
                 <span>گزارش خرابی</span>
@@ -228,9 +244,10 @@ function MangaImage({
         </div>
       )}
 
-      {/* Actual HTML Image Element - KEPT VISIBLE IN DOM TREE AT ALL TIMES (Never hidden with display:none) */}
-      <div className={`relative w-full overflow-hidden select-none ${status === 'loaded' ? 'block' : 'opacity-0 h-0 pointer-events-none'}`}>
+      {/* Actual HTML Image Element */}
+      <div className={`relative w-full overflow-hidden select-none ${status === 'loaded' ? 'block' : 'hidden'}`}>
         <img 
+          ref={imgRef}
           src={currentSrc} 
           alt={`Page ${index + 1}`} 
           onLoad={handleLoad}
@@ -256,7 +273,7 @@ export default function Reader() {
   const navigate = useNavigate();
   const { seriesId, chapterId } = useParams();
   const { settings } = useSettings();
-  const { series, loading: seriesLoading } = useSeriesOverview(seriesId);
+  const { series, loading: seriesLoading, mutate: mutateSeries } = useSeriesOverview(seriesId);
   const { updateHistory } = useHistory();
   const { user, profile, isSimulatingUser, setShowSetupModal } = useAuth();
   
@@ -267,6 +284,9 @@ export default function Reader() {
   const [readingMode, setReadingMode] = useState<'vertical' | 'single' | 'double'>('vertical');
   const [activePageIndex, setActivePageIndex] = useState<number>(0);
   const [globalReloadKey, setGlobalReloadKey] = useState<number>(0);
+
+  const [directChapter, setDirectChapter] = useState<Chapter | null>(null);
+  const [directLoading, setDirectLoading] = useState(true);
 
   const [dbUser, setDbUser] = useState<any>(null);
   const [isPurchased, setIsPurchased] = useState<boolean>(false);
@@ -282,6 +302,26 @@ export default function Reader() {
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [reportMsg, setReportMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Direct fetch chapter for fast resilience on refresh or direct link
+  const fetchDirectChapter = async () => {
+    if (!seriesId || !chapterId) return;
+    try {
+      setDirectLoading(true);
+      const ch = await apiClient.getChapterById(seriesId, chapterId);
+      if (ch) {
+        setDirectChapter(ch);
+      }
+    } catch (err) {
+      console.error("Direct chapter fetch error:", err);
+    } finally {
+      setDirectLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDirectChapter();
+  }, [seriesId, chapterId]);
+
   const chapterIdx = series?.chapters ? series.chapters.findIndex(c => {
     if (c.id === chapterId) return true;
     const match = chapterId?.match(/chapter-(\d+(\.\d+)?)/) || chapterId?.match(/^(\d+(\.\d+)?)$/);
@@ -291,7 +331,9 @@ export default function Reader() {
     }
     return false;
   }) : -1;
-  const chapter = chapterIdx >= 0 && series?.chapters ? series.chapters[chapterIdx] : (series?.chapters ? series.chapters[0] : null);
+  const chapter = (chapterIdx >= 0 && series?.chapters) 
+    ? series.chapters[chapterIdx] 
+    : (directChapter || (series?.chapters && series.chapters.length > 0 ? series.chapters[0] : null));
   
   // Apply natural sorting unless sortMode is set to 'input'
   const sortedImages = chapter?.images 
@@ -547,11 +589,11 @@ export default function Reader() {
     }
   }, [seriesId, chapterId, chapter?.number, updateHistory, isPurchased, user?.uid]);
 
-  if (seriesLoading || (user && checkingPurchase)) {
+  if ((seriesLoading && directLoading && !chapter) || (user && checkingPurchase)) {
     return <ReaderSkeleton />;
   }
 
-  if (!series || !series.chapters || !chapter) {
+  if (!chapter) {
     return (
       <div className="bg-[#0a0a0c] min-h-screen text-zinc-300 flex items-center justify-center p-4 font-sans" dir="rtl">
         <div className="max-w-md w-full bg-[#111217] border border-white/10 rounded-2xl p-8 text-center shadow-2xl">
@@ -565,14 +607,14 @@ export default function Reader() {
           <div className="flex gap-3 justify-center">
             <button
               onClick={handleBackToSeries}
-              className="flex-1 py-2.5 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2"
+              className="flex-1 py-2.5 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <ChevronRight size={16} />
               بازگشت به مانهوا
             </button>
             <button
               onClick={handleGoHome}
-              className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 border border-white/5"
+              className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 border border-white/5 cursor-pointer"
             >
               <Home size={16} />
               صفحه اصلی

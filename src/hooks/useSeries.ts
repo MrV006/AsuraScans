@@ -91,16 +91,14 @@ export function useSeriesOverview(id?: string) {
       return;
     }
     try {
-      // Parallel fetch series details AND chapters
-      const [s, chapters] = await Promise.all([
-        apiClient.getSeriesById(id),
-        apiClient.getChapters(id).catch(() => [])
-      ]);
-
+      const s = await apiClient.getSeriesById(id);
       if (s) {
+        const chapters = await apiClient.getChapters(s.id || id).catch(() => []);
         s.chapters = Array.isArray(chapters) ? chapters : [];
+        setSeries(s);
+      } else {
+        setSeries(null);
       }
-      setSeries(s);
       setLoading(false);
     } catch (err) {
       console.error("Error fetching series overview:", err);
@@ -109,11 +107,12 @@ export function useSeriesOverview(id?: string) {
   };
 
   useEffect(() => {
+    setLoading(true);
     fetchOverview();
 
     const socket = getSocketInstance();
     const handleUpdate = (data: any) => {
-      if (!data || data.seriesId === id || data.id === id) {
+      if (!data || data.seriesId === id || data.id === id || (series && (data.seriesId === series.id || data.id === series.id))) {
         fetchOverview();
       }
     };

@@ -79,13 +79,18 @@ export default function Home() {
         apiClient.getSeries({ sortBy: "oldest", limit: 8 }),
       ]);
 
-      setLatestList(latest);
-      setViewsList(views);
-      setPopularList(popular);
-      setOldestList(oldest);
+      const safeLatest = Array.isArray(latest) ? latest : [];
+      const safeViews = Array.isArray(views) ? views : [];
+      const safePopular = Array.isArray(popular) ? popular : [];
+      const safeOldest = Array.isArray(oldest) ? oldest : [];
+
+      setLatestList(safeLatest);
+      setViewsList(safeViews);
+      setPopularList(safePopular);
+      setOldestList(safeOldest);
 
       // Filter slider items (marked isHero) from all lists combined, or load them
-      const allFetched = [...latest, ...views, ...popular, ...oldest];
+      const allFetched = [...safeLatest, ...safeViews, ...safePopular, ...safeOldest];
       const uniqueFetched = Array.from(new Map(allFetched.map(item => [item.id, item])).values());
       const heroes = uniqueFetched.filter(s => s.isHero);
       
