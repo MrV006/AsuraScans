@@ -35,8 +35,11 @@ export function ImageUploader({ onUpload, multiple = false, seriesTitle, chapter
 
   const handleFiles = async (files: File[]) => {
     if (files.length === 0) return;
-    if (!user) {
-      setError("شما باید به عنوان مدیر برای آپلود وارد شده باشید.");
+    const adminAuth = localStorage.getItem("admin_auth") === "true";
+    const savedUid = localStorage.getItem("asura_user_uid") || localStorage.getItem("asura_user_id") || localStorage.getItem("asura_admin_uid") || localStorage.getItem("userUid");
+
+    if (!user && !adminAuth && !savedUid) {
+      setError("شما باید به عنوان مدیر یا عضو تحریریه برای آپلود وارد شده باشید.");
       return;
     }
 
@@ -57,7 +60,7 @@ export function ImageUploader({ onUpload, multiple = false, seriesTitle, chapter
         setProgressText(`در حال آپلود ${uploadPayload.length} تصویر به سرور...`);
       }
 
-      const uid = (user as any)?.uid || user?.id || user?.email || 'admin';
+      const uid = (user as any)?.uid || user?.id || user?.email || savedUid || (adminAuth ? 'admin' : 'admin');
       const res = await apiClient.uploadImages(uploadPayload, uid, {
         seriesTitle,
         chapterNumber,

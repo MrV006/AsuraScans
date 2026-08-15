@@ -437,14 +437,17 @@ export default function DownloadHostTab({ isSuperAdmin }: DownloadHostTabProps) 
               <div>uploads/</div>
               <div className="pl-4">└── series/</div>
               <div className="pl-8">└── [نام-اثر]/</div>
-              <div className="pl-12">├── cover.webp</div>
-              <div className="pl-12">└── chapter-[شماره]/</div>
-              <div className="pl-16">├── page-001-xxx.webp</div>
-              <div className="pl-16">├── page-002-xxx.webp</div>
-              <div className="pl-16">└── ...</div>
+              <div className="pl-12">├── cover/</div>
+              <div className="pl-16">└── cover.webp</div>
+              <div className="pl-12">├── banner/</div>
+              <div className="pl-16">└── banner.webp</div>
+              <div className="pl-12">└── chapters/</div>
+              <div className="pl-16">├── chapter-1.zip (فشرده‌سازی حداکثری)</div>
+              <div className="pl-16">├── chapter-2.zip</div>
+              <div className="pl-16">└── chapter-3.zip</div>
             </div>
-            <p className="text-zinc-400 text-[11px]">
-              سیستم به‌طور نامحسوس نام مانهوا و شماره چپتر را فیلتر کرده و پوشه‌های جداگانه و تمیز می‌سازد تا مدیریت دستی فایل‌ها در cPanel هاست دانلود نیز فوق‌العاده راحت باشد.
+            <p className="text-zinc-400 text-[11px] leading-relaxed">
+              هر اثر دارای یک پوشه اختصاصی شامل کاور، بنر و پوشه چپترهاست. هر چپتر به صورت فایل فشرده <code className="text-indigo-400 font-bold">.zip</code> در هاست ذخیره می‌شود تا حداقل فضای ممکن را اشغال کند. ریدر بدون نیاز به استخراج فیزیکی روی دیسک، تصاویر را مستقیماً از داخل فایل Zip استریم و لود می‌کند.
             </p>
           </div>
 

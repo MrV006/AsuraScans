@@ -9,7 +9,7 @@ export function useSeriesList() {
 
   const fetchSeries = async () => {
     try {
-      const data = await apiClient.getSeries();
+      const data: any = await apiClient.getSeries();
       if (!data || !Array.isArray(data)) {
         throw new Error(data?.error || "اطلاعات مانهوا یافت نشد یا ساختار داده نادرست است.");
       }

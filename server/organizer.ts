@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import JSZip from "jszip";
 import { dbManager } from "./db";
 import { uploadLocalFileToFtp, moveFtpFile } from "./ftpStorage";
 
@@ -14,6 +15,13 @@ export function sanitizeFolderName(name: string): string {
 export function extractFilename(urlOrPath: string): string {
   if (!urlOrPath) return "";
   try {
+    if (urlOrPath.includes("entry=") || urlOrPath.includes("file=")) {
+      const match = urlOrPath.match(/[?&](?:entry|file)=([^&#]+)/);
+      if (match && match[1]) {
+        const decoded = decodeURIComponent(match[1]);
+        return path.basename(decoded);
+      }
+    }
     const clean = urlOrPath.split("?")[0].split("#")[0];
     return path.basename(clean);
   } catch (e) {
@@ -43,6 +51,7 @@ export function isUploadedFileUrl(urlOrPath: string, baseUrl: string): boolean {
   }
 
   if (urlOrPath.includes("/uploads/") || urlOrPath.startsWith("uploads/")) return true;
+  if (urlOrPath.includes("/api/chapter-zip-image") || urlOrPath.includes("/api/uploads/zip-entry")) return true;
   if (baseUrl && urlOrPath.startsWith(baseUrl)) return true;
   
   // Check if it's a media/document file
@@ -231,34 +240,112 @@ export async function organizeAllFiles(): Promise<{
       for (const chapter of chapters) {
         processedChapters++;
         let chapterChanged = false;
-        const safeChapter = sanitizeFolderName(`chapter-${chapter.number}`);
-        const chapterRelDir = `series/${safeSeries}/${safeChapter}`;
+        const safeChapterNum = sanitizeFolderName(String(chapter.number));
+        const chapterRelDir = `series/${safeSeries}/chapters`;
+        const chapterAbsDir = path.join(uploadsDir, "series", safeSeries, "chapters");
+        const zipFileName = `chapter-${safeChapterNum}.zip`;
+        const zipRelPath = `uploads/${chapterRelDir}/${zipFileName}`;
+        const zipAbsPath = path.join(chapterAbsDir, zipFileName);
 
-        // Organize Images
+        // Check if chapter images are already using streaming zip URLs or loose files
         if (Array.isArray(chapter.images) && chapter.images.length > 0) {
-          const updatedImages: string[] = [];
+          const isAlreadyZipStream = chapter.images.some(u => typeof u === "string" && u.includes("chapter-zip-image"));
 
-          for (const imgUrl of chapter.images) {
-            if (typeof imgUrl === "string") {
-              const res = await organizeSingleFileUrl(imgUrl, chapterRelDir, uploadsDir, isFtpEnabled, dbFtpConfig, baseUrl);
-              if (res.moved || res.newUrl !== imgUrl) {
-                chapterChanged = true;
-                if (res.moved) movedFilesCount++;
+          if (isAlreadyZipStream) {
+            // Already streaming, verify the referenced zip is placed in the expected directory
+            const updatedImages = chapter.images.map(imgUrl => {
+              if (typeof imgUrl === "string" && imgUrl.includes("chapter-zip-image")) {
+                const match = imgUrl.match(/[?&]zip=([^&#]+)/);
+                if (match && match[1]) {
+                  const currentZipRel = decodeURIComponent(match[1]);
+                  if (!currentZipRel.includes(chapterRelDir)) {
+                    // Move current zip to expected path
+                    const currentAbsZip = path.join(uploadsDir, currentZipRel.replace(/^uploads\//, ""));
+                    if (fs.existsSync(currentAbsZip) && currentAbsZip !== zipAbsPath) {
+                      fs.mkdirSync(chapterAbsDir, { recursive: true });
+                      try {
+                        fs.renameSync(currentAbsZip, zipAbsPath);
+                        movedFilesCount++;
+                        chapterChanged = true;
+                      } catch (e) {
+                        // ignore
+                      }
+                    }
+                    return imgUrl.replace(match[1], encodeURIComponent(zipRelPath));
+                  }
+                }
               }
-              updatedImages.push(res.newUrl);
-            } else {
-              updatedImages.push(imgUrl);
-            }
-          }
+              return imgUrl;
+            });
 
-          if (chapterChanged) {
-            chapter.images = updatedImages;
+            if (chapterChanged) {
+              chapter.images = updatedImages;
+            }
+          } else {
+            // Loose files: Collect all existing local images for this chapter and package them into a single zip
+            const localImageFiles: { name: string; absPath: string }[] = [];
+            
+            for (let i = 0; i < chapter.images.length; i++) {
+              const imgUrl = chapter.images[i];
+              if (typeof imgUrl === "string") {
+                const fname = extractFilename(imgUrl);
+                const foundLocal = findLocalFile(uploadsDir, fname);
+                if (foundLocal && fs.existsSync(foundLocal)) {
+                  localImageFiles.push({ name: fname, absPath: foundLocal });
+                }
+              }
+            }
+
+            if (localImageFiles.length > 0) {
+              fs.mkdirSync(chapterAbsDir, { recursive: true });
+              const zip = new JSZip();
+              const entryNames: string[] = [];
+
+              for (let i = 0; i < localImageFiles.length; i++) {
+                const item = localImageFiles[i];
+                const pageNum = String(i + 1).padStart(3, "0");
+                const ext = path.extname(item.name).toLowerCase() || ".webp";
+                const entryName = `page-${pageNum}${ext}`;
+                const fileBuf = fs.readFileSync(item.absPath);
+                zip.file(entryName, fileBuf);
+                entryNames.push(entryName);
+              }
+
+              const zipBuf = await zip.generateAsync({ 
+                type: "nodebuffer", 
+                compression: "DEFLATE", 
+                compressionOptions: { level: 9 } 
+              });
+
+              await fs.promises.writeFile(zipAbsPath, zipBuf);
+              movedFilesCount++;
+
+              // Delete loose duplicate image files to reclaim host disk space
+              for (const item of localImageFiles) {
+                try {
+                  if (fs.existsSync(item.absPath) && item.absPath !== zipAbsPath) {
+                    fs.unlinkSync(item.absPath);
+                  }
+                } catch (e) {
+                  // ignore
+                }
+              }
+
+              if (isFtpEnabled) {
+                await uploadLocalFileToFtp(zipAbsPath, zipRelPath, dbFtpConfig);
+              }
+
+              chapter.images = entryNames.map(entry => 
+                `/api/chapter-zip-image?zip=${encodeURIComponent(zipRelPath)}&entry=${encodeURIComponent(entry)}`
+              );
+              chapterChanged = true;
+            }
           }
         }
 
         // Organize Submissions if present
         if (Array.isArray(chapter.submissions) && chapter.submissions.length > 0) {
-          const subRelDir = `series/${safeSeries}/${safeChapter}/submissions`;
+          const subRelDir = `series/${safeSeries}/submissions`;
           for (const sub of chapter.submissions) {
             if (sub.fileUrl && typeof sub.fileUrl === "string") {
               const res = await organizeSingleFileUrl(sub.fileUrl, subRelDir, uploadsDir, isFtpEnabled, dbFtpConfig, baseUrl);
@@ -309,7 +396,7 @@ export async function organizeAllFiles(): Promise<{
       processedSeries,
       processedChapters,
       movedFilesCount,
-      message: `سازماندهی کامل شد. ${processedSeries} مجموعه، ${processedChapters} چپتر بررسی شدند و ${movedFilesCount} فایل در هاست مرتب شدند.`
+      message: `سازماندهی کامل شد. ${processedSeries} مجموعه، ${processedChapters} چپتر بررسی و بهینه‌سازی شدند و فایل‌ها به صورت ساختارمند و با فشرده‌سازی ZIP مرتب شدند.`
     };
   } catch (err: any) {
     console.error("Error organizing files:", err);

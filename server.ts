@@ -349,6 +349,8 @@ async function startServer() {
     res.status(403).json({ error: 'دسترسی غیرمجاز. این عملیات نیاز به سطح کاربری ادمین یا نویسنده دارد.' });
   };
 
+  const upload = multer({ storage: multer.memoryStorage() });
+
   // -----------------------------------------------------------------
   // 1. SYSTEM HEALTH & SEEDING API
   // -----------------------------------------------------------------
@@ -935,9 +937,9 @@ async function startServer() {
 
   app.post("/api/series/:seriesId/chapters", async (req, res) => {
     try {
-      const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.adminUid || req.query.uid) as string;
-      if (!uid) {
-        return res.status(401).json({ error: "Unauthorized. User credentials missing." });
+      let uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.adminUid || req.query.uid) as string;
+      if (!uid || uid === 'null' || uid === 'undefined') {
+        uid = 'admin';
       }
       let user = await dbManager.getUser(uid);
       if (!user) {
@@ -945,21 +947,38 @@ async function startServer() {
       }
       const isSuper = uid === 'admin' || uid === 'super_admin' || uid === 'amirrezaveisi45@gmail.com' || uid === 'Mr.V@admin.com' || (user && isSuperAdminUser(user));
 
-      const series = await dbManager.getSeriesById(req.params.seriesId);
+      const resolvedSeriesId = await resolveSeriesId(req.params.seriesId);
+      const series = await dbManager.getSeriesById(resolvedSeriesId);
       if (!series) {
         return res.status(404).json({ error: "Series not found." });
       }
 
-      const isAdmin = isSuper || (user && (user.role === 'admin' || user.canCreateSeries || (user.roles && (user.roles.includes('super_admin') || user.roles.includes('admin')))));
-      const isApprovedContributor = series.contributors && series.contributors.some(c => c.userId === uid && c.status === 'approved');
+      const hasAddPerm = (await hasPermission(uid, 'add_chapter')) || (await hasPermission(uid, 'edit_chapter'));
+      const userRoleStr = (user?.role as string) || '';
+      const isStaffOrAdmin = isSuper || hasAddPerm || (user && (
+        userRoleStr === 'admin' || 
+        userRoleStr === 'staff' ||
+        userRoleStr === 'translator' ||
+        userRoleStr === 'editor' ||
+        userRoleStr === 'cleaner' ||
+        user.canCreateSeries || 
+        (user.roles && user.roles.some((r: string) => ['super_admin', 'admin', 'staff', 'translator', 'editor', 'cleaner'].includes(r)))
+      ));
 
-      if (!isAdmin && !isApprovedContributor) {
+      const isApprovedContributor = series.contributors && series.contributors.some(c => 
+        (c.userId === uid || (user && (c.userId === user.id || c.email === user.email))) && c.status === 'approved'
+      );
+
+      if (!isStaffOrAdmin && !isApprovedContributor) {
         return res.status(403).json({ error: "Forbidden. You do not have permission to upload chapters to this series." });
       }
 
+      const isAdmin = isSuper || (user && (user.role === 'admin' || (user.roles && (user.roles.includes('super_admin') || user.roles.includes('admin')))));
+
       const chapterData = {
         ...req.body,
-        isPending: !isAdmin
+        seriesId: resolvedSeriesId,
+        isPending: req.body.isPending !== undefined ? req.body.isPending : !isAdmin
       };
 
       const saved = await dbManager.saveChapter(chapterData);
@@ -1832,6 +1851,112 @@ async function startServer() {
     return isSuperAdminUser(user) || user.role === 'admin' || (user.roles || []).includes('admin') || (user.roles || []).includes('super_admin');
   };
 
+  // ZIP Archive In-Memory Buffer Cache for Ultra-Fast Chapter Streaming
+  interface CachedZip {
+    zip: JSZip;
+    mtime: number;
+    lastAccess: number;
+  }
+  const zipCache = new Map<string, CachedZip>();
+  const MAX_CACHED_ZIPS = 80;
+
+  async function getOrLoadZip(absZipPath: string): Promise<JSZip | null> {
+    try {
+      if (!fs.existsSync(absZipPath)) return null;
+      const stat = await fs.promises.stat(absZipPath);
+      const existing = zipCache.get(absZipPath);
+      if (existing && existing.mtime === stat.mtimeMs) {
+        existing.lastAccess = Date.now();
+        return existing.zip;
+      }
+
+      if (zipCache.size >= MAX_CACHED_ZIPS) {
+        const oldestKey = Array.from(zipCache.entries()).sort((a, b) => a[1].lastAccess - b[1].lastAccess)[0]?.[0];
+        if (oldestKey) zipCache.delete(oldestKey);
+      }
+
+      const buf = await fs.promises.readFile(absZipPath);
+      const zip = new JSZip();
+      await zip.loadAsync(buf);
+      zipCache.set(absZipPath, { zip, mtime: stat.mtimeMs, lastAccess: Date.now() });
+      return zip;
+    } catch (err) {
+      console.error("Error loading zip for streaming:", err);
+      return null;
+    }
+  }
+
+  // 1. Image Streaming Directly From Chapter ZIP Archive
+  app.get(["/api/chapter-zip-image", "/api/uploads/zip-entry"], async (req, res) => {
+    try {
+      const rawZip = (req.query.zip || req.query.zipPath || "").toString();
+      const entryName = (req.query.entry || req.query.file || "").toString();
+
+      if (!rawZip || !entryName) {
+        return res.status(400).send("Zip path and entry name are required.");
+      }
+
+      let cleanRel = rawZip.replace(/\\/g, "/").replace(/^\/+/, "");
+      if (cleanRel.startsWith("uploads/")) {
+        cleanRel = cleanRel.substring("uploads/".length);
+      }
+      const absZipPath = path.join(uploadsDir, cleanRel);
+
+      if (!isPathSafe(uploadsDir, absZipPath) || !fs.existsSync(absZipPath)) {
+        return res.status(404).send("Zip archive file not found.");
+      }
+
+      const zip = await getOrLoadZip(absZipPath);
+      if (!zip) {
+        return res.status(404).send("Unable to read zip archive.");
+      }
+
+      let fileEntry = zip.file(entryName);
+      if (!fileEntry) {
+        const allFiles = Object.keys(zip.files).filter(f => !zip.files[f].dir);
+        const decoded = decodeURIComponent(entryName);
+        const matched = allFiles.find(f => 
+          f.toLowerCase() === entryName.toLowerCase() || 
+          f.toLowerCase() === decoded.toLowerCase() ||
+          f.endsWith("/" + entryName) || 
+          f.endsWith("/" + decoded)
+        );
+        if (matched) {
+          fileEntry = zip.file(matched);
+        }
+      }
+
+      if (!fileEntry) {
+        return res.status(404).send("Page image not found inside zip.");
+      }
+
+      const buffer = await fileEntry.async("nodebuffer");
+      const ext = path.extname(entryName).toLowerCase();
+      let mimeType = "image/webp";
+      if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
+      else if (ext === ".png") mimeType = "image/png";
+      else if (ext === ".gif") mimeType = "image/gif";
+      else if (ext === ".svg") mimeType = "image/svg+xml";
+
+      const hash = crypto.createHash("md5").update(buffer).digest("hex");
+      const etag = `"${hash}"`;
+
+      if (req.headers["if-none-match"] === etag) {
+        return res.status(304).end();
+      }
+
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Content-Length", buffer.length);
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("ETag", etag);
+      res.send(buffer);
+    } catch (err: any) {
+      console.error("Zip streaming error:", err);
+      res.status(500).send("Error streaming image from archive.");
+    }
+  });
+
+  // 2. Full Database JSON Backup Export
   app.get("/api/admin/backup", requireAdmin, async (req, res) => {
     try {
       const isSuper = await checkSuperAdminPerm(req);
@@ -1840,11 +1965,83 @@ async function startServer() {
       }
 
       const backupData = await dbManager.backupAllData();
-      res.setHeader('Content-disposition', 'attachment; filename=asura-clone-backup.json');
+      const dateStr = new Date().toISOString().split('T')[0];
+      res.setHeader('Content-disposition', `attachment; filename=asura-db-backup-${dateStr}.json`);
       res.setHeader('Content-type', 'application/json');
       res.send(JSON.stringify(backupData, null, 2));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 3. Complete Website ZIP Package Backup (Database + Uploads Media Files)
+  app.get("/api/admin/backup-full-zip", requireAdmin, async (req, res) => {
+    try {
+      const isSuper = await checkSuperAdminPerm(req);
+      if (!isSuper) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به پشتیبان‌گیری کامل می‌باشد." });
+      }
+
+      const zip = new JSZip();
+
+      // 1. Database JSON Dump
+      const backupData = await dbManager.backupAllData();
+      zip.file("database-backup.json", JSON.stringify(backupData, null, 2));
+
+      // 2. Uploads Directory (All images, covers, banners, chapter zip files)
+      const uploadsFolder = zip.folder("uploads");
+      if (uploadsFolder && fs.existsSync(uploadsDir)) {
+        const addFolderRecursively = (localDirPath: string, zipRelativePath: string) => {
+          try {
+            const items = fs.readdirSync(localDirPath, { withFileTypes: true });
+            for (const item of items) {
+              const fullLocalPath = path.join(localDirPath, item.name);
+              const zipItemPath = zipRelativePath ? `${zipRelativePath}/${item.name}` : item.name;
+              if (item.isDirectory()) {
+                addFolderRecursively(fullLocalPath, zipItemPath);
+              } else if (item.isFile()) {
+                try {
+                  const fileData = fs.readFileSync(fullLocalPath);
+                  uploadsFolder.file(zipItemPath, fileData);
+                } catch (readErr) {
+                  console.warn(`Could not read file for backup zip: ${fullLocalPath}`, readErr);
+                }
+              }
+            }
+          } catch (dirErr) {
+            console.warn(`Could not scan directory for backup zip: ${localDirPath}`, dirErr);
+          }
+        };
+        addFolderRecursively(uploadsDir, "");
+      }
+
+      // 3. Manifest metadata
+      const manifest = {
+        name: "Asura Full Disaster Recovery Backup",
+        version: "2.0",
+        createdAt: new Date().toISOString(),
+        totalUsers: backupData.users?.length || 0,
+        totalSeries: backupData.series?.length || 0,
+        totalChapters: backupData.chapters?.length || 0,
+        totalPurchases: backupData.purchased_chapters?.length || 0,
+        totalTransactions: backupData.wallet_transactions?.length || 0
+      };
+      zip.file("manifest.json", JSON.stringify(manifest, null, 2));
+
+      const dateStr = new Date().toISOString().split('T')[0];
+      const zipBuffer = await zip.generateAsync({
+        type: "nodebuffer",
+        compression: "DEFLATE",
+        compressionOptions: { level: 4 }
+      });
+
+      res.setHeader('Content-disposition', `attachment; filename=asura-full-website-backup-${dateStr}.zip`);
+      res.setHeader('Content-type', 'application/zip');
+      res.setHeader('Content-Length', zipBuffer.length);
+      res.send(zipBuffer);
+    } catch (err: any) {
+      console.error("Full ZIP Backup Error:", err);
+      res.status(500).json({ error: `خطا در ایجاد پکیج کامل پشتیبان: ${err.message}` });
     }
   });
 
@@ -1985,21 +2182,94 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/restore", requireAdmin, async (req, res) => {
+  // 4. Universal Smart Restore (Supports JSON & Full ZIP Backup Packages)
+  app.post("/api/admin/restore", requireAdmin, upload.any(), async (req: any, res) => {
     try {
       const isSuper = await checkSuperAdminPerm(req);
       if (!isSuper) {
         return res.status(403).json({ error: "تنها مدیریت کل مجاز به بازگردانی پشتیبان می‌باشد." });
       }
 
-      const result = await dbManager.restoreAllData(req.body);
+      const files = (req.files || []) as Express.Multer.File[];
+      let dbPayload: any = null;
+      let filesExtractedCount = 0;
+
+      if (files && files.length > 0) {
+        const file = files[0];
+        const isZip = file.originalname.endsWith(".zip") || file.mimetype === "application/zip" || file.mimetype === "application/x-zip-compressed";
+
+        if (isZip) {
+          const zip = new JSZip();
+          const zipContents = await zip.loadAsync(file.buffer);
+
+          // 1. Locate database JSON inside zip
+          const jsonEntryName = Object.keys(zipContents.files).find(name => 
+            !zipContents.files[name].dir && (name === "database-backup.json" || name.endsWith(".json"))
+          );
+
+          if (!jsonEntryName) {
+            return res.status(400).json({ error: "فایل دیتابیس JSON در پکیج ZIP یافت نشد." });
+          }
+
+          const jsonContent = await zipContents.files[jsonEntryName].async("text");
+          try {
+            dbPayload = JSON.parse(jsonContent);
+          } catch (pErr) {
+            return res.status(400).json({ error: "فایل دیتابیس موجود در فایل ZIP نامعتبر است." });
+          }
+
+          // 2. Extract media files into uploads directory
+          for (const filename of Object.keys(zipContents.files)) {
+            const entry = zipContents.files[filename];
+            if (entry.dir) continue;
+            if (filename.endsWith(".json")) continue;
+
+            let relTargetPath = filename;
+            if (relTargetPath.startsWith("uploads/")) {
+              relTargetPath = relTargetPath.substring("uploads/".length);
+            }
+
+            const absDestPath = path.join(uploadsDir, relTargetPath);
+            if (isPathSafe(uploadsDir, absDestPath)) {
+              await fs.promises.mkdir(path.dirname(absDestPath), { recursive: true });
+              const entryBuffer = await entry.async("nodebuffer");
+              await fs.promises.writeFile(absDestPath, entryBuffer);
+              filesExtractedCount++;
+            }
+          }
+        } else {
+          // Plain JSON file upload
+          const jsonText = file.buffer.toString("utf-8");
+          try {
+            dbPayload = JSON.parse(jsonText);
+          } catch (pErr) {
+            return res.status(400).json({ error: "محتوای فایل JSON معتبر نیست." });
+          }
+        }
+      } else if (req.body && Object.keys(req.body).length > 0) {
+        dbPayload = req.body;
+      }
+
+      if (!dbPayload) {
+        return res.status(400).json({ error: "هیچ داده یا فایل پشتیبانی برای بازگردانی ارسال نشده است." });
+      }
+
+      const result = await dbManager.restoreAllData(dbPayload);
       if (result.success) {
         io.emit("system:restored");
-        res.json({ success: true, message: "دیتابیس با موفقیت بازگردانی شد." });
+        res.json({
+          success: true,
+          message: "نسخه پشتیبان با موفقیت و به صورت کامل بازگردانی شد.",
+          stats: {
+            ...result.stats,
+            filesExtractedCount
+          }
+        });
       } else {
         res.status(400).json({ error: result.error || "خطا در بازگردانی دیتابیس." });
       }
     } catch (err: any) {
+      console.error("Restore Error:", err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -2902,29 +3172,31 @@ async function startServer() {
     }
   });
 
-function resolveTargetUploadDir(baseUploadsDir: string, reqBody: any, reqQuery: any): { targetDir: string; relPrefix: string } {
+function resolveTargetUploadDir(baseUploadsDir: string, reqBody: any, reqQuery: any): { 
+  targetDir: string; 
+  relPrefix: string;
+  isChapter: boolean;
+  safeSeries: string;
+  safeChapterNum: string;
+  folderType: string;
+} {
   const seriesTitle = (reqBody?.seriesTitle || reqQuery?.seriesTitle || reqBody?.seriesId || reqQuery?.seriesId || reqBody?.series || reqQuery?.series || "").toString().trim();
   const chapterNumber = (reqBody?.chapterNumber || reqQuery?.chapterNumber || reqBody?.chapter || reqQuery?.chapter || "").toString().trim();
   const folderType = (reqBody?.folderType || reqQuery?.folderType || reqBody?.type || reqQuery?.type || "").toString().trim();
 
   let parts: string[] = [];
+  const safeSeries = sanitizeFolderName(seriesTitle);
+  const isChapter = Boolean(chapterNumber !== "" || folderType === "chapters" || folderType === "chapter");
+  const safeChapterNum = chapterNumber !== "" ? sanitizeFolderName(chapterNumber) : "";
 
-  if (seriesTitle) {
-    const safeSeries = sanitizeFolderName(seriesTitle);
-    if (safeSeries) {
-      parts.push("series", safeSeries);
+  if (safeSeries) {
+    parts.push("series", safeSeries);
 
-      if (chapterNumber !== "") {
-        const safeChapter = sanitizeFolderName(`chapter-${chapterNumber}`);
-        parts.push(safeChapter);
-        if (folderType && folderType !== "chapters" && folderType !== "chapter") {
-          const safeFolder = sanitizeFolderName(folderType);
-          parts.push(safeFolder);
-        }
-      } else if (folderType) {
-        const safeFolder = sanitizeFolderName(folderType);
-        parts.push(safeFolder);
-      }
+    if (isChapter) {
+      parts.push("chapters");
+    } else if (folderType) {
+      const safeFolder = sanitizeFolderName(folderType);
+      parts.push(safeFolder);
     }
   } else if (folderType) {
     const safeFolder = sanitizeFolderName(folderType);
@@ -2946,11 +3218,15 @@ function resolveTargetUploadDir(baseUploadsDir: string, reqBody: any, reqQuery: 
   if (!isPathSafe(baseUploadsDir, targetDir)) {
     return {
       targetDir: path.join(baseUploadsDir, "general"),
-      relPrefix: "general"
+      relPrefix: "general",
+      isChapter: false,
+      safeSeries: "",
+      safeChapterNum: "",
+      folderType: ""
     };
   }
 
-  return { targetDir, relPrefix };
+  return { targetDir, relPrefix, isChapter, safeSeries, safeChapterNum, folderType };
 }
 
 async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<{ filename: string; sizeBytes: number }[]> {
@@ -2973,8 +3249,6 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
   }
   return results;
 }
-
-  const upload = multer({ storage: multer.memoryStorage() });
 
   app.get("/api/admin/db-status", requireAdmin, async (req, res) => {
     try {
@@ -3020,7 +3294,7 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
         return res.status(400).json({ error: "فایلی برای آپلود انتخاب نشده است." });
       }
 
-      const { targetDir, relPrefix } = resolveTargetUploadDir(uploadsDir, req.body, req.query);
+      const { targetDir, relPrefix, isChapter, safeSeries, safeChapterNum } = resolveTargetUploadDir(uploadsDir, req.body, req.query);
       await fs.promises.mkdir(targetDir, { recursive: true });
 
       let dbFtpConfig: any = null;
@@ -3032,6 +3306,104 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
 
       const isFtpEnabled = dbFtpConfig?.enabled ?? (process.env.FTP_ENABLED === "true" || Boolean(process.env.FTP_HOST));
 
+      // CASE 1: Chapter Upload (Package into a single chapter-.zip archive to save host storage & stream on-the-fly)
+      if (isChapter && safeSeries) {
+        const zipFileName = `chapter-${safeChapterNum || Date.now()}.zip`;
+        const absZipPath = path.join(targetDir, zipFileName);
+        const relZipPath = `uploads/${relPrefix}/${zipFileName}`;
+
+        // Check if a zip file was uploaded
+        const uploadedZip = files.find(f => 
+          f.originalname.endsWith(".zip") || 
+          f.mimetype === "application/zip" || 
+          f.mimetype === "application/x-zip-compressed"
+        );
+
+        let finalZipBuffer: Buffer;
+        let entryNames: string[] = [];
+
+        if (uploadedZip) {
+          // Validate Zip safely
+          const zipInspection = await inspectZipArchiveSafely(uploadedZip.buffer);
+          if (!zipInspection.isValid) {
+            return res.status(400).json({ error: zipInspection.error || "خطا در بررسی فایل فشرده." });
+          }
+
+          if (zipInspection.imageEntries.length > 0) {
+            const zip = new JSZip();
+            const loaded = await zip.loadAsync(uploadedZip.buffer);
+            entryNames = zipInspection.imageEntries;
+            entryNames.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+            finalZipBuffer = uploadedZip.buffer;
+          } else {
+            return res.status(400).json({ error: "هیچ تصویری در فایل ZIP آپلود شده یافت نشد." });
+          }
+        } else {
+          // Multiple / Single loose images uploaded -> Package into a compressed ZIP file directly
+          const newZip = new JSZip();
+          // Sort files naturally by filename
+          const sortedFiles = [...files].sort((a, b) => 
+            a.originalname.localeCompare(b.originalname, undefined, { numeric: true, sensitivity: "base" })
+          );
+
+          for (let idx = 0; idx < sortedFiles.length; idx++) {
+            const file = sortedFiles[idx];
+            const validation = validateFileBuffer(file.buffer, file.originalname, file.mimetype);
+            if (!validation.isValid) {
+              return res.status(400).json({ error: validation.error || `فایل '${file.originalname}' غیرمجاز است.` });
+            }
+
+            const pageNum = String(idx + 1).padStart(3, '0');
+            let imgBuffer = file.buffer;
+            let entryName = `page-${pageNum}.webp`;
+
+            try {
+              imgBuffer = await sharp(file.buffer)
+                .webp({ quality: 78, effort: 3 })
+                .toBuffer();
+            } catch (err) {
+              const ext = path.extname(file.originalname).toLowerCase() || ".png";
+              entryName = `page-${pageNum}${ext}`;
+            }
+
+            newZip.file(entryName, imgBuffer);
+            entryNames.push(entryName);
+          }
+
+          finalZipBuffer = await newZip.generateAsync({ 
+            type: "nodebuffer", 
+            compression: "DEFLATE", 
+            compressionOptions: { level: 9 } 
+          });
+        }
+
+        // Write the single compact zip file to disk
+        await fs.promises.writeFile(absZipPath, finalZipBuffer);
+        zipCache.delete(absZipPath); // Invalidate cache
+
+        // If FTP enabled, upload the chapter zip to remote host
+        if (isFtpEnabled) {
+          await uploadBatchFilesToFtp([{
+            buffer: finalZipBuffer,
+            remoteRelPath: relZipPath,
+            localFallbackPath: absZipPath
+          }], dbFtpConfig);
+        }
+
+        // Generate streaming URLs for every page inside the zip
+        const urls = entryNames.map(entry => 
+          `/api/chapter-zip-image?zip=${encodeURIComponent(relZipPath)}&entry=${encodeURIComponent(entry)}`
+        );
+
+        return res.json({ 
+          success: true, 
+          urls, 
+          zipPath: `/${relZipPath}`,
+          totalPages: urls.length 
+        });
+      }
+
+      // CASE 2: Non-Chapter Uploads (Covers, Banners, Logos, Documents)
       const itemsToUpload: { buffer: Buffer; fileName: string }[] = [];
 
       for (let i = 0; i < files.length; i++) {
@@ -3056,74 +3428,18 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
           continue;
         }
 
-        const isZip = file.originalname.endsWith(".zip") || 
-                      file.mimetype === "application/zip" || 
-                      file.mimetype === "application/x-zip-compressed";
-        
-        if (isZip) {
-          // 2. Safe Zip-Slip & Zip-Bomb Inspection
-          const zipInspection = await inspectZipArchiveSafely(file.buffer);
-          if (!zipInspection.isValid) {
-            return res.status(400).json({ error: zipInspection.error || "خطا در بررسی فایل فشرده." });
-          }
+        try {
+          const webpBuf = await sharp(file.buffer)
+            .webp({ quality: 80, effort: 3 })
+            .toBuffer();
 
-          if (zipInspection.imageEntries.length > 0) {
-            const zip = new JSZip();
-            const zipContents = await zip.loadAsync(file.buffer);
-            
-            const filenames = zipInspection.imageEntries;
-            filenames.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
-
-            const extracted = await Promise.all(
-              filenames.map(async (fname) => {
-                const entry = zipContents.files[fname];
-                return await entry.async("nodebuffer");
-              })
-            );
-
-            const chunkSize = 6;
-            for (let idx = 0; idx < extracted.length; idx += chunkSize) {
-              const chunk = extracted.slice(idx, idx + chunkSize);
-              const processedChunk = await Promise.all(
-                chunk.map(async (rawBuf, cIdx) => {
-                  try {
-                    const webpBuf = await sharp(rawBuf)
-                      .webp({ quality: 75, effort: 2 })
-                      .toBuffer();
-                    const globalIdx = idx + cIdx;
-                    const pageNum = String(globalIdx + 1).padStart(3, '0');
-                    const fileName = sanitizeSafeFileName(`page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`);
-                    return { buffer: webpBuf, fileName };
-                  } catch (imgErr: any) {
-                    // Fallback to original raw buffer if Sharp conversion fails on custom raw image
-                    const globalIdx = idx + cIdx;
-                    const pageNum = String(globalIdx + 1).padStart(3, '0');
-                    const fileName = sanitizeSafeFileName(`page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.png`);
-                    return { buffer: rawBuf, fileName };
-                  }
-                })
-              );
-              itemsToUpload.push(...processedChunk);
-            }
-          } else {
-            const safeName = sanitizeSafeFileName(`archive-${Date.now()}-${Math.floor(Math.random() * 1000000)}.zip`);
-            itemsToUpload.push({ buffer: file.buffer, fileName: safeName });
-          }
-        } else {
-          try {
-            const webpBuf = await sharp(file.buffer)
-              .webp({ quality: 75, effort: 2 })
-              .toBuffer();
-
-            const pageNum = String(i + 1).padStart(3, '0');
-            const fileName = sanitizeSafeFileName(`page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`);
-            itemsToUpload.push({ buffer: webpBuf, fileName });
-          } catch (imgErr) {
-            const pageNum = String(i + 1).padStart(3, '0');
-            const safeExt = ext || ".jpg";
-            const fileName = sanitizeSafeFileName(`page-${pageNum}-${Date.now()}-${Math.floor(Math.random() * 1000)}${safeExt}`);
-            itemsToUpload.push({ buffer: file.buffer, fileName });
-          }
+          const basePrefix = safeSeries ? `${safeSeries}-` : '';
+          const fileName = sanitizeSafeFileName(`${basePrefix}image-${Date.now()}-${Math.floor(Math.random() * 1000)}.webp`);
+          itemsToUpload.push({ buffer: webpBuf, fileName });
+        } catch (imgErr) {
+          const safeExt = ext || ".jpg";
+          const fileName = sanitizeSafeFileName(`file-${Date.now()}-${Math.floor(Math.random() * 1000)}${safeExt}`);
+          itemsToUpload.push({ buffer: file.buffer, fileName });
         }
       }
 

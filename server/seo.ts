@@ -53,8 +53,10 @@ export async function generateSeoHtml(
 
   // Route: Series Page (/series/:id)
   const seriesMatch = urlPath.match(/^\/series\/([^/]+)$/);
-  // Route: Chapter Page (/series/:id/chapters\/([^/]+)$/
-  const chapterMatch = urlPath.match(/^\/series\/([^/]+)\/chapters\/([^/]+)$/);
+  // Route: Chapter Page (/reader/:id/:chapterId OR /series/:id/chapter/:chapterId OR /series/:id/chapters/:chapterId)
+  const chapterMatch = urlPath.match(/^\/reader\/([^/]+)\/([^/]+)$/) || 
+                       urlPath.match(/^\/series\/([^/]+)\/chapter\/([^/]+)$/) || 
+                       urlPath.match(/^\/series\/([^/]+)\/chapters\/([^/]+)$/);
 
   if (chapterMatch) {
     const seriesId = chapterMatch[1];

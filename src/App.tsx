@@ -33,6 +33,8 @@ export default function App() {
               <Route path="/" element={<Home />} />
               <Route path="/series/:id" element={<Series />} />
               <Route path="/reader/:seriesId/:chapterId" element={<Reader />} />
+              <Route path="/series/:seriesId/chapter/:chapterId" element={<Reader />} />
+              <Route path="/series/:seriesId/chapters/:chapterId" element={<Reader />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/search" element={<Search />} />
               <Route path="/admin" element={<Admin />} />

@@ -3,11 +3,12 @@ import { useSeriesOverview } from '../hooks/useSeries';
 import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../hooks/useUserActivity';
 import { ChevronLeft, ChevronRight, Menu, Home, ArrowUp, Settings as SettingsIcon, Flag, AlertTriangle, X, Check, Send, RefreshCw } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { apiClient, getSocketInstance } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 import { ReaderSkeleton } from '../components/Skeletons';
 import { SEOHead } from '../components/SEOHead';
+import { Chapter } from '../lib/types';
 
 // Helper for converting Persian digits to English digits
 const convertPersianToEnglishDigits = (str: string): string => {
@@ -21,6 +22,16 @@ const convertPersianToEnglishDigits = (str: string): string => {
 
 // Extract filename part of URL to prevent path numbers from interfering with sorting
 const getCleanFilename = (url: string): string => {
+  if (!url) return '';
+  try {
+    if (url.includes('entry=') || url.includes('file=')) {
+      const match = url.match(/[?&](?:entry|file)=([^&#]+)/);
+      if (match && match[1]) {
+        const decoded = decodeURIComponent(match[1]);
+        return decoded.split('/').pop() || decoded;
+      }
+    }
+  } catch (e) {}
   const withoutQuery = url.split('?')[0];
   return withoutQuery.split('/').pop() || withoutQuery;
 };
@@ -95,21 +106,23 @@ function MangaImage({
   const [autoReported, setAutoReported] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
 
-  // Reset image state if primary src URL or reloadKey changes
+  // Synchronize with src or forced reload key
   useEffect(() => {
-    if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0 && !reloadKey) {
-      setStatus('loaded');
-      return;
+    if (reloadKey && reloadKey > 0) {
+      const separator = src.includes('?') ? '&' : '?';
+      setCurrentSrc(`${src}${separator}_t=${Date.now()}_${reloadKey}`);
+      setStatus('loading');
+      setRetryCount(0);
+      setAutoReported(false);
+    } else {
+      setCurrentSrc(src);
+      setStatus('loading');
+      setRetryCount(0);
+      setAutoReported(false);
     }
-    const separator = src.includes('?') ? '&' : '?';
-    const newSrc = reloadKey ? `${src}${separator}reload=${reloadKey}` : src;
-    setCurrentSrc(newSrc);
-    setStatus('loading');
-    setRetryCount(0);
-    setAutoReported(false);
   }, [src, reloadKey]);
 
-  // Check on mount or src change if image is already cached/complete
+  // Synchronous cache check: If image is already in memory or complete, mark loaded immediately
   useEffect(() => {
     if (imgRef.current && imgRef.current.complete && imgRef.current.naturalWidth > 0) {
       setStatus('loaded');
@@ -131,7 +144,7 @@ function MangaImage({
           const nextRetry = retryCount + 1;
           setRetryCount(nextRetry);
           const separator = src.includes('?') ? '&' : '?';
-          setCurrentSrc(`${src}${separator}retry=${Date.now()}`);
+          setCurrentSrc(`${src}${separator}_retry=${Date.now()}`);
         } else {
           setStatus('error');
         }
@@ -152,11 +165,10 @@ function MangaImage({
       const separator = src.includes('?') ? '&' : '?';
       const delay = Math.min(1000 + retryCount * 800, 4000);
       setTimeout(() => {
-        setCurrentSrc(`${src}${separator}retry=${Date.now()}`);
+        setCurrentSrc(`${src}${separator}_retry=${Date.now()}`);
       }, delay);
     } else {
       setStatus('error');
-      // Auto-report persistent host errors once to the admin panel
       if (!autoReported && seriesId && chapterId) {
         setAutoReported(true);
         const uid = localStorage.getItem('asura_user_id') || 'guest';
@@ -175,12 +187,12 @@ function MangaImage({
     setStatus('loading');
     setRetryCount(0);
     const separator = src.includes('?') ? '&' : '?';
-    setCurrentSrc(`${src}${separator}retry=${Date.now()}`);
+    setCurrentSrc(`${src}${separator}_retry=${Date.now()}`);
   };
 
   return (
     <div 
-      className="reader-image-wrapper w-full relative flex flex-col justify-center items-center min-h-[200px]"
+      className="reader-image-wrapper w-full relative flex flex-col justify-center items-center min-h-[160px]"
     >
       {/* Loading Placeholder Overlay */}
       {status === 'loading' && (
@@ -245,7 +257,7 @@ function MangaImage({
       )}
 
       {/* Actual HTML Image Element */}
-      <div className={`relative w-full overflow-hidden select-none ${status === 'loaded' ? 'block' : 'hidden'}`}>
+      <div className="relative w-full select-none">
         <img 
           ref={imgRef}
           src={currentSrc} 
@@ -254,7 +266,7 @@ function MangaImage({
           onError={handleError}
           loading="eager"
           decoding="async"
-          className="object-contain block w-full mx-auto select-none pointer-events-none transition-opacity duration-300"
+          className={`object-contain block w-full mx-auto select-none pointer-events-none transition-opacity duration-300 ${status === 'loaded' ? 'opacity-100 relative' : 'opacity-0 absolute inset-0 pointer-events-none'}`}
           referrerPolicy="no-referrer"
         />
         {/* Anti-copy copyright shield */}
@@ -333,15 +345,24 @@ export default function Reader() {
   }) : -1;
   const chapter = (chapterIdx >= 0 && series?.chapters) 
     ? series.chapters[chapterIdx] 
-    : (directChapter || (series?.chapters && series.chapters.length > 0 ? series.chapters[0] : null));
+    : (directChapter || null);
   
   // Apply natural sorting unless sortMode is set to 'input'
   const sortedImages = chapter?.images 
     ? (chapter.sortMode === 'input' ? chapter.images : sortMangaImages(chapter.images)) 
     : [];
 
-  const nextChapter = series?.chapters && chapterIdx >= 0 ? series.chapters[chapterIdx - 1] : null; 
-  const prevChapter = series?.chapters && chapterIdx >= 0 ? series.chapters[chapterIdx + 1] : null; 
+  // Robust next and previous chapter computation
+  let nextChapter: any = null;
+  let prevChapter: any = null;
+  if (series?.chapters && Array.isArray(series.chapters) && series.chapters.length > 0 && chapter) {
+    const sortedChs = [...series.chapters].sort((a, b) => Number(a.number) - Number(b.number));
+    const curIdx = sortedChs.findIndex(c => c.id === chapter.id || Number(c.number) === Number(chapter.number));
+    if (curIdx >= 0) {
+      if (curIdx < sortedChs.length - 1) nextChapter = sortedChs[curIdx + 1];
+      if (curIdx > 0) prevChapter = sortedChs[curIdx - 1];
+    }
+  }
 
   const nextPage = () => {
     if (sortedImages.length === 0) return;
@@ -373,7 +394,10 @@ export default function Reader() {
   };
 
   const handleBackToSeries = (e?: React.MouseEvent) => {
-    if (e) e.preventDefault();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     const targetId = seriesId || series?.id || series?.slug;
     if (targetId && targetId !== 'undefined') {
       navigate(`/series/${targetId}`);
@@ -383,7 +407,10 @@ export default function Reader() {
   };
 
   const handleGoHome = (e?: React.MouseEvent) => {
-    if (e) e.preventDefault();
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     navigate('/');
   };
 
@@ -589,7 +616,7 @@ export default function Reader() {
     }
   }, [seriesId, chapterId, chapter?.number, updateHistory, isPurchased, user?.uid]);
 
-  if ((seriesLoading && directLoading && !chapter) || (user && checkingPurchase)) {
+  if (((seriesLoading || directLoading) && !chapter) || (user && checkingPurchase)) {
     return <ReaderSkeleton />;
   }
 
@@ -776,8 +803,8 @@ export default function Reader() {
               <SettingsIcon size={18} />
             </button>
             <button 
-              onClick={handleGoHome} 
-              className="hover:text-white transition-colors text-zinc-400 p-1.5 rounded-lg hover:bg-white/10 border border-transparent hover:border-white/10"
+              onClick={handleGoHome}
+              className="hover:text-white transition-colors text-zinc-400 p-1.5 rounded-lg hover:bg-white/10 border border-transparent hover:border-white/10 cursor-pointer flex items-center justify-center"
               title="صفحه اصلی وبسایت"
             >
               <Home size={18} />
@@ -856,8 +883,12 @@ export default function Reader() {
           </div>
 
           <button
-            onClick={() => setGlobalReloadKey(prev => prev + 1)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 rounded-xl text-xs font-black transition-all shrink-0 hover:scale-105 active:scale-95 mr-auto md:mr-0"
+            onClick={() => {
+              setGlobalReloadKey(prev => prev + 1);
+              fetchDirectChapter();
+              mutateSeries();
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 rounded-xl text-xs font-black transition-all shrink-0 hover:scale-105 active:scale-95 mr-auto md:mr-0 cursor-pointer"
             title="بازخوانی فوری تمام تصاویر چپتر (مناسب کندی اینترنت)"
           >
             <RefreshCw size={14} />

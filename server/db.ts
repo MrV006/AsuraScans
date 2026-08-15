@@ -3980,6 +3980,22 @@ class DatabaseManager {
     const backup: any = {};
     const now = new Date().toISOString();
 
+    const parseImagesSafe = (imgRaw: any): string[] => {
+      if (!imgRaw) return [];
+      if (Array.isArray(imgRaw)) return imgRaw.filter(Boolean);
+      if (typeof imgRaw === 'string') {
+        const trimmed = imgRaw.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) return parsed.filter(Boolean);
+          } catch (e) {}
+        }
+        return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      return [];
+    };
+
     if (this.isUsingMySQL && this.pool) {
       const safeQuery = async (query: string): Promise<any[]> => {
         try {
@@ -3998,6 +4014,7 @@ class DatabaseManager {
           banned: r.banned === 1,
           canCreateSeries: r.canCreateSeries === 1,
           hasCompletedSetup: r.hasCompletedSetup === 1,
+          walletBalance: typeof r.walletBalance === 'number' ? r.walletBalance : parseInt(r.walletBalance || '0', 10),
           roles: r.rolesText ? r.rolesText.split(',') : (r.role ? [r.role] : ['user']),
           permissions: r.permissionsText ? r.permissionsText.split(',') : []
         }));
@@ -4006,28 +4023,30 @@ class DatabaseManager {
         const seriesRows = await safeQuery('SELECT * FROM series');
         backup.series = seriesRows.map(r => ({
           ...r,
-          alternativeTitles: r.alternativeTitles ? r.alternativeTitles.split(',') : [],
-          genres: r.genres ? r.genres.split(',') : [],
-          tags: r.tags ? r.tags.split(',') : [],
+          alternativeTitles: r.alternativeTitles ? (r.alternativeTitles.startsWith('[') ? JSON.parse(r.alternativeTitles) : r.alternativeTitles.split(',')) : [],
+          genres: r.genres ? (r.genres.startsWith('[') ? JSON.parse(r.genres) : r.genres.split(',')) : [],
+          tags: r.tags ? (r.tags.startsWith('[') ? JSON.parse(r.tags) : r.tags.split(',')) : [],
           isHero: r.isHero === 1,
-          contributors: r.contributors ? JSON.parse(r.contributors) : []
+          contributors: r.contributors ? (typeof r.contributors === 'string' ? JSON.parse(r.contributors) : r.contributors) : []
         }));
 
         // 3. Chapters
         const chapterRows = await safeQuery('SELECT * FROM chapters');
         backup.chapters = chapterRows.map(r => ({
           ...r,
-          images: r.images ? r.images.split(',') : [],
+          images: parseImagesSafe(r.images),
           isPending: r.isPending === 1,
-          submissions: r.submissions ? JSON.parse(r.submissions) : []
+          isPrivate: r.isPrivate === 1,
+          submissions: r.submissions ? (typeof r.submissions === 'string' ? JSON.parse(r.submissions) : r.submissions) : [],
+          contributors: r.contributors ? (typeof r.contributors === 'string' ? JSON.parse(r.contributors) : r.contributors) : null
         }));
 
         // 4. Comments
         const commentRows = await safeQuery('SELECT * FROM comments');
         backup.comments = commentRows.map(r => ({
           ...r,
-          likes: r.likes ? JSON.parse(r.likes) : [],
-          dislikes: r.dislikes ? JSON.parse(r.dislikes) : []
+          likes: r.likes ? (typeof r.likes === 'string' ? JSON.parse(r.likes) : r.likes) : [],
+          dislikes: r.dislikes ? (typeof r.dislikes === 'string' ? JSON.parse(r.dislikes) : r.dislikes) : []
         }));
 
         // 5. Bookmarks
@@ -4079,6 +4098,9 @@ class DatabaseManager {
         backup.tickets = await safeQuery('SELECT * FROM tickets');
         backup.ticket_messages = await safeQuery('SELECT * FROM ticket_messages');
 
+        // 15. Chapter Views Log
+        backup.chapter_views_log = await safeQuery('SELECT * FROM chapter_views_log');
+
       } catch (err) {
         console.error("MySQL Backup error, falling back to localData", err);
         return this.localData;
@@ -4091,7 +4113,10 @@ class DatabaseManager {
         permissions: u.permissions || []
       }));
       backup.series = this.localData.series || [];
-      backup.chapters = this.localData.chapters || [];
+      backup.chapters = (this.localData.chapters || []).map(c => ({
+        ...c,
+        images: parseImagesSafe(c.images)
+      }));
       backup.comments = this.localData.comments || [];
       backup.bookmarks = this.localData.bookmarks || [];
       backup.history = this.localData.history || [];
@@ -4101,35 +4126,80 @@ class DatabaseManager {
       backup.notifications = this.localData.notifications || [];
       backup.wallet_transactions = this.localData.wallet_transactions || [];
       backup.purchased_chapters = this.localData.purchased_chapters || [];
+      backup.purchases = this.localData.purchased_chapters || [];
       backup.settlement_requests = this.localData.settlement_requests || [];
+      backup.tickets = this.localData.tickets || [];
+      backup.ticket_messages = this.localData.ticket_messages || [];
+      backup.chapter_views_log = this.localData.chapter_views_log || [];
     }
+
+    backup.backupMetadata = {
+      version: "2.0",
+      generator: "AsuraEngine Enterprise Backup",
+      timestamp: now,
+      counts: {
+        users: backup.users?.length || 0,
+        series: backup.series?.length || 0,
+        chapters: backup.chapters?.length || 0,
+        purchases: backup.purchased_chapters?.length || 0,
+        walletTransactions: backup.wallet_transactions?.length || 0,
+        comments: backup.comments?.length || 0,
+        bookmarks: backup.bookmarks?.length || 0,
+        tickets: backup.tickets?.length || 0,
+        settings: Object.keys(backup.settings || {}).length
+      }
+    };
 
     return backup;
   }
 
-  async restoreAllData(data: any): Promise<{ success: boolean; error?: string }> {
+  async restoreAllData(data: any): Promise<{ success: boolean; stats?: any; error?: string }> {
     if (!data || typeof data !== 'object') {
-      return { success: false, error: 'اطلاعات ارسالی معتبر نیست' };
+      return { success: false, error: 'اطلاعات ارسالی معتبر نیست یا فایل خالی است.' };
     }
 
-    const cleanData = {
-      users: Array.isArray(data.users) ? data.users : [],
-      series: Array.isArray(data.series) ? data.series : [],
-      chapters: Array.isArray(data.chapters) ? data.chapters : [],
-      comments: Array.isArray(data.comments) ? data.comments : [],
-      bookmarks: Array.isArray(data.bookmarks) ? data.bookmarks : [],
-      history: Array.isArray(data.history) ? data.history : [],
-      ratings: Array.isArray(data.ratings) ? data.ratings : [],
-      settings: (data.settings && typeof data.settings === 'object') ? data.settings : {},
-      reports: Array.isArray(data.reports) ? data.reports : [],
-      notifications: Array.isArray(data.notifications) ? data.notifications : [],
-      wallet_transactions: Array.isArray(data.wallet_transactions) ? data.wallet_transactions : [],
-      purchased_chapters: Array.isArray(data.purchased_chapters) ? data.purchased_chapters : [],
-      settlement_requests: Array.isArray(data.settlement_requests) ? data.settlement_requests : [],
-      tickets: Array.isArray(data.tickets) ? data.tickets : [],
-      ticket_messages: Array.isArray(data.ticket_messages) ? data.ticket_messages : [],
-      chapter_views_log: Array.isArray(data.chapter_views_log) ? data.chapter_views_log : []
+    const root = data.data && typeof data.data === 'object' && (data.data.series || data.data.users) ? data.data : data;
+
+    const parseImagesSafe = (imgRaw: any): string[] => {
+      if (!imgRaw) return [];
+      if (Array.isArray(imgRaw)) return imgRaw.filter(Boolean);
+      if (typeof imgRaw === 'string') {
+        const trimmed = imgRaw.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) return parsed.filter(Boolean);
+          } catch (e) {}
+        }
+        return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+      }
+      return [];
     };
+
+    const cleanData = {
+      users: Array.isArray(root.users) ? root.users : (Array.isArray(root.accounts) ? root.accounts : []),
+      series: Array.isArray(root.series) ? root.series : (Array.isArray(root.manga) ? root.manga : (Array.isArray(root.comics) ? root.comics : [])),
+      chapters: Array.isArray(root.chapters) ? root.chapters : (Array.isArray(root.episodes) ? root.episodes : []),
+      comments: Array.isArray(root.comments) ? root.comments : (Array.isArray(root.reviews) ? root.reviews : []),
+      bookmarks: Array.isArray(root.bookmarks) ? root.bookmarks : (Array.isArray(root.favorites) ? root.favorites : []),
+      history: Array.isArray(root.history) ? root.history : (Array.isArray(root.readingHistory) ? root.readingHistory : []),
+      ratings: Array.isArray(root.ratings) ? root.ratings : (Array.isArray(root.scores) ? root.scores : []),
+      settings: (root.settings && typeof root.settings === 'object') ? root.settings : {},
+      reports: Array.isArray(root.reports) ? root.reports : [],
+      notifications: Array.isArray(root.notifications) ? root.notifications : [],
+      wallet_transactions: Array.isArray(root.wallet_transactions) ? root.wallet_transactions : (Array.isArray(root.walletTransactions) ? root.walletTransactions : (Array.isArray(root.transactions) ? root.transactions : [])),
+      purchased_chapters: Array.isArray(root.purchased_chapters) ? root.purchased_chapters : (Array.isArray(root.purchases) ? root.purchases : (Array.isArray(root.purchasedChapters) ? root.purchasedChapters : (Array.isArray(root.user_purchases) ? root.user_purchases : []))),
+      settlement_requests: Array.isArray(root.settlement_requests) ? root.settlement_requests : (Array.isArray(root.settlements) ? root.settlements : []),
+      tickets: Array.isArray(root.tickets) ? root.tickets : [],
+      ticket_messages: Array.isArray(root.ticket_messages) ? root.ticket_messages : (Array.isArray(root.ticketMessages) ? root.ticketMessages : []),
+      chapter_views_log: Array.isArray(root.chapter_views_log) ? root.chapter_views_log : (Array.isArray(root.viewsLog) ? root.viewsLog : [])
+    };
+
+    // Normalize chapters images
+    cleanData.chapters = cleanData.chapters.map((c: any) => ({
+      ...c,
+      images: parseImagesSafe(c.images)
+    }));
 
     if (this.isUsingMySQL && this.pool) {
       const conn = await this.pool.getConnection();
@@ -4150,24 +4220,33 @@ class DatabaseManager {
           'reports',
           'notifications',
           'wallet_transactions',
-          'purchased_chapters'
+          'purchased_chapters',
+          'settlement_requests',
+          'tickets',
+          'ticket_messages',
+          'chapter_views_log'
         ];
         for (const table of tables) {
-          await conn.execute(`DELETE FROM ${table}`);
+          try {
+            await conn.execute(`DELETE FROM \`${table}\``);
+          } catch (delErr) {
+            console.warn(`Warning deleting table ${table} during restore:`, delErr);
+          }
         }
 
         // Insert Users
         for (const u of cleanData.users) {
           const rolesArr = u.roles || (u.role ? [u.role] : ['user']);
           const permsArr = u.permissions || [];
+          const balance = typeof u.walletBalance === 'number' ? u.walletBalance : (parseInt(u.walletBalance || '0', 10) || 0);
           await conn.execute(
-            `INSERT INTO users (id, email, displayName, avatarUrl, banned, role, melliCode, firstName, lastName, phoneNumber, canCreateSeries, rolesText, permissionsText, password, hasCompletedSetup, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO users (id, email, displayName, avatarUrl, banned, role, melliCode, firstName, lastName, phoneNumber, canCreateSeries, rolesText, permissionsText, password, hasCompletedSetup, walletBalance, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-              u.id, u.email, u.displayName, u.avatarUrl || null,
+              u.id, u.email, u.displayName || u.email, u.avatarUrl || null,
               u.banned ? 1 : 0, u.role || 'user', u.melliCode || '',
               u.firstName || '', u.lastName || '', u.phoneNumber || '',
               u.canCreateSeries ? 1 : 0, rolesArr.join(','), permsArr.join(','),
-              u.password || null, u.hasCompletedSetup ? 1 : 0, u.createdAt || new Date().toISOString()
+              u.password || null, u.hasCompletedSetup ? 1 : 0, balance, u.createdAt || new Date().toISOString()
             ]
           );
         }
@@ -4179,13 +4258,13 @@ class DatabaseManager {
           const tagsStr = Array.isArray(s.tags) ? s.tags.join(',') : (s.tags || '');
           const contributorsStr = Array.isArray(s.contributors) ? JSON.stringify(s.contributors) : (typeof s.contributors === 'string' ? s.contributors : '[]');
           await conn.execute(
-            `INSERT INTO series (id, title, alternativeTitles, cover, banner, author, artist, synopsis, genres, tags, status, rating, type, views, contributors, isHero, seoTitle, seoDescription, seoKeywords, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO series (id, title, alternativeTitles, cover, banner, author, artist, synopsis, genres, tags, status, rating, type, views, contributors, isHero, seoTitle, seoDescription, seoKeywords, slug, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               s.id, s.title, altTitlesStr, s.cover || null, s.banner || null,
               s.author || '', s.artist || '', s.synopsis || '', genresStr, tagsStr,
               s.status || 'Ongoing', s.rating || 0, s.type || 'Manhwa', s.views || 0,
               contributorsStr, s.isHero ? 1 : 0, s.seoTitle || null, s.seoDescription || null,
-              s.seoKeywords || null, s.createdAt || new Date().toISOString(), s.updatedAt || new Date().toISOString()
+              s.seoKeywords || null, s.slug || null, s.createdAt || new Date().toISOString(), s.updatedAt || new Date().toISOString()
             ]
           );
         }
@@ -4194,11 +4273,13 @@ class DatabaseManager {
         for (const c of cleanData.chapters) {
           const imagesStr = Array.isArray(c.images) ? c.images.join(',') : (c.images || '');
           const submissionsStr = Array.isArray(c.submissions) ? JSON.stringify(c.submissions) : (typeof c.submissions === 'string' ? c.submissions : '[]');
+          const contributorsStr = c.contributors ? (typeof c.contributors === 'string' ? c.contributors : JSON.stringify(c.contributors)) : null;
           await conn.execute(
-            `INSERT INTO chapters (id, seriesId, number, title, images, views, isPending, submissions, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO chapters (id, seriesId, number, title, images, views, isPending, submissions, contributors, seoTitle, seoDescription, seoKeywords, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               c.id, c.seriesId, c.number, c.title || '', imagesStr, c.views || 0,
-              c.isPending ? 1 : 0, submissionsStr, c.createdAt || new Date().toISOString(), c.updatedAt || new Date().toISOString()
+              c.isPending ? 1 : 0, submissionsStr, contributorsStr, c.seoTitle || null, c.seoDescription || null, c.seoKeywords || null,
+              c.createdAt || new Date().toISOString(), c.updatedAt || new Date().toISOString()
             ]
           );
         }
@@ -4276,14 +4357,46 @@ class DatabaseManager {
         // Insert Purchased Chapters
         for (const p of cleanData.purchased_chapters) {
           await conn.execute(
-            `INSERT INTO purchased_chapters (id, userId, seriesId, chapterId, createdAt) VALUES (?, ?, ?, ?, ?)`,
-            [p.id, p.userId, p.seriesId, p.chapterId, p.createdAt || new Date().toISOString()]
+            `INSERT INTO purchased_chapters (id, userId, seriesId, chapterId, chapterNumber, createdAt) VALUES (?, ?, ?, ?, ?, ?)`,
+            [p.id || `pc-${p.userId}-${p.chapterId}`, p.userId, p.seriesId, p.chapterId, p.chapterNumber || null, p.createdAt || new Date().toISOString()]
+          );
+        }
+
+        // Insert Settlement Requests
+        for (const s of cleanData.settlement_requests) {
+          await conn.execute(
+            `INSERT INTO settlement_requests (id, userId, userName, userEmail, amount, cardOrSheba, accountHolder, status, rejectionNote, createdAt, processedAt, processedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [s.id, s.userId, s.userName || '', s.userEmail || '', s.amount, s.cardOrSheba, s.accountHolder, s.status || 'pending', s.rejectionNote || null, s.createdAt || new Date().toISOString(), s.processedAt || null, s.processedBy || null]
+          );
+        }
+
+        // Insert Tickets
+        for (const tk of cleanData.tickets) {
+          await conn.execute(
+            `INSERT INTO tickets (id, userId, userName, userEmail, userAvatar, subject, category, priority, status, assignedTo, assignedToName, createdAt, lastUpdated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [tk.id, tk.userId, tk.userName, tk.userEmail || null, tk.userAvatar || null, tk.subject, tk.category || 'other', tk.priority || 'medium', tk.status || 'open', tk.assignedTo || null, tk.assignedToName || null, tk.createdAt || new Date().toISOString(), tk.lastUpdated || new Date().toISOString()]
+          );
+        }
+
+        // Insert Ticket Messages
+        for (const tm of cleanData.ticket_messages) {
+          const attachStr = Array.isArray(tm.attachments) ? JSON.stringify(tm.attachments) : (typeof tm.attachments === 'string' ? tm.attachments : '[]');
+          await conn.execute(
+            `INSERT INTO ticket_messages (id, ticketId, senderId, senderName, senderAvatar, senderRole, content, attachments, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [tm.id, tm.ticketId, tm.senderId, tm.senderName, tm.senderAvatar || null, tm.senderRole || 'user', tm.content, attachStr, tm.createdAt || new Date().toISOString()]
+          );
+        }
+
+        // Insert Chapter Views Log
+        for (const vl of cleanData.chapter_views_log) {
+          await conn.execute(
+            `INSERT INTO chapter_views_log (id, userId, seriesId, chapterId, createdAt) VALUES (?, ?, ?, ?, ?)`,
+            [vl.id || `vl-${vl.userId}-${vl.chapterId}-${Date.now()}`, vl.userId, vl.seriesId, vl.chapterId, vl.createdAt || new Date().toISOString()]
           );
         }
 
         await conn.query('SET FOREIGN_KEY_CHECKS = 1');
         await conn.commit();
-        return { success: true };
       } catch (err: any) {
         await conn.rollback();
         console.error("MySQL Restore error", err);
@@ -4293,10 +4406,24 @@ class DatabaseManager {
       }
     } else {
       // Local Database
-      this.localData = cleanData;
+      this.localData = cleanData as any;
       this.saveLocalData();
-      return { success: true };
     }
+
+    return {
+      success: true,
+      stats: {
+        usersCount: cleanData.users.length,
+        seriesCount: cleanData.series.length,
+        chaptersCount: cleanData.chapters.length,
+        purchasesCount: cleanData.purchased_chapters.length,
+        transactionsCount: cleanData.wallet_transactions.length,
+        commentsCount: cleanData.comments.length,
+        bookmarksCount: cleanData.bookmarks.length,
+        ticketsCount: cleanData.tickets.length,
+        settingsCount: Object.keys(cleanData.settings).length
+      }
+    };
   }
 
   async getDbStatus(): Promise<{
