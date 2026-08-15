@@ -38,6 +38,7 @@ import BackupTab from "../components/BackupTab";
 import RevenueTab from "../components/RevenueTab";
 import DownloadHostTab from "../components/DownloadHostTab";
 import TicketsTab from "../components/TicketsTab";
+import StorageCleanupTab from "../components/StorageCleanupTab";
 
 import { ImageUploader } from "../components/ImageUploader";
 import { SortableImageList } from "../components/SortableImageList";
@@ -225,6 +226,7 @@ export default function Admin() {
     | "backup"
     | "download_host"
     | "tickets"
+    | "storage_cleanup"
   >("dashboard");
 
   // Auth Forms
@@ -1142,6 +1144,15 @@ export default function Admin() {
               className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "download_host" ? "bg-indigo-600 text-white font-black" : "bg-white/5 text-zinc-400 hover:text-white"}`}
             >
               <Globe size={18} /> تنظیمات هاست دانلود (FTP)
+            </button>
+          )}
+
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab("storage_cleanup")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "storage_cleanup" ? "bg-rose-600 text-white font-black shadow-lg shadow-rose-600/30" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <Trash2 size={18} /> مدیریت و پاکسازی فضای هاست
             </button>
           )}
 
@@ -4053,6 +4064,17 @@ export default function Admin() {
 
           {activeTab === "download_host" && isSuperAdmin && (
             <DownloadHostTab isSuperAdmin={isSuperAdmin} />
+          )}
+
+          {activeTab === "storage_cleanup" && isSuperAdmin && (
+            <StorageCleanupTab
+              isSuperAdmin={isSuperAdmin}
+              onDataChanged={() => {
+                fetchSeries();
+                fetchChapters();
+                fetchUsersAndComments();
+              }}
+            />
           )}
 
           {activeTab === "simulation" && isSuperAdmin && (

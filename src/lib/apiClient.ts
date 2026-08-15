@@ -871,5 +871,31 @@ export const apiClient = {
       headers: this.getHeaders(adminUid)
     });
     return res.json();
+  },
+
+  // Storage & Section-by-Section Data Cleaner API
+  async getStorageBreakdown(adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/admin/storage/breakdown`, {
+      headers: this.getHeaders(adminUid)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'خطا در دریافت آمار فضای هاست');
+    }
+    return res.json();
+  },
+
+  async cleanSectionData(section: string, options?: any, adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/admin/storage/clean-section`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify({ section, options })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'خطا در پاکسازی داده‌های هاست');
+    }
+    return res.json();
   }
 };
+

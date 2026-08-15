@@ -2274,6 +2274,126 @@ async function startServer() {
     }
   });
 
+  async function getDirectoryStats(dirPath: string): Promise<{ totalBytes: number; fileCount: number }> {
+    let totalBytes = 0;
+    let fileCount = 0;
+    if (!fs.existsSync(dirPath)) return { totalBytes: 0, fileCount: 0 };
+    
+    async function scan(current: string) {
+      try {
+        const entries = await fs.promises.readdir(current, { withFileTypes: true });
+        for (const entry of entries) {
+          const full = path.join(current, entry.name);
+          if (entry.isDirectory()) {
+            await scan(full);
+          } else if (entry.isFile()) {
+            try {
+              const st = await fs.promises.stat(full);
+              totalBytes += st.size;
+              fileCount++;
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+    }
+    await scan(dirPath);
+    return { totalBytes, fileCount };
+  }
+
+  // 5. Host & Database Storage Management Breakdown API
+  app.get("/api/admin/storage/breakdown", requireAdmin, async (req, res) => {
+    try {
+      const isSuper = await checkSuperAdminPerm(req);
+      if (!isSuper) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به دسترسی به بخش مدیریت فضای هاست می‌باشد." });
+      }
+
+      const tableCounts = await dbManager.getAllDataCounts();
+      const uploadsStats = await getDirectoryStats(uploadsDir);
+      const seriesUploadsStats = await getDirectoryStats(path.join(uploadsDir, 'series'));
+      const backupsStats = await getDirectoryStats(backupsDir);
+
+      const formatBytes = (bytes: number): string => {
+        if (bytes === 0) return '0 بایت';
+        const k = 1024;
+        const sizes = ['بایت', 'کیلوبایت (KB)', 'مگابایت (MB)', 'گیگابایت (GB)'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+      };
+
+      res.json({
+        success: true,
+        database: {
+          isUsingMySQL: dbManager.isUsingMySQL,
+          host: dbManager.isUsingMySQL ? (process.env.DB_HOST || 'MySQL Server') : 'محیط محلی (local-db.json)',
+          dbName: dbManager.isUsingMySQL ? (process.env.DB_NAME || 'MySQL DB') : 'local-db.json',
+          tables: tableCounts
+        },
+        storage: {
+          uploads: {
+            totalBytes: uploadsStats.totalBytes,
+            formatted: formatBytes(uploadsStats.totalBytes),
+            fileCount: uploadsStats.fileCount
+          },
+          seriesUploads: {
+            totalBytes: seriesUploadsStats.totalBytes,
+            formatted: formatBytes(seriesUploadsStats.totalBytes),
+            fileCount: seriesUploadsStats.fileCount
+          },
+          backups: {
+            totalBytes: backupsStats.totalBytes,
+            formatted: formatBytes(backupsStats.totalBytes),
+            fileCount: backupsStats.fileCount
+          },
+          zipCacheCount: zipCache.size
+        }
+      });
+    } catch (err: any) {
+      console.error("Storage Breakdown Error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 6. Granular Section & Total Website Cleaner API
+  app.post("/api/admin/storage/clean-section", requireAdmin, async (req, res) => {
+    try {
+      const isSuper = await checkSuperAdminPerm(req);
+      if (!isSuper) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به پاکسازی داده‌های هاست و دیتابیس می‌باشد." });
+      }
+
+      const { section, options } = req.body;
+      if (!section) {
+        return res.status(400).json({ error: "شناسه بخش ارسالی نامعتبر است." });
+      }
+
+      if (section === 'server_cache') {
+        const prevCount = zipCache.size;
+        zipCache.clear();
+        return res.json({
+          success: true,
+          deletedRecords: 0,
+          deletedFiles: 0,
+          freedBytes: 0,
+          message: `کش رم سرور با موفقیت پاکسازی گردید (${prevCount} آرشیو ZIP آزاد شد).`
+        });
+      }
+
+      const result = await dbManager.clearSectionData(section, uploadsDir, options || {});
+      
+      // Clear RAM cache if chapter/files modified
+      if (section === 'series_and_chapters' || section === 'chapters_only' || section === 'all_uploads' || section === 'full_factory_reset') {
+        zipCache.clear();
+      }
+
+      io.emit("system:storage_cleaned", { section });
+      res.json(result);
+    } catch (err: any) {
+      console.error("Storage Clean Error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/admin/comments", requireAdmin, async (req, res) => {
     try {
       const statusFilter = req.query.status as string;

@@ -4535,6 +4535,623 @@ class DatabaseManager {
     }
     return { success: true, message: 'دیتابیس در حالت ذخیره‌سازی محلی (JSON) قرار دارد و تمام فایل‌ها با انکودینگ UTF-8 ذخیره می‌شوند.' };
   }
+
+  async getAllDataCounts(): Promise<{
+    seriesCount: number;
+    chaptersCount: number;
+    commentsCount: number;
+    usersCount: number;
+    nonAdminUsersCount: number;
+    bookmarksCount: number;
+    historyCount: number;
+    ratingsCount: number;
+    reportsCount: number;
+    notificationsCount: number;
+    walletTransactionsCount: number;
+    purchasedChaptersCount: number;
+    settlementRequestsCount: number;
+    ticketsCount: number;
+    ticketMessagesCount: number;
+    chapterViewsLogCount: number;
+    settingsCount: number;
+  }> {
+    if (this.isUsingMySQL && this.pool) {
+      try {
+        const getCount = async (tableName: string, whereClause: string = ""): Promise<number> => {
+          try {
+            const [[{ count }]] = await this.pool!.execute(`SELECT COUNT(*) as count FROM \`${tableName}\` ${whereClause}`) as any;
+            return Number(count) || 0;
+          } catch (e) {
+            return 0;
+          }
+        };
+
+        const [
+          seriesCount,
+          chaptersCount,
+          commentsCount,
+          usersCount,
+          nonAdminUsersCount,
+          bookmarksCount,
+          historyCount,
+          ratingsCount,
+          reportsCount,
+          notificationsCount,
+          walletTransactionsCount,
+          purchasedChaptersCount,
+          settlementRequestsCount,
+          ticketsCount,
+          ticketMessagesCount,
+          chapterViewsLogCount,
+          settingsCount
+        ] = await Promise.all([
+          getCount("series"),
+          getCount("chapters"),
+          getCount("comments"),
+          getCount("users"),
+          getCount("users", "WHERE email NOT IN ('amirrezaveisi45@gmail.com', 'Mr.V@admin.com') AND role != 'admin'"),
+          getCount("bookmarks"),
+          getCount("history"),
+          getCount("ratings"),
+          getCount("reports"),
+          getCount("notifications"),
+          getCount("wallet_transactions"),
+          getCount("purchased_chapters"),
+          getCount("settlement_requests"),
+          getCount("tickets"),
+          getCount("ticket_messages"),
+          getCount("chapter_views_log"),
+          getCount("settings")
+        ]);
+
+        return {
+          seriesCount,
+          chaptersCount,
+          commentsCount,
+          usersCount,
+          nonAdminUsersCount,
+          bookmarksCount,
+          historyCount,
+          ratingsCount,
+          reportsCount,
+          notificationsCount,
+          walletTransactionsCount,
+          purchasedChaptersCount,
+          settlementRequestsCount,
+          ticketsCount,
+          ticketMessagesCount,
+          chapterViewsLogCount,
+          settingsCount
+        };
+      } catch (err) {
+        console.error("Error getting MySQL data counts:", err);
+      }
+    }
+
+    const users = this.localData.users || [];
+    const nonAdminUsers = users.filter(u => 
+      u.email !== 'amirrezaveisi45@gmail.com' && 
+      u.email !== 'Mr.V@admin.com' && 
+      u.role !== 'admin' && 
+      !(u.roles || []).includes('super_admin')
+    );
+
+    return {
+      seriesCount: (this.localData.series || []).length,
+      chaptersCount: (this.localData.chapters || []).length,
+      commentsCount: (this.localData.comments || []).length,
+      usersCount: users.length,
+      nonAdminUsersCount: nonAdminUsers.length,
+      bookmarksCount: (this.localData.bookmarks || []).length,
+      historyCount: (this.localData.history || []).length,
+      ratingsCount: (this.localData.ratings || []).length,
+      reportsCount: (this.localData.reports || []).length,
+      notificationsCount: (this.localData.notifications || []).length,
+      walletTransactionsCount: (this.localData.wallet_transactions || []).length,
+      purchasedChaptersCount: (this.localData.purchased_chapters || []).length,
+      settlementRequestsCount: (this.localData.settlement_requests || []).length,
+      ticketsCount: (this.localData.tickets || []).length,
+      ticketMessagesCount: (this.localData.ticket_messages || []).length,
+      chapterViewsLogCount: (this.localData.chapter_views_log || []).length,
+      settingsCount: Object.keys(this.localData.settings || {}).length
+    };
+  }
+
+  async clearSectionData(section: string, uploadsDir: string, options: any = {}): Promise<{
+    success: boolean;
+    deletedRecords: number;
+    deletedFiles: number;
+    freedBytes: number;
+    message: string;
+  }> {
+    let deletedRecords = 0;
+    let deletedFiles = 0;
+    let freedBytes = 0;
+
+    const safeDeleteDirRecursive = async (dirPath: string): Promise<{ count: number; bytes: number }> => {
+      let count = 0;
+      let bytes = 0;
+      if (!fs.existsSync(dirPath)) return { count: 0, bytes: 0 };
+
+      const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+          const sub = await safeDeleteDirRecursive(fullPath);
+          count += sub.count;
+          bytes += sub.bytes;
+          try {
+            await fs.promises.rmdir(fullPath);
+          } catch (e) {}
+        } else {
+          try {
+            const stat = await fs.promises.stat(fullPath);
+            bytes += stat.size;
+            await fs.promises.unlink(fullPath);
+            count++;
+          } catch (e) {}
+        }
+      }
+      return { count, bytes };
+    };
+
+    if (section === 'series_and_chapters') {
+      if (this.isUsingMySQL && this.pool) {
+        try {
+          await this.pool.execute("DELETE FROM chapter_views_log");
+          await this.pool.execute("DELETE FROM purchased_chapters");
+          await this.pool.execute("DELETE FROM history");
+          await this.pool.execute("DELETE FROM bookmarks");
+          await this.pool.execute("DELETE FROM ratings");
+          await this.pool.execute("DELETE FROM comments");
+          const [cRes]: any = await this.pool.execute("DELETE FROM chapters");
+          const [sRes]: any = await this.pool.execute("DELETE FROM series");
+          deletedRecords += (sRes.affectedRows || 0) + (cRes.affectedRows || 0);
+        } catch (e) {
+          console.error("MySQL series_and_chapters delete error:", e);
+        }
+      }
+
+      deletedRecords += (this.localData.series?.length || 0) + (this.localData.chapters?.length || 0);
+      this.localData.series = [];
+      this.localData.chapters = [];
+      this.localData.comments = [];
+      this.localData.bookmarks = [];
+      this.localData.history = [];
+      this.localData.ratings = [];
+      this.localData.purchased_chapters = [];
+      this.localData.chapter_views_log = [];
+      this.saveLocalData();
+
+      // Delete series uploads folder
+      const seriesUploadsDir = path.join(uploadsDir, 'series');
+      const del = await safeDeleteDirRecursive(seriesUploadsDir);
+      deletedFiles += del.count;
+      freedBytes += del.bytes;
+      await fs.promises.mkdir(seriesUploadsDir, { recursive: true });
+
+      return {
+        success: true,
+        deletedRecords,
+        deletedFiles,
+        freedBytes,
+        message: `تمامی آثار مانهوا/مانگا، چپترها و فایل‌های مربوطه در هاست با موفقیت حذف شدند (${deletedFiles} فایل آزاد شد).`
+      };
+    }
+
+    if (section === 'chapters_only') {
+      if (this.isUsingMySQL && this.pool) {
+        try {
+          await this.pool.execute("DELETE FROM chapter_views_log");
+          await this.pool.execute("DELETE FROM purchased_chapters");
+          const [cRes]: any = await this.pool.execute("DELETE FROM chapters");
+          deletedRecords += cRes.affectedRows || 0;
+        } catch (e) {
+          console.error("MySQL chapters_only delete error:", e);
+        }
+      }
+
+      deletedRecords += this.localData.chapters?.length || 0;
+      this.localData.chapters = [];
+      this.localData.purchased_chapters = [];
+      this.localData.chapter_views_log = [];
+      this.saveLocalData();
+
+      // Remove chapters folders inside series
+      const seriesDir = path.join(uploadsDir, 'series');
+      if (fs.existsSync(seriesDir)) {
+        const seriesFolders = await fs.promises.readdir(seriesDir, { withFileTypes: true });
+        for (const sf of seriesFolders) {
+          if (sf.isDirectory()) {
+            const chDir = path.join(seriesDir, sf.name, 'chapters');
+            if (fs.existsSync(chDir)) {
+              const del = await safeDeleteDirRecursive(chDir);
+              deletedFiles += del.count;
+              freedBytes += del.bytes;
+              await fs.promises.mkdir(chDir, { recursive: true });
+            }
+          }
+        }
+      }
+
+      return {
+        success: true,
+        deletedRecords,
+        deletedFiles,
+        freedBytes,
+        message: `تمامی چپترها و آرشیوهای تصویری با حفظ شناسنامه آثار پاکسازی شدند (${deletedFiles} فایل آزاد شد).`
+      };
+    }
+
+    if (section === 'comments') {
+      if (this.isUsingMySQL && this.pool) {
+        try {
+          const [res]: any = await this.pool.execute("DELETE FROM comments");
+          deletedRecords += res.affectedRows || 0;
+        } catch (e) {
+          console.error("MySQL comments delete error:", e);
+        }
+      }
+      deletedRecords += this.localData.comments?.length || 0;
+      this.localData.comments = [];
+      this.saveLocalData();
+
+      return {
+        success: true,
+        deletedRecords,
+        deletedFiles: 0,
+        freedBytes: 0,
+        message: `تمامی نظرات و دیدگاه‌های کاربران با موفقیت از دیتابیس پاکسازی شدند.`
+      };
+    }
+
+    if (section === 'tickets') {
+      if (this.isUsingMySQL && this.pool) {
+        try {
+          await this.pool.execute("DELETE FROM ticket_messages");
+          const [res]: any = await this.pool.execute("DELETE FROM tickets");
+          deletedRecords += res.affectedRows || 0;
+        } catch (e) {
+          console.error("MySQL tickets delete error:", e);
+        }
+      }
+      deletedRecords += (this.localData.tickets?.length || 0) + (this.localData.ticket_messages?.length || 0);
+      this.localData.tickets = [];
+      this.localData.ticket_messages = [];
+      this.saveLocalData();
+
+      const ticketUploadsDir = path.join(uploadsDir, 'tickets');
+      const del = await safeDeleteDirRecursive(ticketUploadsDir);
+      deletedFiles += del.count;
+      freedBytes += del.bytes;
+
+      return {
+        success: true,
+        deletedRecords,
+        deletedFiles,
+        freedBytes,
+        message: `تمامی تیکت‌ها و پیام‌های پشتیبانی به همراه ضمایم پاکسازی شدند.`
+      };
+    }
+
+    if (section === 'financial') {
+      if (this.isUsingMySQL && this.pool) {
+        try {
+          await this.pool.execute("DELETE FROM purchased_chapters");
+          await this.pool.execute("DELETE FROM settlement_requests");
+          const [res]: any = await this.pool.execute("DELETE FROM wallet_transactions");
+          deletedRecords += res.affectedRows || 0;
+          if (options.resetBalances) {
+            await this.pool.execute("UPDATE users SET walletBalance = 0");
+          }
+        } catch (e) {
+          console.error("MySQL financial delete error:", e);
+        }
+      }
+      deletedRecords += (this.localData.wallet_transactions?.length || 0) + 
+                        (this.localData.purchased_chapters?.length || 0) + 
+                        (this.localData.settlement_requests?.length || 0);
+      this.localData.wallet_transactions = [];
+      this.localData.purchased_chapters = [];
+      this.localData.settlement_requests = [];
+      if (options.resetBalances) {
+        (this.localData.users || []).forEach(u => {
+          u.walletBalance = 0;
+        });
+      }
+      this.saveLocalData();
+
+      return {
+        success: true,
+        deletedRecords,
+        deletedFiles: 0,
+        freedBytes: 0,
+        message: `تمامی سوابق مالی، تراکنش‌های کیف پول، خریدهای چپتر و درخواست‌های تسویه پاکسازی شدند.`
+      };
+    }
+
+    if (section === 'users') {
+      if (this.isUsingMySQL && this.pool) {
+        try {
+          const [res]: any = await this.pool.execute(
+            "DELETE FROM users WHERE email NOT IN ('amirrezaveisi45@gmail.com', 'Mr.V@admin.com') AND role != 'admin'"
+          );
+          deletedRecords += res.affectedRows || 0;
+        } catch (e) {
+          console.error("MySQL users delete error:", e);
+        }
+      }
+      const initialCount = this.localData.users?.length || 0;
+      this.localData.users = (this.localData.users || []).filter(u => 
+        u.email === 'amirrezaveisi45@gmail.com' || 
+        u.email === 'Mr.V@admin.com' || 
+        u.role === 'admin' || 
+        (u.roles || []).includes('super_admin')
+      );
+      deletedRecords += initialCount - this.localData.users.length;
+      this.saveLocalData();
+
+      return {
+        success: true,
+        deletedRecords,
+        deletedFiles: 0,
+        freedBytes: 0,
+        message: `تمامی کاربران عضو به جز حساب مدیریت کل با موفقیت از سیستم حذف شدند.`
+      };
+    }
+
+    if (section === 'user_activity') {
+      if (this.isUsingMySQL && this.pool) {
+        try {
+          await this.pool.execute("DELETE FROM history");
+          await this.pool.execute("DELETE FROM bookmarks");
+          const [res]: any = await this.pool.execute("DELETE FROM ratings");
+          deletedRecords += res.affectedRows || 0;
+        } catch (e) {
+          console.error("MySQL user_activity delete error:", e);
+        }
+      }
+      deletedRecords += (this.localData.history?.length || 0) + 
+                        (this.localData.bookmarks?.length || 0) + 
+                        (this.localData.ratings?.length || 0);
+      this.localData.history = [];
+      this.localData.bookmarks = [];
+      this.localData.ratings = [];
+      this.saveLocalData();
+
+      return {
+        success: true,
+        deletedRecords,
+        deletedFiles: 0,
+        freedBytes: 0,
+        message: `تاریخچه مطالعه، لیست نشان‌شده‌ها و امتیازات کاربران از دیتابیس حذف شدند.`
+      };
+    }
+
+    if (section === 'logs_reports') {
+      if (this.isUsingMySQL && this.pool) {
+        try {
+          await this.pool.execute("DELETE FROM reports");
+          await this.pool.execute("DELETE FROM notifications");
+          const [res]: any = await this.pool.execute("DELETE FROM chapter_views_log");
+          deletedRecords += res.affectedRows || 0;
+        } catch (e) {
+          console.error("MySQL logs_reports delete error:", e);
+        }
+      }
+      deletedRecords += (this.localData.reports?.length || 0) + 
+                        (this.localData.notifications?.length || 0) + 
+                        (this.localData.chapter_views_log?.length || 0);
+      this.localData.reports = [];
+      this.localData.notifications = [];
+      this.localData.chapter_views_log = [];
+      this.saveLocalData();
+
+      return {
+        success: true,
+        deletedRecords,
+        deletedFiles: 0,
+        freedBytes: 0,
+        message: `گزارش‌های خطا، اعلان‌های سیستمی و لاگ‌های بازدید چپترها پاکسازی شدند.`
+      };
+    }
+
+    if (section === 'orphaned_files') {
+      // Collect all referenced file paths from DB
+      const referencedFiles = new Set<string>();
+
+      const allSeries = await this.getSeries();
+      for (const s of allSeries) {
+        if (s.cover) referencedFiles.add(path.basename(s.cover.split('?')[0]));
+        if (s.banner) referencedFiles.add(path.basename(s.banner.split('?')[0]));
+      }
+
+      const allChapters = await this.getAllChaptersRaw();
+      for (const ch of allChapters) {
+        if (Array.isArray(ch.images)) {
+          for (const img of ch.images) {
+            if (typeof img === 'string') {
+              if (img.includes('zip=')) {
+                const match = img.match(/[?&]zip=([^&#]+)/);
+                if (match && match[1]) {
+                  referencedFiles.add(path.basename(decodeURIComponent(match[1])));
+                }
+              } else {
+                referencedFiles.add(path.basename(img.split('?')[0]));
+              }
+            }
+          }
+        }
+      }
+
+      const allUsers = await this.getUsers();
+      for (const u of allUsers) {
+        if (u.avatarUrl) referencedFiles.add(path.basename(u.avatarUrl.split('?')[0]));
+      }
+
+      // Recursively scan uploads
+      const scanAndDeleteOrphaned = async (dir: string): Promise<void> => {
+        if (!fs.existsSync(dir)) return;
+        const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            await scanAndDeleteOrphaned(fullPath);
+          } else {
+            const fileName = entry.name;
+            if (!referencedFiles.has(fileName) && !fileName.startsWith('.')) {
+              try {
+                const stat = await fs.promises.stat(fullPath);
+                freedBytes += stat.size;
+                await fs.promises.unlink(fullPath);
+                deletedFiles++;
+              } catch (e) {}
+            }
+          }
+        }
+      };
+
+      await scanAndDeleteOrphaned(uploadsDir);
+
+      return {
+        success: true,
+        deletedRecords: 0,
+        deletedFiles,
+        freedBytes,
+        message: `تعداد ${deletedFiles} فایل یتیم و اضافی بدون ارجاع در هاست شناسایی و با موفقیت حذف شدند.`
+      };
+    }
+
+    if (section === 'all_uploads') {
+      const del = await safeDeleteDirRecursive(uploadsDir);
+      deletedFiles = del.count;
+      freedBytes = del.bytes;
+      await fs.promises.mkdir(path.join(uploadsDir, 'series'), { recursive: true });
+      await fs.promises.mkdir(path.join(uploadsDir, 'general'), { recursive: true });
+      await fs.promises.mkdir(path.join(uploadsDir, 'avatars'), { recursive: true });
+
+      return {
+        success: true,
+        deletedRecords: 0,
+        deletedFiles,
+        freedBytes,
+        message: `تمامی فایل‌ها و پوشه‌های موجود در هاست دانلود/آپلود پاکسازی شدند (${deletedFiles} فایل).`
+      };
+    }
+
+    if (section === 'full_factory_reset') {
+      // 1. MySQL Complete Wipe
+      if (this.isUsingMySQL && this.pool) {
+        try {
+          await this.pool.execute("DELETE FROM chapter_views_log");
+          await this.pool.execute("DELETE FROM purchased_chapters");
+          await this.pool.execute("DELETE FROM wallet_transactions");
+          await this.pool.execute("DELETE FROM settlement_requests");
+          await this.pool.execute("DELETE FROM ticket_messages");
+          await this.pool.execute("DELETE FROM tickets");
+          await this.pool.execute("DELETE FROM reports");
+          await this.pool.execute("DELETE FROM notifications");
+          await this.pool.execute("DELETE FROM history");
+          await this.pool.execute("DELETE FROM bookmarks");
+          await this.pool.execute("DELETE FROM ratings");
+          await this.pool.execute("DELETE FROM comments");
+          await this.pool.execute("DELETE FROM chapters");
+          await this.pool.execute("DELETE FROM series");
+          await this.pool.execute("DELETE FROM users WHERE email NOT IN ('amirrezaveisi45@gmail.com', 'Mr.V@admin.com') AND role != 'admin'");
+        } catch (e) {
+          console.error("MySQL full factory reset error:", e);
+        }
+      }
+
+      // 2. LocalData Complete Wipe
+      const superAdminUser = (this.localData.users || []).find(u => 
+        u.email === 'amirrezaveisi45@gmail.com' || u.email === 'Mr.V@admin.com' || u.role === 'admin'
+      ) || {
+        id: 'admin',
+        email: 'amirrezaveisi45@gmail.com',
+        displayName: 'مدیریت کل',
+        avatarUrl: '',
+        banned: false,
+        role: 'admin' as const,
+        roles: ['super_admin', 'admin'],
+        permissions: ['all'],
+        melliCode: '11111111',
+        canCreateSeries: true,
+        walletBalance: 0,
+        hasCompletedSetup: true,
+        createdAt: new Date().toISOString()
+      };
+
+      const defaultSettings = this.localData.settings || {
+        global: {
+          siteName: 'AsuraClone',
+          discordUrl: 'https://discord.gg',
+          telegramUrl: 'https://t.me',
+          featuredType: 'Manhwa',
+          activeAnnouncement: 'به آسورا کلون خوش آمدید!'
+        }
+      };
+
+      this.localData = {
+        series: [],
+        chapters: [],
+        comments: [],
+        users: [superAdminUser],
+        bookmarks: [],
+        history: [],
+        ratings: [],
+        notifications: [],
+        reports: [],
+        wallet_transactions: [],
+        purchased_chapters: [],
+        settlement_requests: [],
+        tickets: [],
+        ticket_messages: [],
+        chapter_views_log: [],
+        settings: defaultSettings
+      };
+      this.saveLocalData();
+
+      // 3. Clear Uploads Filesystem
+      const del = await safeDeleteDirRecursive(uploadsDir);
+      deletedFiles = del.count;
+      freedBytes = del.bytes;
+      await fs.promises.mkdir(path.join(uploadsDir, 'series'), { recursive: true });
+      await fs.promises.mkdir(path.join(uploadsDir, 'general'), { recursive: true });
+      await fs.promises.mkdir(path.join(uploadsDir, 'avatars'), { recursive: true });
+
+      return {
+        success: true,
+        deletedRecords: 9999,
+        deletedFiles,
+        freedBytes,
+        message: `عملیات ریست فکتوری کامل انجام شد. تمامی دیتابیس، محتواها، کاربران و فایل‌های هاست پاکسازی شده و سیستم به حالت اولیه بازگشت.`
+      };
+    }
+
+    return {
+      success: false,
+      deletedRecords: 0,
+      deletedFiles: 0,
+      freedBytes: 0,
+      message: 'بخش انتخاب شده برای پاکسازی نامعتبر است.'
+    };
+  }
+
+  private async getAllChaptersRaw(): Promise<Chapter[]> {
+    if (this.isUsingMySQL && this.pool) {
+      try {
+        const [rows] = await this.pool.execute("SELECT * FROM chapters") as any[];
+        return rows.map((r: any) => ({
+          ...r,
+          images: typeof r.images === 'string' ? r.images.split('\n').map((s: string) => s.trim()).filter(Boolean) : (r.images || [])
+        }));
+      } catch (e) {
+        return [];
+      }
+    }
+    return this.localData.chapters || [];
+  }
 }
 
 export const dbManager = new DatabaseManager();
