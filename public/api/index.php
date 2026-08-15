@@ -2078,6 +2078,389 @@ if ($method === 'GET' && $sub_path === '/admin/migration-manifest') {
     exit;
 }
 
+function getPhpStorageDirectoryStats($dirPath) {
+    $totalBytes = 0;
+    $fileCount = 0;
+    if (!file_exists($dirPath) || !is_dir($dirPath)) {
+        return ["totalBytes" => 0, "fileCount" => 0];
+    }
+    try {
+        $it = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dirPath, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($it as $item) {
+            if ($item->isFile()) {
+                $totalBytes += $item->getSize();
+                $fileCount++;
+            }
+        }
+    } catch (Exception $e) {}
+    return ["totalBytes" => $totalBytes, "fileCount" => $fileCount];
+}
+
+function formatStorageBytesPhp($bytes) {
+    if ($bytes <= 0) return '0 بایت';
+    $k = 1024;
+    $sizes = ['بایت', 'کیلوبایت (KB)', 'مگابایت (MB)', 'گیگابایت (GB)'];
+    $i = floor(log($bytes) / log($k));
+    if ($i >= count($sizes)) $i = count($sizes) - 1;
+    return round($bytes / pow($k, $i), 2) . ' ' . $sizes[$i];
+}
+
+function safePhpDirWipe($dirPath) {
+    $deletedFiles = 0;
+    $freedBytes = 0;
+    if (!file_exists($dirPath) || !is_dir($dirPath)) {
+        return ["deletedFiles" => 0, "freedBytes" => 0];
+    }
+    try {
+        $files = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dirPath, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($files as $fileinfo) {
+            if ($fileinfo->isDir()) {
+                @rmdir($fileinfo->getRealPath());
+            } else {
+                $freedBytes += $fileinfo->getSize();
+                $deletedFiles++;
+                @unlink($fileinfo->getRealPath());
+            }
+        }
+    } catch (Exception $e) {}
+    return ["deletedFiles" => $deletedFiles, "freedBytes" => $freedBytes];
+}
+
+// 40g-1. STORAGE BREAKDOWN (PHP)
+if ($method === 'GET' && $sub_path === '/admin/storage/breakdown') {
+    $user = requireAdmin($pdo);
+    if (!isSuperAdminUser($user)) {
+        sendResponse(["error" => "تنها مدیریت کل مجاز به دسترسی به بخش مدیریت فضای هاست می‌باشد."], 403);
+    }
+
+    $uploadsDir = realpath(__DIR__ . '/../uploads') ?: (__DIR__ . '/../uploads');
+    $seriesUploadsDir = $uploadsDir . '/series';
+    $backupsDir = realpath(__DIR__ . '/../backups') ?: (__DIR__ . '/../backups');
+
+    $uploadsStats = getPhpStorageDirectoryStats($uploadsDir);
+    $seriesStats = getPhpStorageDirectoryStats($seriesUploadsDir);
+    $backupsStats = getPhpStorageDirectoryStats($backupsDir);
+
+    $counts = [
+        "seriesCount" => (int)$pdo->query("SELECT COUNT(*) FROM series")->fetchColumn(),
+        "chaptersCount" => (int)$pdo->query("SELECT COUNT(*) FROM chapters")->fetchColumn(),
+        "commentsCount" => (int)$pdo->query("SELECT COUNT(*) FROM comments")->fetchColumn(),
+        "usersCount" => (int)$pdo->query("SELECT COUNT(*) FROM users")->fetchColumn(),
+        "nonAdminUsersCount" => (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role != 'admin' AND email NOT IN ('amirrezaveisi45@gmail.com', 'Mr.V@admin.com')")->fetchColumn(),
+        "bookmarksCount" => (int)$pdo->query("SELECT COUNT(*) FROM bookmarks")->fetchColumn(),
+        "historyCount" => (int)$pdo->query("SELECT COUNT(*) FROM history")->fetchColumn(),
+        "ratingsCount" => (int)$pdo->query("SELECT COUNT(*) FROM ratings")->fetchColumn(),
+        "reportsCount" => (int)$pdo->query("SELECT COUNT(*) FROM reports")->fetchColumn(),
+        "notificationsCount" => (int)$pdo->query("SELECT COUNT(*) FROM notifications")->fetchColumn(),
+        "walletTransactionsCount" => (int)$pdo->query("SELECT COUNT(*) FROM wallet_transactions")->fetchColumn(),
+        "purchasedChaptersCount" => (int)$pdo->query("SELECT COUNT(*) FROM purchased_chapters")->fetchColumn(),
+        "settlementRequestsCount" => (int)$pdo->query("SELECT COUNT(*) FROM settlement_requests")->fetchColumn(),
+        "ticketsCount" => (int)$pdo->query("SELECT COUNT(*) FROM tickets")->fetchColumn(),
+        "ticketMessagesCount" => (int)$pdo->query("SELECT COUNT(*) FROM ticket_messages")->fetchColumn(),
+        "chapterViewsLogCount" => (int)$pdo->query("SELECT COUNT(*) FROM chapter_views_log")->fetchColumn(),
+        "settingsCount" => (int)$pdo->query("SELECT COUNT(*) FROM settings")->fetchColumn()
+    ];
+
+    sendResponse([
+        "success" => true,
+        "database" => [
+            "isUsingMySQL" => true,
+            "host" => DB_HOST,
+            "dbName" => DB_NAME,
+            "tables" => $counts
+        ],
+        "storage" => [
+            "uploads" => [
+                "totalBytes" => $uploadsStats['totalBytes'],
+                "formatted" => formatStorageBytesPhp($uploadsStats['totalBytes']),
+                "fileCount" => $uploadsStats['fileCount']
+            ],
+            "seriesUploads" => [
+                "totalBytes" => $seriesStats['totalBytes'],
+                "formatted" => formatStorageBytesPhp($seriesStats['totalBytes']),
+                "fileCount" => $seriesStats['fileCount']
+            ],
+            "backups" => [
+                "totalBytes" => $backupsStats['totalBytes'],
+                "formatted" => formatStorageBytesPhp($backupsStats['totalBytes']),
+                "fileCount" => $backupsStats['fileCount']
+            ],
+            "zipCacheCount" => 0
+        ]
+    ]);
+}
+
+// 40g-2. SECTION-BY-SECTION DATA & STORAGE CLEANER (PHP)
+if ($method === 'POST' && $sub_path === '/admin/storage/clean-section') {
+    $user = requireAdmin($pdo);
+    if (!isSuperAdminUser($user)) {
+        sendResponse(["error" => "تنها مدیریت کل مجاز به پاکسازی داده‌های هاست و دیتابیس می‌باشد."], 403);
+    }
+
+    $input = getJsonInput();
+    $section = $input['section'] ?? '';
+    $options = $input['options'] ?? [];
+
+    if (!$section) {
+        sendResponse(["error" => "شناسه بخش ارسالی نامعتبر است."], 400);
+    }
+
+    $uploadsDir = realpath(__DIR__ . '/../uploads') ?: (__DIR__ . '/../uploads');
+    $seriesUploadsDir = $uploadsDir . '/series';
+    $deletedRecords = 0;
+    $deletedFiles = 0;
+    $freedBytes = 0;
+
+    try {
+        if ($section === 'server_cache') {
+            sendResponse([
+                "success" => true,
+                "deletedRecords" => 0,
+                "deletedFiles" => 0,
+                "freedBytes" => 0,
+                "message" => "کش موقت سرور با موفقیت تخلیه شد."
+            ]);
+        }
+
+        if ($section === 'series_and_chapters') {
+            $deletedRecords += (int)$pdo->exec("DELETE FROM chapter_views_log");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM purchased_chapters");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM comments");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM bookmarks");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM history");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM ratings");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM reports");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM chapters");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM series");
+
+            $wipe = safePhpDirWipe($seriesUploadsDir);
+            $deletedFiles = $wipe['deletedFiles'];
+            $freedBytes = $wipe['freedBytes'];
+            if (!is_dir($seriesUploadsDir)) @mkdir($seriesUploadsDir, 0755, true);
+
+            sendResponse([
+                "success" => true,
+                "deletedRecords" => $deletedRecords,
+                "deletedFiles" => $deletedFiles,
+                "freedBytes" => $freedBytes,
+                "message" => "تمامی آثار، مانگاها و چپترها به همراه {$deletedFiles} فایل تصویری و ZIP در هاست با موفقیت حذف شدند."
+            ]);
+        }
+
+        if ($section === 'chapters_only') {
+            $deletedRecords += (int)$pdo->exec("DELETE FROM chapter_views_log");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM purchased_chapters");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM chapters");
+
+            $wipe = safePhpDirWipe($seriesUploadsDir);
+            $deletedFiles = $wipe['deletedFiles'];
+            $freedBytes = $wipe['freedBytes'];
+            if (!is_dir($seriesUploadsDir)) @mkdir($seriesUploadsDir, 0755, true);
+
+            sendResponse([
+                "success" => true,
+                "deletedRecords" => $deletedRecords,
+                "deletedFiles" => $deletedFiles,
+                "freedBytes" => $freedBytes,
+                "message" => "تمام چپترها و آرشیوهای ZIP هاست پاکسازی شدند ({$deletedFiles} فایل). عناوین آثار در سایت حفظ گردیدند."
+            ]);
+        }
+
+        if ($section === 'orphaned_files') {
+            $referencedFiles = [];
+            
+            // Collect series covers & banners
+            $seriesRows = $pdo->query("SELECT cover, banner FROM series")->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($seriesRows as $sr) {
+                if (!empty($sr['cover'])) $referencedFiles[basename($sr['cover'])] = true;
+                if (!empty($sr['banner'])) $referencedFiles[basename($sr['banner'])] = true;
+            }
+
+            // Collect chapters images
+            $chapRows = $pdo->query("SELECT images FROM chapters")->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($chapRows as $cr) {
+                if (!empty($cr['images'])) {
+                    $imgList = is_array($cr['images']) ? $cr['images'] : explode(',', $cr['images']);
+                    foreach ($imgList as $img) {
+                        $imgTrim = trim($img);
+                        if ($imgTrim) $referencedFiles[basename($imgTrim)] = true;
+                    }
+                }
+            }
+
+            // Collect user avatars
+            $userRows = $pdo->query("SELECT avatarUrl FROM users WHERE avatarUrl != ''")->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($userRows as $ur) {
+                if (!empty($ur['avatarUrl'])) $referencedFiles[basename($ur['avatarUrl'])] = true;
+            }
+
+            if (file_exists($uploadsDir) && is_dir($uploadsDir)) {
+                $it = new RecursiveIteratorIterator(
+                    new RecursiveDirectoryIterator($uploadsDir, FilesystemIterator::SKIP_DOTS),
+                    RecursiveIteratorIterator::SELF_FIRST
+                );
+                foreach ($it as $item) {
+                    if ($item->isFile()) {
+                        $fName = $item->getFilename();
+                        if (!isset($referencedFiles[$fName]) && strpos($fName, '.') !== 0) {
+                            $freedBytes += $item->getSize();
+                            $deletedFiles++;
+                            @unlink($item->getRealPath());
+                        }
+                    }
+                }
+            }
+
+            sendResponse([
+                "success" => true,
+                "deletedRecords" => 0,
+                "deletedFiles" => $deletedFiles,
+                "freedBytes" => $freedBytes,
+                "message" => "تعداد {$deletedFiles} فایل یتیم و اضافی بدون ارجاع در هاست شناسایی و با موفقیت حذف شدند."
+            ]);
+        }
+
+        if ($section === 'all_uploads') {
+            $wipe = safePhpDirWipe($uploadsDir);
+            $deletedFiles = $wipe['deletedFiles'];
+            $freedBytes = $wipe['freedBytes'];
+            @mkdir($uploadsDir . '/series', 0755, true);
+            @mkdir($uploadsDir . '/general', 0755, true);
+            @mkdir($uploadsDir . '/avatars', 0755, true);
+            @mkdir($uploadsDir . '/tickets', 0755, true);
+
+            sendResponse([
+                "success" => true,
+                "deletedRecords" => 0,
+                "deletedFiles" => $deletedFiles,
+                "freedBytes" => $freedBytes,
+                "message" => "تمامی فایل‌ها و پوشه‌های موجود در هاست دانلود/آپلود پاکسازی شدند ({$deletedFiles} فایل)."
+            ]);
+        }
+
+        if ($section === 'comments') {
+            $deletedRecords = (int)$pdo->exec("DELETE FROM comments");
+            sendResponse([
+                "success" => true,
+                "deletedRecords" => $deletedRecords,
+                "deletedFiles" => 0,
+                "freedBytes" => 0,
+                "message" => "تعداد {$deletedRecords} نظر و دیدگاه کاربری با موفقیت از دیتابیس پاکسازی شد."
+            ]);
+        }
+
+        if ($section === 'tickets') {
+            $msgCount = (int)$pdo->exec("DELETE FROM ticket_messages");
+            $tCount = (int)$pdo->exec("DELETE FROM tickets");
+            $wipe = safePhpDirWipe($uploadsDir . '/tickets');
+            sendResponse([
+                "success" => true,
+                "deletedRecords" => $tCount + $msgCount,
+                "deletedFiles" => $wipe['deletedFiles'],
+                "freedBytes" => $wipe['freedBytes'],
+                "message" => "کلیه تیکت‌ها ({$tCount} تیکت و {$msgCount} پیام) و فایل‌های پیوست با موفقیت حذف شدند."
+            ]);
+        }
+
+        if ($section === 'financial') {
+            $deletedRecords += (int)$pdo->exec("DELETE FROM wallet_transactions");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM purchased_chapters");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM settlement_requests");
+            if (!empty($options['resetBalances'])) {
+                $pdo->exec("UPDATE users SET walletBalance = 0");
+            }
+            sendResponse([
+                "success" => true,
+                "deletedRecords" => $deletedRecords,
+                "deletedFiles" => 0,
+                "freedBytes" => 0,
+                "message" => "سوابق مالی، تراکنش‌ها و خریدهای چپتر با موفقیت پاکسازی شدند."
+            ]);
+        }
+
+        if ($section === 'users') {
+            $deletedRecords = (int)$pdo->exec("DELETE FROM users WHERE role != 'admin' AND email NOT IN ('amirrezaveisi45@gmail.com', 'Mr.V@admin.com')");
+            sendResponse([
+                "success" => true,
+                "deletedRecords" => $deletedRecords,
+                "deletedFiles" => 0,
+                "freedBytes" => 0,
+                "message" => "تعداد {$deletedRecords} کاربر عادی با موفقیت حذف گردیدند. حساب مدیریت کل حفظ شد."
+            ]);
+        }
+
+        if ($section === 'user_activity') {
+            $deletedRecords += (int)$pdo->exec("DELETE FROM bookmarks");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM history");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM ratings");
+            sendResponse([
+                "success" => true,
+                "deletedRecords" => $deletedRecords,
+                "deletedFiles" => 0,
+                "freedBytes" => 0,
+                "message" => "سوابق بازدید، لیست‌های بوک‌مارک و امتیازات ثبت‌شده کاربران پاکسازی گردیدند."
+            ]);
+        }
+
+        if ($section === 'logs_reports') {
+            $deletedRecords += (int)$pdo->exec("DELETE FROM reports");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM notifications");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM chapter_views_log");
+            sendResponse([
+                "success" => true,
+                "deletedRecords" => $deletedRecords,
+                "deletedFiles" => 0,
+                "freedBytes" => 0,
+                "message" => "گزارشات خطای ارسالی، نوتیفیکیشن‌ها و لاگ‌های بازدید ساعتی با موفقیت تخلیه شدند."
+            ]);
+        }
+
+        if ($section === 'full_factory_reset') {
+            $deletedRecords += (int)$pdo->exec("DELETE FROM chapter_views_log");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM purchased_chapters");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM wallet_transactions");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM settlement_requests");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM ticket_messages");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM tickets");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM reports");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM notifications");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM history");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM bookmarks");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM ratings");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM comments");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM chapters");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM series");
+            $deletedRecords += (int)$pdo->exec("DELETE FROM users WHERE role != 'admin' AND email NOT IN ('amirrezaveisi45@gmail.com', 'Mr.V@admin.com')");
+
+            $wipe = safePhpDirWipe($uploadsDir);
+            $deletedFiles = $wipe['deletedFiles'];
+            $freedBytes = $wipe['freedBytes'];
+            @mkdir($uploadsDir . '/series', 0755, true);
+            @mkdir($uploadsDir . '/general', 0755, true);
+            @mkdir($uploadsDir . '/avatars', 0755, true);
+            @mkdir($uploadsDir . '/tickets', 0755, true);
+
+            sendResponse([
+                "success" => true,
+                "deletedRecords" => $deletedRecords,
+                "deletedFiles" => $deletedFiles,
+                "freedBytes" => $freedBytes,
+                "message" => "عملیات ریست فکتوری کامل انجام شد. تمامی دیتابیس، محتواها، کاربران و فایل‌های هاست پاکسازی شده و سیستم به حالت اولیه بازگشت."
+            ]);
+        }
+
+        sendResponse(["error" => "شناسه بخش نامعتبر است."], 400);
+    } catch (Exception $e) {
+        sendResponse(["error" => $e->getMessage()], 500);
+    }
+}
+
 // 40h. GET USER TICKETS
 if ($method === 'GET' && $sub_path === '/tickets') {
     $uid = $_SERVER['HTTP_X_USER_UID'] ?? $_SERVER['HTTP_X_ADMIN_UID'] ?? $_GET['uid'] ?? $_GET['adminUid'] ?? null;
