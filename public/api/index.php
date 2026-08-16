@@ -387,7 +387,13 @@ function ensureSchema($pdo) {
         $pdo->exec("ALTER TABLE comments ADD COLUMN parentId VARCHAR(100) DEFAULT NULL");
     } catch (Exception $e) {}
     try {
-        $pdo->exec("ALTER TABLE comments ADD COLUMN status VARCHAR(20) DEFAULT 'pending'");
+        $pdo->exec("ALTER TABLE comments ADD COLUMN status VARCHAR(20) DEFAULT 'approved'");
+    } catch (Exception $e) {}
+    try {
+        $pdo->exec("ALTER TABLE comments ADD COLUMN isPinned TINYINT(1) DEFAULT 0");
+    } catch (Exception $e) {}
+    try {
+        $pdo->exec("ALTER TABLE comments ADD COLUMN pinnedAt DATETIME NULL");
     } catch (Exception $e) {}
     try {
         $pdo->exec("UPDATE comments SET status = 'approved' WHERE status IS NULL OR status = ''");
@@ -1571,16 +1577,22 @@ if ($method === 'POST' && matchRoute('/series/:seriesId/chapters/:id/submit', $s
 // 28. GET CHAPTER COMMENTS
 if ($method === 'GET' && matchRoute('/chapters/:chapterId/comments', $sub_path, $params)) {
     $user = getUserFromHeaders($pdo);
-    $isAdmin = $user && ($user['role'] === 'admin' || (isset($user['roles']) && in_array('super_admin', json_decode($user['roles'] ?? '[]', true))));
+    $isAdmin = $user && (
+        $user['role'] === 'admin' || 
+        $user['id'] === 'admin' || 
+        $user['email'] === 'amirrezaveisi45@gmail.com' || 
+        $user['email'] === 'Mr.V@admin.com' || 
+        (isset($user['roles']) && in_array('super_admin', json_decode($user['roles'] ?? '[]', true)))
+    );
     
     if ($isAdmin) {
-        $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? ORDER BY createdAt DESC");
+        $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? ORDER BY isPinned DESC, createdAt DESC");
         $stmt->execute([$params['chapterId']]);
     } else if ($user) {
-        $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? AND (status = 'approved' OR status IS NULL OR status = '' OR userId = ?) ORDER BY createdAt DESC");
+        $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? AND (status = 'approved' OR status IS NULL OR status = '' OR userId = ?) ORDER BY isPinned DESC, createdAt DESC");
         $stmt->execute([$params['chapterId'], $user['id']]);
     } else {
-        $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? AND (status = 'approved' OR status IS NULL OR status = '') ORDER BY createdAt DESC");
+        $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? AND (status = 'approved' OR status IS NULL OR status = '') ORDER BY isPinned DESC, createdAt DESC");
         $stmt->execute([$params['chapterId']]);
     }
     $comments = $stmt->fetchAll();
@@ -1591,6 +1603,8 @@ if ($method === 'GET' && matchRoute('/chapters/:chapterId/comments', $sub_path, 
         $c['dislikes'] = $c['dislikes'] ? json_decode($c['dislikes'], true) : [];
         if (!is_array($c['dislikes'])) $c['dislikes'] = [];
         if (empty($c['status'])) $c['status'] = 'approved';
+        $c['isPinned'] = (bool)($c['isPinned'] ?? 0);
+        $c['pinnedAt'] = $c['pinnedAt'] ?? null;
     }
     
     sendResponse($comments);
@@ -1598,25 +1612,38 @@ if ($method === 'GET' && matchRoute('/chapters/:chapterId/comments', $sub_path, 
 
 // 29. ADD COMMENT
 if ($method === 'POST' && matchRoute('/chapters/:chapterId/comments', $sub_path, $params)) {
-    $user = getUserFromHeaders($pdo);
-    if (!$user) sendResponse(["error" => "کاربر یافت نشد."], 401);
-    
     $input = getJsonInput();
+    $user = getUserFromHeaders($pdo);
+    if (!$user && !empty($input['userId'])) {
+        $stmtU = $pdo->prepare("SELECT * FROM users WHERE id = ? OR email = ?");
+        $stmtU->execute([$input['userId'], $input['userId']]);
+        $user = $stmtU->fetch();
+    }
+    
     $content = isset($input['content']) ? trim($input['content']) : '';
     if (empty($content)) sendResponse(["error" => "محتوای کامنت نمی‌تواند خالی باشد."], 400);
     
-    $parentId = isset($input['parentId']) ? $input['parentId'] : null;
-    $isAdmin = ($user['role'] === 'admin' || (isset($user['roles']) && in_array('super_admin', json_decode($user['roles'] ?? '[]', true))));
+    $userId = $user ? $user['id'] : ($input['userId'] ?? 'user_guest');
+    $userName = $user ? $user['displayName'] : ($input['userName'] ?? 'کاربر مانگا');
+    $userAvatar = $user ? $user['avatarUrl'] : ($input['userAvatar'] ?? '');
     
-    // Check auto approve setting
-    $autoApprove = false;
+    $isAdmin = ($user && (
+        $user['role'] === 'admin' || 
+        $user['id'] === 'admin' || 
+        $user['email'] === 'amirrezaveisi45@gmail.com' || 
+        $user['email'] === 'Mr.V@admin.com' || 
+        (isset($user['roles']) && in_array('super_admin', is_array($user['roles']) ? $user['roles'] : json_decode($user['roles'] ?? '[]', true)))
+    ));
+    
+    // Check auto approve setting (default to true)
+    $autoApprove = true;
     $stmtSet = $pdo->prepare("SELECT val FROM settings WHERE id = 'global'");
     $stmtSet->execute();
     $globalSet = $stmtSet->fetch();
     if ($globalSet && !empty($globalSet['val'])) {
         $gVal = json_decode($globalSet['val'], true);
-        if (isset($gVal['autoApproveComments']) && $gVal['autoApproveComments']) {
-            $autoApprove = true;
+        if (isset($gVal['autoApproveComments']) && $gVal['autoApproveComments'] === false) {
+            $autoApprove = false;
         }
     }
     
@@ -1625,14 +1652,15 @@ if ($method === 'POST' && matchRoute('/chapters/:chapterId/comments', $sub_path,
         $status = $input['status'];
     }
     
-    $id = 'comment-' . round(microtime(true) * 1000);
-    $stmt = $pdo->prepare("INSERT INTO comments (id, chapterId, userId, userName, userAvatar, content, parentId, status, likes, dislikes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]')");
+    $parentId = isset($input['parentId']) ? $input['parentId'] : null;
+    $id = !empty($input['id']) ? $input['id'] : ('comment-' . round(microtime(true) * 1000));
+    $stmt = $pdo->prepare("INSERT INTO comments (id, chapterId, userId, userName, userAvatar, content, parentId, status, likes, dislikes, isPinned) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', 0)");
     $stmt->execute([
         $id,
         $params['chapterId'],
-        $user['id'],
-        $user['displayName'],
-        $user['avatarUrl'],
+        $userId,
+        $userName,
+        $userAvatar,
         $content,
         $parentId,
         $status
@@ -1645,8 +1673,25 @@ if ($method === 'POST' && matchRoute('/chapters/:chapterId/comments', $sub_path,
     $c['likes'] = [];
     $c['dislikes'] = [];
     $c['status'] = $status;
+    $c['isPinned'] = false;
     
     sendResponse($c);
+}
+
+// 29.1 PIN / UNPIN COMMENT (ADMIN)
+if ($method === 'POST' && matchRoute('/comments/:id/pin', $sub_path, $params)) {
+    requireAdmin($pdo);
+    $stmt = $pdo->prepare("SELECT isPinned, chapterId FROM comments WHERE id = ?");
+    $stmt->execute([$params['id']]);
+    $c = $stmt->fetch();
+    if (!$c) sendResponse(["error" => "دیدگاه یافت نشد."], 404);
+
+    $newPinned = empty($c['isPinned']) ? 1 : 0;
+    $pinnedAt = $newPinned ? date('Y-m-d H:i:s') : null;
+    $stmtUp = $pdo->prepare("UPDATE comments SET isPinned = ?, pinnedAt = ? WHERE id = ?");
+    $stmtUp->execute([$newPinned, $pinnedAt, $params['id']]);
+
+    sendResponse(["success" => true, "isPinned" => (bool)$newPinned]);
 }
 
 // UPDATE COMMENT STATUS

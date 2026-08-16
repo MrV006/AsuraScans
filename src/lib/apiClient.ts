@@ -308,16 +308,28 @@ export const apiClient = {
   async addComment(chapterId: string, comment: { id: string; userId: string; userName: string; userAvatar: string; content: string; parentId?: string }) {
     const res = await fetch(`${API_URL}/api/chapters/${chapterId}/comments`, {
       method: 'POST',
-      headers: this.getHeaders(),
+      headers: this.getHeaders(comment.userId),
       body: JSON.stringify({ chapterId, ...comment })
     });
+    return res.json();
+  },
+
+  async togglePinComment(commentId: string, adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/comments/${commentId}/pin`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'خطا در تغییر وضعیت سنجاق نظر.');
+    }
     return res.json();
   },
 
   async reactToComment(commentId: string, userId: string, type: 'like' | 'dislike') {
     const res = await fetch(`${API_URL}/api/comments/${commentId}/react`, {
       method: 'POST',
-      headers: this.getHeaders(),
+      headers: this.getHeaders(userId),
       body: JSON.stringify({ userId, type })
     });
     return res.json();

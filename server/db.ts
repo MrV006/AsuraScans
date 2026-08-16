@@ -92,6 +92,8 @@ export interface Comment {
   status?: 'pending' | 'approved' | 'rejected';
   likes: string[]; // array of userIds
   dislikes: string[]; // array of userIds
+  isPinned?: boolean;
+  pinnedAt?: string | null;
   createdAt: string;
 }
 
@@ -488,8 +490,12 @@ class DatabaseManager {
           userName VARCHAR(100) NOT NULL,
           userAvatar TEXT,
           content TEXT NOT NULL,
+          parentId VARCHAR(100) DEFAULT NULL,
+          status VARCHAR(20) DEFAULT 'approved',
           likes TEXT, -- JSON arrays of user IDs
           dislikes TEXT, -- JSON arrays of user IDs
+          isPinned TINYINT(1) DEFAULT 0,
+          pinnedAt DATETIME NULL,
           createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
         `CREATE TABLE IF NOT EXISTS bookmarks (
@@ -675,6 +681,22 @@ class DatabaseManager {
       } catch (e) {
         // ignore
       }
+
+      try {
+        await this.pool.execute("ALTER TABLE comments ADD COLUMN parentId VARCHAR(100) DEFAULT NULL");
+      } catch (e) {}
+
+      try {
+        await this.pool.execute("ALTER TABLE comments ADD COLUMN status VARCHAR(20) DEFAULT 'approved'");
+      } catch (e) {}
+
+      try {
+        await this.pool.execute("ALTER TABLE comments ADD COLUMN isPinned TINYINT(1) DEFAULT 0");
+      } catch (e) {}
+
+      try {
+        await this.pool.execute("ALTER TABLE comments ADD COLUMN pinnedAt DATETIME NULL");
+      } catch (e) {}
 
       // Convert tables and all their columns to utf8mb4 to support Persian properly
       const tablesToConvert = [
@@ -1847,21 +1869,38 @@ class DatabaseManager {
   // -----------------------------------------------------------------
   async getComments(chapterId: string, currentUserId?: string, isAdminOrModerator: boolean = false): Promise<Comment[]> {
     if (this.isUsingMySQL && this.pool) {
-      const [rows] = await this.pool.execute('SELECT * FROM comments WHERE chapterId = ? ORDER BY createdAt DESC', [chapterId]);
+      const [rows] = await this.pool.execute('SELECT * FROM comments WHERE chapterId = ? ORDER BY isPinned DESC, createdAt DESC', [chapterId]);
       const mapped = (rows as any[]).map(r => ({
         ...r,
         status: r.status || 'approved',
         parentId: r.parentId || '',
-        likes: r.likes ? JSON.parse(r.likes) : [],
-        dislikes: r.dislikes ? JSON.parse(r.dislikes) : []
+        isPinned: !!r.isPinned,
+        pinnedAt: r.pinnedAt || null,
+        likes: r.likes ? (typeof r.likes === 'string' ? JSON.parse(r.likes) : r.likes) : [],
+        dislikes: r.dislikes ? (typeof r.dislikes === 'string' ? JSON.parse(r.dislikes) : r.dislikes) : []
       }));
-      if (isAdminOrModerator) return mapped;
-      return mapped.filter(c => c.status === 'approved' || (currentUserId && c.userId === currentUserId));
+      let filtered = mapped;
+      if (!isAdminOrModerator) {
+        filtered = mapped.filter(c => c.status === 'approved' || (currentUserId && c.userId === currentUserId));
+      }
+      return filtered.sort((a, b) => {
+        const aPin = a.isPinned ? 1 : 0;
+        const bPin = b.isPinned ? 1 : 0;
+        if (bPin !== aPin) return bPin - aPin;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
     }
 
-    const allForChapter = (this.localData.comments || []).filter(c => c.chapterId === chapterId);
-    if (isAdminOrModerator) return allForChapter;
-    return allForChapter.filter(c => (c.status || 'approved') === 'approved' || (currentUserId && c.userId === currentUserId));
+    let allForChapter = (this.localData.comments || []).filter(c => c.chapterId === chapterId);
+    if (!isAdminOrModerator) {
+      allForChapter = allForChapter.filter(c => (c.status || 'approved') === 'approved' || (currentUserId && c.userId === currentUserId));
+    }
+    return allForChapter.sort((a, b) => {
+      const aPin = a.isPinned ? 1 : 0;
+      const bPin = b.isPinned ? 1 : 0;
+      if (bPin !== aPin) return bPin - aPin;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
   }
 
   async getCommentById(id: string): Promise<Comment | null> {
@@ -1873,15 +1912,19 @@ class DatabaseManager {
         ...r,
         status: r.status || 'approved',
         parentId: r.parentId || '',
-        likes: r.likes ? JSON.parse(r.likes) : [],
-        dislikes: r.dislikes ? JSON.parse(r.dislikes) : []
+        isPinned: !!r.isPinned,
+        pinnedAt: r.pinnedAt || null,
+        likes: r.likes ? (typeof r.likes === 'string' ? JSON.parse(r.likes) : r.likes) : [],
+        dislikes: r.dislikes ? (typeof r.dislikes === 'string' ? JSON.parse(r.dislikes) : r.dislikes) : []
       };
     }
     const c = (this.localData.comments || []).find(c => c.id === id);
     if (!c) return null;
     return {
       ...c,
-      status: c.status || 'approved'
+      status: c.status || 'approved',
+      isPinned: !!c.isPinned,
+      pinnedAt: c.pinnedAt || null
     };
   }
 
@@ -1890,12 +1933,14 @@ class DatabaseManager {
     const likesStr = JSON.stringify([]);
     const dislikesStr = JSON.stringify([]);
     const parentId = c.parentId || '';
-    const status = c.status || 'pending';
+    const status = c.status || 'approved';
+    const isPinned = c.isPinned ? 1 : 0;
+    const pinnedAt = c.isPinned ? now : null;
 
     if (this.isUsingMySQL && this.pool) {
       await this.pool.execute(
-        `INSERT INTO comments (id, chapterId, userId, userName, userAvatar, content, parentId, status, likes, dislikes, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [c.id, c.chapterId, c.userId, c.userName, c.userAvatar || '', c.content, parentId, status, likesStr, dislikesStr, now]
+        `INSERT INTO comments (id, chapterId, userId, userName, userAvatar, content, parentId, status, likes, dislikes, isPinned, pinnedAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [c.id, c.chapterId, c.userId, c.userName, c.userAvatar || '', c.content, parentId, status, likesStr, dislikesStr, isPinned, pinnedAt, now]
       );
       return (await this.getCommentById(c.id))!;
     }
@@ -1911,6 +1956,8 @@ class DatabaseManager {
       status,
       likes: [],
       dislikes: [],
+      isPinned: !!c.isPinned,
+      pinnedAt: c.isPinned ? now : null,
       createdAt: now
     };
 
@@ -1918,6 +1965,30 @@ class DatabaseManager {
     this.localData.comments.push(commentObj);
     this.saveLocalData();
     return commentObj;
+  }
+
+  async togglePinComment(id: string): Promise<Comment | null> {
+    if (this.isUsingMySQL && this.pool) {
+      const c = await this.getCommentById(id);
+      if (!c) return null;
+      const newPinned = !c.isPinned;
+      const pinnedAt = newPinned ? new Date().toISOString() : null;
+      await this.pool.execute('UPDATE comments SET isPinned = ?, pinnedAt = ? WHERE id = ?', [newPinned ? 1 : 0, pinnedAt, id]);
+      return await this.getCommentById(id);
+    }
+    const idx = (this.localData.comments || []).findIndex(c => c.id === id);
+    if (idx >= 0) {
+      const current = this.localData.comments[idx];
+      const newPinned = !current.isPinned;
+      this.localData.comments[idx] = {
+        ...current,
+        isPinned: newPinned,
+        pinnedAt: newPinned ? new Date().toISOString() : null
+      };
+      this.saveLocalData();
+      return this.localData.comments[idx];
+    }
+    return null;
   }
 
   async updateCommentStatus(id: string, status: 'pending' | 'approved' | 'rejected'): Promise<Comment | null> {

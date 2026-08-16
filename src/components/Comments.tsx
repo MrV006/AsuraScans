@@ -16,7 +16,8 @@ import {
   ShieldCheck, 
   Send,
   Eye,
-  EyeOff
+  EyeOff,
+  Pin
 } from 'lucide-react';
 
 interface Comment {
@@ -27,6 +28,8 @@ interface Comment {
   authorId: string;
   content: string;
   status?: 'pending' | 'approved' | 'rejected';
+  isPinned?: boolean;
+  pinnedAt?: any;
   createdAt: any;
   updatedAt?: any;
   likes?: string[];
@@ -95,6 +98,8 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
           authorId: c.userId || c.authorId,
           content: c.content,
           status: c.status || 'approved',
+          isPinned: !!c.isPinned,
+          pinnedAt: c.pinnedAt || null,
           createdAt: c.createdAt ? { toDate: () => new Date(c.createdAt) } : null,
           likes: Array.isArray(c.likes) ? c.likes : (typeof c.likes === 'string' ? JSON.parse(c.likes || '[]') : []),
           dislikes: Array.isArray(c.dislikes) ? c.dislikes : (typeof c.dislikes === 'string' ? JSON.parse(c.dislikes || '[]') : []),
@@ -187,6 +192,23 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
       fetchComments();
     } catch (error) {
       console.error("Error deleting comment:", error);
+    }
+  };
+
+  const handleTogglePin = async (commentId: string) => {
+    if (!isAdmin) return;
+    try {
+      setComments(prev => prev.map(c => {
+        if (c.id === commentId) {
+          return { ...c, isPinned: !c.isPinned };
+        }
+        return c;
+      }));
+      await apiClient.togglePinComment(commentId, user?.uid || user?.id);
+      fetchComments();
+    } catch (error) {
+      console.error("Error pinning comment:", error);
+      fetchComments();
     }
   };
 
@@ -412,7 +434,9 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
 
               {/* Body */}
               <div className={`flex-1 border rounded-2xl p-4 sm:p-5 relative transition-all duration-200 ${
-                isPending 
+                comment.isPinned
+                  ? 'bg-amber-500/[0.04] border-amber-500/40 shadow-sm shadow-amber-500/5 ring-1 ring-amber-500/20'
+                  : isPending 
                   ? 'bg-amber-500/5 border-amber-500/30' 
                   : isRejected
                   ? 'bg-red-500/5 border-red-500/30'
@@ -432,6 +456,13 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
                       </span>
                     )}
 
+                    {comment.isPinned && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 shadow-sm">
+                        <Pin size={11} className="fill-amber-400 text-amber-400" />
+                        سنجاق شده
+                      </span>
+                    )}
+
                     {isPending && (
                       <span className="px-2 py-0.5 text-[10px] font-bold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
                         ⏳ در انتظار تایید مدیریت
@@ -445,15 +476,31 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
                     )}
                   </div>
 
-                  {canDelete && (
-                    <button 
-                      onClick={() => handleDelete(comment.id)}
-                      className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
-                      title="حذف دیدگاه"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {isAdmin && (
+                      <button 
+                        onClick={() => handleTogglePin(comment.id)}
+                        className={`p-1.5 rounded-lg transition-all ${
+                          comment.isPinned 
+                            ? 'text-amber-400 bg-amber-500/20 hover:bg-amber-500/30' 
+                            : 'text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10'
+                        }`}
+                        title={comment.isPinned ? "برداشتن سنجاق" : "سنجاق کردن دیدگاه"}
+                      >
+                        <Pin size={15} className={comment.isPinned ? "fill-amber-400" : ""} />
+                      </button>
+                    )}
+
+                    {canDelete && (
+                      <button 
+                        onClick={() => handleDelete(comment.id)}
+                        className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+                        title="حذف دیدگاه"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Content */}
