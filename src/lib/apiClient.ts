@@ -596,7 +596,7 @@ export const apiClient = {
     return res.json();
   },
 
-  async approveContributor(seriesId: string, userId: string, action: 'approve' | 'reject' | 'remove' | 'update_role', adminUid: string, role?: string) {
+  async approveContributor(seriesId: string, userId: string, action: 'approve' | 'reject' | 'remove' | 'update_role', adminUid?: string, role?: string) {
     const res = await fetch(`${API_URL}/api/series/${seriesId}/approve-contributor`, {
       method: 'POST',
       headers: this.getHeaders(adminUid),
@@ -678,14 +678,14 @@ export const apiClient = {
   },
 
   async checkChapterPurchase(userId: string, seriesId: string, chapterId: string) {
-    const res = await fetch(`${API_URL}/api/users/${userId}/purchases/${seriesId}/${chapterId}`, { headers: this.getHeaders() });
+    const res = await fetch(`${API_URL}/api/users/${userId}/purchases/${seriesId}/${chapterId}`, { headers: this.getHeaders(userId) });
     return res.json();
   },
 
   async purchaseChapter(userId: string, seriesId: string, chapterId: string) {
     const res = await fetch(`${API_URL}/api/chapters/purchase`, {
       method: 'POST',
-      headers: this.getHeaders(),
+      headers: this.getHeaders(userId),
       body: JSON.stringify({ userId, seriesId, chapterId })
     });
     return res.json();

@@ -375,10 +375,35 @@ export default function CooperationTab({
         melliCode: reqUserCode || profile?.melliCode || user.uid || ""
       });
 
-      if (res.series) {
-        onUpdateSeries(res.series);
+      const updatedSeries = res?.series || (res?.id ? res : null);
+      if (updatedSeries) {
+        onUpdateSeries(updatedSeries);
         if (activeCatalogSeries?.id === series.id) {
-          setActiveCatalogSeries(res.series);
+          setActiveCatalogSeries(updatedSeries);
+        }
+        setReqSuccess("درخواست همکاری شما با موفقیت برای مدیریت ارسال شد. پس از بررسی، دسترسی شما فعال خواهد شد.");
+      } else if (res?.success) {
+        const existing = seriesList.find(s => s.id === series.id);
+        if (existing) {
+          const newContribs = [...(existing.contributors || [])];
+          const exists = newContribs.find(c => c.userId === user.uid);
+          if (exists) {
+            exists.status = 'pending';
+            exists.role = reqRole;
+          } else {
+            newContribs.push({
+              userId: user.uid,
+              email: user.email || "",
+              displayName: profile?.displayName || user.displayName || user.email || "همکار",
+              role: reqRole,
+              status: "pending"
+            });
+          }
+          const optim = { ...existing, contributors: newContribs };
+          onUpdateSeries(optim);
+          if (activeCatalogSeries?.id === series.id) {
+            setActiveCatalogSeries(optim);
+          }
         }
         setReqSuccess("درخواست همکاری شما با موفقیت برای مدیریت ارسال شد. پس از بررسی، دسترسی شما فعال خواهد شد.");
       } else {
@@ -393,11 +418,41 @@ export default function CooperationTab({
 
   // Handle Admin approval/rejection of collaboration requests
   const handleAdminProcessRequest = async (seriesId: string, applicantUserId: string, action: "approve" | "reject", role?: string) => {
-    setProcessingActionId(`${seriesId}-${applicantUserId}`);
+    const actionKey = `${seriesId}-${applicantUserId}`;
+    setProcessingActionId(actionKey);
     try {
       const res = await apiClient.approveContributor(seriesId, applicantUserId, action, user?.uid, role);
-      if (res.series) {
-        onUpdateSeries(res.series);
+      const updatedSeries = res?.series || (res?.id ? res : null);
+      if (updatedSeries) {
+        onUpdateSeries(updatedSeries);
+      } else {
+        // Optimistic local update fallback
+        const existing = seriesList.find(s => s.id === seriesId);
+        if (existing) {
+          let updatedContribs = [...(existing.contributors || [])];
+          if (action === "approve") {
+            let found = false;
+            updatedContribs = updatedContribs.map(c => {
+              if (c.userId === applicantUserId) {
+                found = true;
+                return { ...c, status: "approved", role: role || c.role };
+              }
+              return c;
+            });
+            if (!found) {
+              updatedContribs.push({
+                userId: applicantUserId,
+                displayName: "همکار",
+                email: "",
+                role: role || "translator",
+                status: "approved"
+              });
+            }
+          } else {
+            updatedContribs = updatedContribs.filter(c => c.userId !== applicantUserId);
+          }
+          onUpdateSeries({ ...existing, contributors: updatedContribs });
+        }
       }
     } catch (e: any) {
       alert(`خطا: ${e.message}`);
@@ -1826,14 +1881,19 @@ export default function CooperationTab({
 
                     <div className="flex items-center gap-2 w-full sm:w-auto">
                       <button
+                        disabled={processingActionId === `${req.seriesId}-${req.userId}`}
                         onClick={() => handleAdminProcessRequest(req.seriesId, req.userId, "approve", req.role)}
-                        className="flex-1 sm:flex-none px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-black font-black text-xs rounded-xl transition-all shadow"
+                        className="flex-1 sm:flex-none px-4 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-black font-black text-xs rounded-xl transition-all shadow flex items-center justify-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
                       >
+                        {processingActionId === `${req.seriesId}-${req.userId}` ? (
+                          <div className="w-3.5 h-3.5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                        ) : null}
                         تایید و اعطای دسترسی
                       </button>
                       <button
+                        disabled={processingActionId === `${req.seriesId}-${req.userId}`}
                         onClick={() => handleAdminProcessRequest(req.seriesId, req.userId, "reject", req.role)}
-                        className="flex-1 sm:flex-none px-3 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl transition-all shadow"
+                        className="flex-1 sm:flex-none px-3 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition-all shadow cursor-pointer disabled:cursor-not-allowed"
                       >
                         رد درخواست
                       </button>

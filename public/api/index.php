@@ -168,7 +168,7 @@ function isSuperAdminUser($user) {
 
 function requireAdmin($pdo) {
     $user = getUserFromHeaders($pdo);
-    if (!$user || $user['banned'] || $user['role'] !== 'admin') {
+    if (!$user || $user['banned'] || ($user['role'] !== 'admin' && !isSuperAdminUser($user))) {
         sendResponse(["error" => "دسترسی غیرمجاز. این عملیات نیاز به سطح مدیریت دارد."], 403);
     }
     return $user;
@@ -176,7 +176,7 @@ function requireAdmin($pdo) {
 
 function requireStaffOrAdmin($pdo) {
     $user = getUserFromHeaders($pdo);
-    if (!$user || $user['banned'] || !in_array($user['role'], ['admin', 'staff'])) {
+    if (!$user || $user['banned'] || (!in_array($user['role'], ['admin', 'staff']) && !isSuperAdminUser($user))) {
         sendResponse(["error" => "دسترسی غیرمجاز. این عملیات نیاز به سطح کاربری ادمین یا نویسنده دارد."], 403);
     }
     return $user;
@@ -1141,9 +1141,9 @@ if ($method === 'POST' && matchRoute('/series/:id/request-contributor', $sub_pat
     $melliCode = isset($input['melliCode']) ? $input['melliCode'] : '';
     
     // Fetch series
-    $stmt = $pdo->prepare("SELECT contributors FROM series WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT * FROM series WHERE id = ?");
     $stmt->execute([$params['id']]);
-    $s = $stmt->fetch();
+    $s = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$s) sendResponse(["error" => "مجموعه یافت نشد."], 404);
     
     $contributors = $s['contributors'] ? json_decode($s['contributors'], true) : [];
@@ -1164,8 +1164,8 @@ if ($method === 'POST' && matchRoute('/series/:id/request-contributor', $sub_pat
     if (!$alreadyExists) {
         $contributors[] = [
             "userId" => $user['id'],
-            "email" => $user['email'],
-            "displayName" => $user['displayName'],
+            "email" => $user['email'] ?? '',
+            "displayName" => $user['displayName'] ?? 'همکار',
             "role" => $role,
             "melliCode" => $melliCode,
             "status" => "pending"
@@ -1173,9 +1173,21 @@ if ($method === 'POST' && matchRoute('/series/:id/request-contributor', $sub_pat
     }
     
     $stmtUpdate = $pdo->prepare("UPDATE series SET contributors = ? WHERE id = ?");
-    $stmtUpdate->execute([json_encode($contributors), $params['id']]);
+    $stmtUpdate->execute([json_encode($contributors, JSON_UNESCAPED_UNICODE), $params['id']]);
     
-    sendResponse(["success" => true]);
+    $s['contributors'] = $contributors;
+    $s['alternativeTitles'] = $s['alternativeTitles'] ? array_filter(explode(',', $s['alternativeTitles'])) : [];
+    $s['genres'] = $s['genres'] ? array_filter(explode(',', $s['genres'])) : [];
+    $s['tags'] = $s['tags'] ? array_filter(explode(',', $s['tags'])) : [];
+    $s['isHero'] = isset($s['isHero']) ? (bool)$s['isHero'] : false;
+    $s['rating'] = (double)($s['rating'] ?? 0);
+    $s['views'] = (int)($s['views'] ?? 0);
+    
+    sendResponse([
+        "success" => true,
+        "series" => $s,
+        ...$s
+    ]);
 }
 
 // 19. APPROVE CONTRIBUTOR (ADMIN)
@@ -1183,34 +1195,70 @@ if ($method === 'POST' && matchRoute('/series/:id/approve-contributor', $sub_pat
     requireAdmin($pdo);
     $input = getJsonInput();
     $userId = isset($input['userId']) ? $input['userId'] : null;
-    $status = isset($input['status']) ? $input['status'] : 'approved'; // 'approved' or 'pending' (deleted)
+    $action = isset($input['action']) ? $input['action'] : (isset($input['status']) ? $input['status'] : 'approve');
+    $role = isset($input['role']) ? $input['role'] : null;
     
-    $stmt = $pdo->prepare("SELECT contributors FROM series WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT * FROM series WHERE id = ?");
     $stmt->execute([$params['id']]);
-    $s = $stmt->fetch();
+    $s = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$s) sendResponse(["error" => "مجموعه یافت نشد."], 404);
     
     $contributors = $s['contributors'] ? json_decode($s['contributors'], true) : [];
     if (!is_array($contributors)) $contributors = [];
     
-    if ($status === 'approved') {
+    if ($action === 'approve' || $action === 'approved') {
+        $found = false;
         foreach ($contributors as &$c) {
             if ($c['userId'] === $userId) {
                 $c['status'] = 'approved';
+                if ($role) $c['role'] = $role;
+                $found = true;
+                break;
+            }
+        }
+        if (!$found && $userId) {
+            $uStmt = $pdo->prepare("SELECT id, displayName, email FROM users WHERE id = ?");
+            $uStmt->execute([$userId]);
+            $uRow = $uStmt->fetch(PDO::FETCH_ASSOC);
+            $contributors[] = [
+                "userId" => $userId,
+                "email" => $uRow ? ($uRow['email'] ?? '') : '',
+                "displayName" => $uRow ? ($uRow['displayName'] ?? 'همکار') : 'همکار',
+                "role" => $role ?: 'translator',
+                "status" => 'approved',
+                "melliCode" => ''
+            ];
+        }
+    } else if ($action === 'update_role') {
+        foreach ($contributors as &$c) {
+            if ($c['userId'] === $userId) {
+                if ($role) $c['role'] = $role;
                 break;
             }
         }
     } else {
-        // Remove
+        // 'reject' or 'remove'
         $contributors = array_values(array_filter($contributors, function($c) use ($userId) {
             return $c['userId'] !== $userId;
         }));
     }
     
     $stmtUpdate = $pdo->prepare("UPDATE series SET contributors = ? WHERE id = ?");
-    $stmtUpdate->execute([json_encode($contributors), $params['id']]);
+    $stmtUpdate->execute([json_encode($contributors, JSON_UNESCAPED_UNICODE), $params['id']]);
     
-    sendResponse(["success" => true]);
+    $s['contributors'] = $contributors;
+    $s['alternativeTitles'] = $s['alternativeTitles'] ? array_filter(explode(',', $s['alternativeTitles'])) : [];
+    $s['genres'] = $s['genres'] ? array_filter(explode(',', $s['genres'])) : [];
+    $s['tags'] = $s['tags'] ? array_filter(explode(',', $s['tags'])) : [];
+    $s['isHero'] = isset($s['isHero']) ? (bool)$s['isHero'] : false;
+    $s['rating'] = (double)($s['rating'] ?? 0);
+    $s['views'] = (int)($s['views'] ?? 0);
+    
+    sendResponse([
+        "success" => true,
+        "series" => $s,
+        ...$s
+    ]);
 }
 
 // 20. ADJUST MANUAL RATINGS (ADMIN)

@@ -585,17 +585,17 @@ export default function Reader() {
     setPurchaseError(null);
     try {
       const res = await apiClient.purchaseChapter(user.uid, seriesId!, chapterId!);
-      if (res.success) {
+      if (res && res.success) {
         setIsPurchased(true);
-        if (dbUser) {
-          setDbUser({ ...dbUser, walletBalance: res.balance });
+        if (typeof res.balance === 'number') {
+          setDbUser((prev: any) => prev ? { ...prev, walletBalance: res.balance } : { walletBalance: res.balance });
         }
       } else {
-        setPurchaseError(res.error || "خطایی در انجام تراکنش رخ داد.");
+        setPurchaseError(res?.error || "خطایی در انجام تراکنش رخ داد.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Purchase error:", err);
-      setPurchaseError("ارتباط با سرور برقرار نشد.");
+      setPurchaseError(err?.message || "ارتباط با سرور برقرار نشد.");
     } finally {
       setPurchasing(false);
     }
@@ -694,23 +694,11 @@ export default function Reader() {
               )}
 
               <div className="flex flex-col gap-3">
-                {!profile?.hasCompletedSetup ? (
-                  <div className="flex flex-col gap-3">
-                    <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold p-4 rounded-xl text-center leading-relaxed">
-                      برای خرید چپتر، ابتدا باید اطلاعات حساب کاربری خود را در پروفایل تکمیل کنید.
-                    </div>
-                    <button
-                      onClick={() => setShowSetupModal(true)}
-                      className="w-full py-3.5 px-4 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-sm rounded-xl transition-all shadow-lg flex items-center justify-center gap-2"
-                    >
-                      تکمیل اطلاعات حساب کاربری
-                    </button>
-                  </div>
-                ) : (dbUser?.walletBalance || 0) >= 400 ? (
+                {(dbUser?.walletBalance || 0) >= 400 ? (
                   <button
                     onClick={handlePurchase}
                     disabled={purchasing}
-                    className="w-full py-3.5 px-4 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-light)] disabled:opacity-50 text-white font-black text-sm rounded-xl transition-all shadow-lg shadow-[var(--color-asura-accent)]/20 flex items-center justify-center gap-2"
+                    className="w-full py-3.5 px-4 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-light)] disabled:opacity-50 text-white font-black text-sm rounded-xl transition-all shadow-lg shadow-[var(--color-asura-accent)]/20 flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
                   >
                     {purchasing ? (
                       <>
@@ -725,8 +713,8 @@ export default function Reader() {
                   </button>
                 ) : (
                   <div className="flex flex-col gap-3">
-                    <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold p-3.5 rounded-xl text-center">
-                      موجودی کیف پول شما برای خرید این چپتر کافی نیست.
+                    <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold p-3.5 rounded-xl text-center leading-relaxed">
+                      موجودی کیف پول شما برای خرید این چپتر کافی نیست (موجودی فعلی: {(dbUser?.walletBalance || 0).toLocaleString('fa-IR')} تومان).
                     </div>
                     <Link
                       to="/profile?tab=wallet"
@@ -739,7 +727,7 @@ export default function Reader() {
 
                 <Link
                   to={`/series/${series.id}`}
-                  className="w-full py-3 px-4 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white font-black text-xs rounded-xl transition-all border border-white/5"
+                  className="w-full py-3 px-4 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white font-black text-xs rounded-xl transition-all border border-white/5 text-center"
                 >
                   بازگشت به صفحه مانهوا
                 </Link>

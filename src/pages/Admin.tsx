@@ -3999,7 +3999,10 @@ export default function Admin() {
               profile={profile}
               isSuperAdmin={isSuperAdmin}
               onUpdateSeries={(updatedSeries: any) => {
-                setSeriesList(prev => prev.map(s => s.id === updatedSeries.id ? updatedSeries : s));
+                if (updatedSeries && updatedSeries.id) {
+                  setSeriesList(prev => prev.map(s => s.id === updatedSeries.id ? updatedSeries : s));
+                }
+                fetchSeries();
               }}
             />
           )}

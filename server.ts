@@ -798,7 +798,7 @@ async function startServer() {
       series.contributors = contributors;
       const updated = await dbManager.saveSeries(series);
       io.emit("series:updated", { seriesId: updated.id });
-      res.json(updated);
+      res.json({ ...updated, series: updated, success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -812,7 +812,25 @@ async function startServer() {
 
       let contributors = series.contributors || [];
       if (action === 'approve') {
-        contributors = contributors.map(c => c.userId === userId ? { ...c, status: 'approved', role: role || c.role } : c);
+        let found = false;
+        contributors = contributors.map(c => {
+          if (c.userId === userId) {
+            found = true;
+            return { ...c, status: 'approved', role: role || c.role };
+          }
+          return c;
+        });
+        if (!found && userId) {
+          const user = await dbManager.getUser(userId);
+          contributors.push({
+            userId,
+            email: user?.email || '',
+            displayName: user?.displayName || 'همکار',
+            role: role || 'translator',
+            status: 'approved',
+            melliCode: ''
+          });
+        }
       } else if (action === 'update_role') {
         contributors = contributors.map(c => c.userId === userId ? { ...c, role: role || c.role } : c);
       } else {
@@ -823,7 +841,7 @@ async function startServer() {
       series.contributors = contributors;
       const updated = await dbManager.saveSeries(series);
       io.emit("series:updated", { seriesId: updated.id });
-      res.json(updated);
+      res.json({ ...updated, series: updated, success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
