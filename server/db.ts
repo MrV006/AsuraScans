@@ -2481,6 +2481,73 @@ class DatabaseManager {
     });
   }
 
+  async getUserComments(userId: string): Promise<any[]> {
+    let rawList: Comment[] = [];
+    if (this.isUsingMySQL && this.pool) {
+      try {
+        const [rows] = await this.pool.execute('SELECT * FROM comments WHERE userId = ? ORDER BY createdAt DESC', [userId]);
+        rawList = (rows as any[]).map(r => ({
+          ...r,
+          status: r.status || 'approved',
+          parentId: r.parentId || '',
+          likes: r.likes ? (typeof r.likes === 'string' ? JSON.parse(r.likes) : r.likes) : [],
+          dislikes: r.dislikes ? (typeof r.dislikes === 'string' ? JSON.parse(r.dislikes) : r.dislikes) : []
+        }));
+      } catch (e) {
+        console.error("Error in getUserComments sql", e);
+      }
+    } else {
+      rawList = (this.localData.comments || []).filter(c => c.userId === userId);
+      rawList = [...rawList].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
+
+    const seriesList = await this.getSeries();
+    const seriesMap = new Map<string, string>();
+    seriesList.forEach(s => seriesMap.set(s.id, s.title));
+
+    const chapterMap = new Map<string, { number: number; seriesId: string }>();
+    if (this.isUsingMySQL && this.pool) {
+      try {
+        const [chRows] = await this.pool.execute('SELECT id, number, seriesId FROM chapters');
+        (chRows as any[]).forEach(ch => {
+          chapterMap.set(ch.id, { number: ch.number, seriesId: ch.seriesId });
+        });
+      } catch (e) {}
+    } else {
+      (this.localData.chapters || []).forEach(ch => {
+        chapterMap.set(ch.id, { number: ch.number, seriesId: ch.seriesId });
+      });
+    }
+
+    return rawList.map(c => {
+      let seriesId = '';
+      let seriesTitle = '';
+      let chapterNumber: number | undefined = undefined;
+
+      if (c.chapterId) {
+        if (c.chapterId.startsWith('series-')) {
+          seriesId = c.chapterId.replace('series-', '');
+          seriesTitle = seriesMap.get(seriesId) || seriesId;
+        } else {
+          const chInfo = chapterMap.get(c.chapterId);
+          if (chInfo) {
+            chapterNumber = chInfo.number;
+            seriesId = chInfo.seriesId;
+            seriesTitle = seriesMap.get(seriesId) || seriesId;
+          }
+        }
+      }
+
+      return {
+        ...c,
+        status: c.status || 'approved',
+        seriesId,
+        seriesTitle,
+        chapterNumber
+      };
+    });
+  }
+
   async getCommentsForSeries(seriesId: string): Promise<Comment[]> {
     if (this.isUsingMySQL && this.pool) {
       try {

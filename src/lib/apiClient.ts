@@ -55,8 +55,8 @@ export const apiClient = {
       'Content-Type': 'application/json; charset=utf-8',
       'Accept': 'application/json; charset=utf-8'
     };
-    const savedUid = localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid');
-    const uid = userId || savedUid || 'admin';
+    const savedUid = typeof localStorage !== 'undefined' ? (localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid') || '') : '';
+    const uid = userId || savedUid || '';
     if (uid) {
       headers['x-admin-uid'] = uid;
       headers['x-user-uid'] = uid;
@@ -295,8 +295,13 @@ export const apiClient = {
   },
 
   // COMMENTS API
-  async getComments(chapterId: string) {
-    const res = await fetch(`${API_URL}/api/chapters/${chapterId}/comments`, { headers: this.getHeaders() });
+  async getComments(chapterId: string, currentUserId?: string) {
+    const res = await fetch(`${API_URL}/api/chapters/${chapterId}/comments`, { headers: this.getHeaders(currentUserId) });
+    return res.json();
+  },
+
+  async getUserComments(userId: string) {
+    const res = await fetch(`${API_URL}/api/users/${userId}/comments`, { headers: this.getHeaders(userId) });
     return res.json();
   },
 

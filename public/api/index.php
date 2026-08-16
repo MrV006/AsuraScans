@@ -1787,6 +1787,56 @@ if ($method === 'PUT' && matchRoute('/comments/:id', $sub_path, $params)) {
     sendResponse($c);
 }
 
+// 32.1 GET USER COMMENTS
+if ($method === 'GET' && matchRoute('/users/:userId/comments', $sub_path, $params)) {
+    $stmt = $pdo->prepare("SELECT * FROM comments WHERE userId = ? ORDER BY createdAt DESC");
+    $stmt->execute([$params['userId']]);
+    $comments = $stmt->fetchAll();
+    
+    // Map series and chapters
+    $seriesStmt = $pdo->query("SELECT id, title FROM series");
+    $seriesMap = [];
+    if ($seriesStmt) {
+        while ($row = $seriesStmt->fetch()) {
+            $seriesMap[$row['id']] = $row['title'];
+        }
+    }
+
+    $chapStmt = $pdo->query("SELECT id, number, seriesId FROM chapters");
+    $chapMap = [];
+    if ($chapStmt) {
+        while ($row = $chapStmt->fetch()) {
+            $chapMap[$row['id']] = ['number' => (float)$row['number'], 'seriesId' => $row['seriesId']];
+        }
+    }
+
+    foreach ($comments as &$c) {
+        $c['likes'] = $c['likes'] ? json_decode($c['likes'], true) : [];
+        if (!is_array($c['likes'])) $c['likes'] = [];
+        $c['dislikes'] = $c['dislikes'] ? json_decode($c['dislikes'], true) : [];
+        if (!is_array($c['dislikes'])) $c['dislikes'] = [];
+        if (empty($c['status'])) $c['status'] = 'approved';
+
+        $c['seriesId'] = '';
+        $c['seriesTitle'] = '';
+        $c['chapterNumber'] = null;
+
+        if (!empty($c['chapterId'])) {
+            if (strpos($c['chapterId'], 'series-') === 0) {
+                $sId = str_replace('series-', '', $c['chapterId']);
+                $c['seriesId'] = $sId;
+                $c['seriesTitle'] = isset($seriesMap[$sId]) ? $seriesMap[$sId] : $sId;
+            } else if (isset($chapMap[$c['chapterId']])) {
+                $chInfo = $chapMap[$c['chapterId']];
+                $c['chapterNumber'] = $chInfo['number'];
+                $c['seriesId'] = $chInfo['seriesId'];
+                $c['seriesTitle'] = isset($seriesMap[$chInfo['seriesId']]) ? $seriesMap[$chInfo['seriesId']] : $chInfo['seriesId'];
+            }
+        }
+    }
+    sendResponse($comments);
+}
+
 // 33. GET BOOKMARKS
 if ($method === 'GET' && matchRoute('/users/:userId/bookmarks', $sub_path, $params)) {
     $stmt = $pdo->prepare("SELECT * FROM bookmarks WHERE userId = ? ORDER BY createdAt DESC");

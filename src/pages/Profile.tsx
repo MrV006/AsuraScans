@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { Layout } from '../components/Layout';
 import { Navigate, Link } from 'react-router-dom';
-import { Settings, Bookmark, MessageSquare, Heart, Clock, Wallet } from 'lucide-react';
+import { Settings, Bookmark, MessageSquare, Heart, Clock, Wallet, Trash2, ExternalLink, ThumbsUp, ThumbsDown, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useBookmarks, useHistory } from '../hooks/useUserActivity';
 import { formatDistanceToNow } from 'date-fns';
 import { apiClient, getSocketInstance } from '../lib/apiClient';
@@ -25,6 +25,10 @@ export default function Profile() {
   const [dbUser, setDbUser] = useState<any>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loadingWallet, setLoadingWallet] = useState(false);
+
+  // User comments states
+  const [userComments, setUserComments] = useState<any[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
 
   useEffect(() => {
     if (profile) {
@@ -59,11 +63,40 @@ export default function Profile() {
     }
   };
 
+  const fetchUserComments = async () => {
+    if (!user) return;
+    setLoadingComments(true);
+    try {
+      const userId = user.id || user.uid;
+      const data = await apiClient.getUserComments(userId);
+      if (Array.isArray(data)) {
+        setUserComments(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch user comments:", err);
+    } finally {
+      setLoadingComments(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'wallet') {
       fetchWalletData();
+    } else if (activeTab === 'comments') {
+      fetchUserComments();
     }
   }, [activeTab, user]);
+
+  const handleDeleteUserComment = async (commentId: string) => {
+    if (!window.confirm("آیا از حذف این دیدگاه اطمینان دارید؟")) return;
+    try {
+      const userId = user?.id || user?.uid;
+      await apiClient.deleteComment(commentId, userId);
+      setUserComments(prev => prev.filter(c => c.id !== commentId));
+    } catch (err: any) {
+      alert("خطا در حذف دیدگاه: " + err.message);
+    }
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -457,9 +490,109 @@ export default function Profile() {
               {/* COMMENTS TAB */}
               {/* ========================================================= */}
               {activeTab === 'comments' && (
-                <div className="flex flex-col items-center justify-center h-64 text-zinc-500 bg-black/10 rounded-xl border border-dashed border-white/5 p-8">
-                  <MessageSquare size={44} className="mb-4 text-zinc-700 opacity-60" />
-                  <p className="text-xs font-bold text-zinc-400">تاکنون نظری توسط شما ثبت نشده است.</p>
+                <div className="space-y-4 text-right" dir="rtl">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-4">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <MessageSquare size={16} className="text-[var(--color-asura-accent)]" />
+                      <span>دیدگاه‌های ثبت شده توسط شما ({userComments.length})</span>
+                    </h3>
+                  </div>
+
+                  {loadingComments ? (
+                    <div className="flex justify-center py-12">
+                      <div className="w-8 h-8 border-2 border-[var(--color-asura-accent)] border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                  ) : userComments.length > 0 ? (
+                    <div className="space-y-3">
+                      {userComments.map((comment) => {
+                        const status = comment.status || 'approved';
+                        const targetLink = comment.chapterId && !comment.chapterId.startsWith('series-')
+                          ? `/series/${comment.seriesId}/chapter/${comment.chapterId}`
+                          : `/series/${comment.seriesId}`;
+
+                        return (
+                          <div 
+                            key={comment.id}
+                            className="bg-black/30 border border-white/5 hover:border-white/10 rounded-2xl p-4 sm:p-5 transition-all flex flex-col gap-3"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-3">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Link 
+                                  to={targetLink}
+                                  className="text-xs sm:text-sm font-bold text-white hover:text-[var(--color-asura-accent-light)] transition-colors flex items-center gap-1.5"
+                                >
+                                  <span>{comment.seriesTitle || 'اثر'}</span>
+                                  {comment.chapterNumber !== undefined && (
+                                    <span className="text-[11px] text-zinc-400 font-normal">
+                                      (چپتر {comment.chapterNumber})
+                                    </span>
+                                  )}
+                                  <ExternalLink size={12} className="text-zinc-500" />
+                                </Link>
+
+                                {comment.createdAt && (
+                                  <span className="text-[10px] text-zinc-500 flex items-center gap-1">
+                                    <Clock size={10} />
+                                    {new Date(comment.createdAt).toLocaleDateString('fa-IR')}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {status === 'pending' && (
+                                  <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                                    <Clock size={10} />
+                                    <span>در انتظار تایید مدیریت</span>
+                                  </span>
+                                )}
+                                {status === 'approved' && (
+                                  <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                                    <CheckCircle2 size={10} />
+                                    <span>تایید و منتشر شده</span>
+                                  </span>
+                                )}
+                                {status === 'rejected' && (
+                                  <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-red-500/10 text-red-300 border border-red-500/30 flex items-center gap-1">
+                                    <AlertCircle size={10} />
+                                    <span>رد شده توسط مدیریت</span>
+                                  </span>
+                                )}
+
+                                <button
+                                  onClick={() => handleDeleteUserComment(comment.id)}
+                                  className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+                                  title="حذف دیدگاه"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            </div>
+
+                            <p className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed">
+                              {comment.content?.replace(/\[spoiler\]([\s\S]*?)\[\/spoiler\]/gi, '$1')}
+                            </p>
+
+                            <div className="flex items-center gap-3 pt-2 text-[11px] text-zinc-500">
+                              <span className="flex items-center gap-1">
+                                <ThumbsUp size={11} className="text-zinc-600" />
+                                <span>{comment.likes?.length || 0} موافق</span>
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <ThumbsDown size={11} className="text-zinc-600" />
+                                <span>{comment.dislikes?.length || 0} مخالف</span>
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-64 text-zinc-500 bg-black/10 rounded-xl border border-dashed border-white/5 p-8">
+                      <MessageSquare size={44} className="mb-4 text-zinc-700 opacity-60" />
+                      <p className="text-xs font-bold text-zinc-400">تاکنون دیدگاهی توسط شما ثبت نشده است.</p>
+                      <p className="text-[11px] text-zinc-600 mt-1">با خواندن مانگاها و ثبت نظر، دیدگاه‌های شما در اینجا نمایش داده می‌شوند.</p>
+                    </div>
+                  )}
                 </div>
               )}
 

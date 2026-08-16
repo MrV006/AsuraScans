@@ -133,6 +133,7 @@ export default function Admin() {
   const [adminsMap, setAdminsMap] = useState<Record<string, boolean>>({});
   const [commentsList, setCommentsList] = useState<any[]>([]);
   const [commentStatusFilter, setCommentStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const [commentSearchQuery, setCommentSearchQuery] = useState("");
   const [selectedCommentIds, setSelectedCommentIds] = useState<string[]>([]);
   const [siteGenres, setSiteGenres] = useState<string[]>([]);
   const [newGenreInput, setNewGenreInput] = useState("");
@@ -794,11 +795,14 @@ export default function Admin() {
       alert("خطای عدم دسترسی: شما دسترسی لازم برای تغییر وضعیت نظرات را ندارید.");
       return;
     }
+    // Optimistic update
+    setCommentsList(prev => prev.map(c => c.id === commentId ? { ...c, status } : c));
     try {
       await apiClient.updateCommentStatus(commentId, status, adminUid);
       fetchCommentsList();
     } catch (error: any) {
       alert("خطا در تغییر وضعیت نظر: " + error.message);
+      fetchCommentsList();
     }
   };
 
@@ -808,12 +812,16 @@ export default function Admin() {
       alert("خطای عدم دسترسی: شما دسترسی لازم برای تغییر وضعیت نظرات را ندارید.");
       return;
     }
+    // Optimistic update
+    setCommentsList(prev => prev.map(c => selectedCommentIds.includes(c.id) ? { ...c, status } : c));
+    const idsToUpdate = [...selectedCommentIds];
+    setSelectedCommentIds([]);
     try {
-      await apiClient.batchUpdateCommentsStatus(selectedCommentIds, status, adminUid);
-      setSelectedCommentIds([]);
+      await apiClient.batchUpdateCommentsStatus(idsToUpdate, status, adminUid);
       fetchCommentsList();
     } catch (error: any) {
       alert("خطا در تغییر وضعیت گروهی: " + error.message);
+      fetchCommentsList();
     }
   };
 
@@ -824,12 +832,16 @@ export default function Admin() {
       return;
     }
     if (!window.confirm(`آیا از حذف گروهی ${selectedCommentIds.length} دیدگاه انتخابی اطمینان دارید؟`)) return;
+    // Optimistic delete
+    setCommentsList(prev => prev.filter(c => !selectedCommentIds.includes(c.id)));
+    const idsToDelete = [...selectedCommentIds];
+    setSelectedCommentIds([]);
     try {
-      await apiClient.batchDeleteComments(selectedCommentIds, adminUid);
-      setSelectedCommentIds([]);
+      await apiClient.batchDeleteComments(idsToDelete, adminUid);
       fetchCommentsList();
     } catch (error: any) {
       alert("خطا در حذف گروهی دیدگاه‌ها: " + error.message);
+      fetchCommentsList();
     }
   };
 
@@ -838,14 +850,17 @@ export default function Admin() {
       alert("خطای عدم دسترسی: شما دسترسی لازم برای حذف نظرات را ندارید.");
       return;
     }
-    if (!window.confirm("Are you sure you want to delete this comment?"))
+    if (!window.confirm("آیا از حذف این دیدگاه اطمینان دارید؟"))
       return;
+    // Optimistic delete
+    setCommentsList(prev => prev.filter(c => c.id !== commentId));
+    setSelectedCommentIds(prev => prev.filter(id => id !== commentId));
     try {
-      await apiClient.deleteComment(commentId);
-      alert("Comment deleted successfully!");
+      await apiClient.deleteComment(commentId, adminUid);
       fetchCommentsList();
     } catch (error: any) {
-      alert("Failed to delete comment: " + error.message);
+      alert("خطا در حذف دیدگاه: " + error.message);
+      fetchCommentsList();
     }
   };
 

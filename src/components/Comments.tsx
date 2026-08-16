@@ -2,7 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { apiClient, getSocketInstance } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
 import { formatDistanceToNow } from 'date-fns';
-import { Trash2, User as UserIcon, ThumbsUp, ThumbsDown, MessageSquare, AlertTriangle } from 'lucide-react';
+import { faIR } from 'date-fns/locale';
+import { 
+  Trash2, 
+  User as UserIcon, 
+  ThumbsUp, 
+  ThumbsDown, 
+  MessageSquare, 
+  AlertTriangle, 
+  Clock, 
+  CornerDownLeft, 
+  LogIn, 
+  ShieldCheck, 
+  Send,
+  Eye,
+  EyeOff
+} from 'lucide-react';
 
 interface Comment {
   id: string;
@@ -13,7 +28,7 @@ interface Comment {
   content: string;
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: any;
-  updatedAt: any;
+  updatedAt?: any;
   likes?: string[];
   dislikes?: string[];
   authorProfile?: {
@@ -30,67 +45,83 @@ function SpoilerText({ text }: { text: string; key?: React.Key }) {
         e.stopPropagation();
         setRevealed(!revealed);
       }}
-      className={`cursor-pointer px-1.5 py-0.5 rounded transition-all duration-300 font-medium ${
+      className={`inline-flex items-center gap-1 cursor-pointer px-2 py-0.5 rounded-lg text-xs transition-all duration-300 font-medium ${
         revealed 
-          ? 'bg-zinc-800/80 text-zinc-100 border border-zinc-700/50' 
-          : 'bg-zinc-900 text-zinc-900 select-none hover:bg-zinc-850 border border-zinc-900'
+          ? 'bg-zinc-800 text-zinc-100 border border-zinc-700/60 shadow-sm' 
+          : 'bg-zinc-900 text-zinc-600 select-none hover:bg-zinc-800 hover:text-zinc-400 border border-zinc-800'
       }`}
-      title="اسپویلر - برای نمایش کلیک کنید"
+      title="اسپویلر - برای مشاهده کلیک کنید"
+      dir="auto"
     >
-      {text}
+      {revealed ? (
+        <>
+          <Eye size={12} className="text-zinc-400 shrink-0 inline" />
+          <span>{text}</span>
+        </>
+      ) : (
+        <>
+          <EyeOff size={12} className="text-amber-500 shrink-0 inline" />
+          <span className="font-bold text-amber-500/80">اسپویلر (کلیک برای نمایش)</span>
+        </>
+      )}
     </span>
   );
 }
 
-export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?: string }) {
+export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?: string }) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [replyText, setReplyText] = useState('');
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [isMainSpoiler, setIsMainSpoiler] = useState(false);
   const [isReplySpoiler, setIsReplySpoiler] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const { user, profile, setShowSetupModal } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
 
-  const commentScopeId = chapterId || `series-${seriesId}`;
+  const commentScopeId = chapterId || (seriesId.startsWith('series-') ? seriesId : `series-${seriesId}`);
 
   const [pendingNotice, setPendingNotice] = useState<string | null>(null);
 
   const fetchComments = async () => {
     try {
-      const data = await apiClient.getComments(commentScopeId);
-      const mappedComments: Comment[] = data.map((c: any) => ({
-        id: c.id,
-        seriesId,
-        chapterId: c.chapterId,
-        parentId: c.parentId || '',
-        authorId: c.userId,
-        content: c.content,
-        status: c.status || 'approved',
-        createdAt: c.createdAt ? { toDate: () => new Date(c.createdAt) } : null,
-        likes: c.likes || [],
-        dislikes: c.dislikes || [],
-        authorProfile: {
-          displayName: c.userName || 'User',
-          avatarUrl: c.userAvatar || ''
-        }
-      }));
-      setComments(mappedComments);
+      const data = await apiClient.getComments(commentScopeId, user?.uid || user?.id);
+      if (Array.isArray(data)) {
+        const mappedComments: Comment[] = data.map((c: any) => ({
+          id: c.id,
+          seriesId,
+          chapterId: c.chapterId,
+          parentId: c.parentId || '',
+          authorId: c.userId || c.authorId,
+          content: c.content,
+          status: c.status || 'approved',
+          createdAt: c.createdAt ? { toDate: () => new Date(c.createdAt) } : null,
+          likes: Array.isArray(c.likes) ? c.likes : (typeof c.likes === 'string' ? JSON.parse(c.likes || '[]') : []),
+          dislikes: Array.isArray(c.dislikes) ? c.dislikes : (typeof c.dislikes === 'string' ? JSON.parse(c.dislikes || '[]') : []),
+          authorProfile: {
+            displayName: c.userName || c.authorName || 'کاربر مانگا',
+            avatarUrl: c.userAvatar || c.authorAvatar || ''
+          }
+        }));
+        setComments(mappedComments);
+      }
     } catch (e) {
       console.error("Error fetching comments via API", e);
     }
   };
 
   useEffect(() => {
-    if (user?.email === "amirrezaveisi45@gmail.com" || user?.email === "Mr.V@admin.com") {
-      setIsAdmin(true);
-    }
+    const isSuperOrAdmin = user?.email === "amirrezaveisi45@gmail.com" || 
+                           user?.email === "Mr.V@admin.com" || 
+                           profile?.role === "admin" ||
+                           (profile?.roles && profile.roles.includes('super_admin'));
+    setIsAdmin(!!isSuperOrAdmin);
 
     fetchComments();
 
     const socket = getSocketInstance();
     const handleUpdate = (data: any) => {
-      if (data.chapterId === commentScopeId) {
+      if (!data || !data.chapterId || data.chapterId === commentScopeId) {
         fetchComments();
       }
     };
@@ -100,11 +131,11 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
     return () => {
       socket.off("comments:updated", handleUpdate);
     };
-  }, [seriesId, chapterId, user, commentScopeId]);
+  }, [seriesId, chapterId, user, profile, commentScopeId]);
 
   const handleSubmit = async (e: React.FormEvent, parentId?: string) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || isSubmitting) return;
     const isReply = !!parentId;
     let rawContent = isReply ? replyText.trim() : newComment.trim();
     if (!rawContent) return;
@@ -112,19 +143,21 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
     const shouldSpoiler = isReply ? isReplySpoiler : isMainSpoiler;
     const finalContent = shouldSpoiler ? `[spoiler]${rawContent}[/spoiler]` : rawContent;
 
+    setIsSubmitting(true);
     try {
-      const randomId = 'comment_' + Math.random().toString(36).substr(2, 9);
+      const randomId = 'comment_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
       const res = await apiClient.addComment(commentScopeId, {
         id: randomId,
-        userId: user.uid,
-        userName: profile?.displayName || 'User',
-        userAvatar: profile?.avatarUrl || '',
+        userId: user.uid || user.id,
+        userName: profile?.displayName || user.displayName || user.email?.split('@')[0] || 'کاربر مانگا',
+        userAvatar: profile?.avatarUrl || user.photoURL || '',
         content: finalContent,
         parentId: parentId
       });
 
       if (res && res.status === 'pending') {
         setPendingNotice('دیدگاه شما با موفقیت ثبت شد و پس از بررسی و تایید توسط مدیریت در وبسایت منتشر خواهد شد.');
+        setTimeout(() => setPendingNotice(null), 7000);
       } else {
         setPendingNotice(null);
       }
@@ -137,16 +170,20 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
         setNewComment('');
         setIsMainSpoiler(false);
       }
-      fetchComments();
+
+      await fetchComments();
     } catch (error) {
       console.error("Error adding comment:", error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleDelete = async (commentId: string) => {
-    if (!window.confirm("Are you sure you want to delete this comment?")) return;
+    if (!window.confirm("آیا از حذف این دیدگاه اطمینان دارید؟")) return;
     try {
-      await apiClient.deleteComment(commentId);
+      await apiClient.deleteComment(commentId, user?.uid || user?.id);
+      setComments(prev => prev.filter(c => c.id !== commentId && c.parentId !== commentId));
       fetchComments();
     } catch (error) {
       console.error("Error deleting comment:", error);
@@ -154,8 +191,13 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
   };
 
   const handleVote = async (comment: Comment, type: 'up' | 'down') => {
-    if (!user) return alert("Log in to vote!");
+    if (!user) {
+      alert("لطفاً برای ثبت رای، ابتدا وارد حساب کاربری خود شوید.");
+      return;
+    }
     
+    const currentUid = user.uid || user.id;
+
     setComments(prevComments => {
       return prevComments.map(c => {
         if (c.id === comment.id) {
@@ -163,18 +205,18 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
           let dislikes = [...(c.dislikes || [])];
           
           if (type === 'up') {
-            if (likes.includes(user.uid)) {
-              likes = likes.filter(id => id !== user.uid);
+            if (likes.includes(currentUid)) {
+              likes = likes.filter(id => id !== currentUid);
             } else {
-              likes.push(user.uid);
-              dislikes = dislikes.filter(id => id !== user.uid);
+              likes.push(currentUid);
+              dislikes = dislikes.filter(id => id !== currentUid);
             }
           } else {
-            if (dislikes.includes(user.uid)) {
-              dislikes = dislikes.filter(id => id !== user.uid);
+            if (dislikes.includes(currentUid)) {
+              dislikes = dislikes.filter(id => id !== currentUid);
             } else {
-              dislikes.push(user.uid);
-              likes = likes.filter(id => id !== user.uid);
+              dislikes.push(currentUid);
+              likes = likes.filter(id => id !== currentUid);
             }
           }
           return { ...c, likes, dislikes };
@@ -184,7 +226,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
     });
 
     try {
-      await apiClient.reactToComment(comment.id, user.uid, type === 'up' ? 'like' : 'dislike');
+      await apiClient.reactToComment(comment.id, currentUid, type === 'up' ? 'like' : 'dislike');
     } catch (e) {
       console.error("Error voting:", e);
       fetchComments();
@@ -193,7 +235,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
 
   const renderContentWithSpoiler = (text: string) => {
     if (!text) return null;
-    const parts = text.split(/(\[spoiler\].*?\[\/spoiler\])/gsi);
+    const parts = text.split(/(\[spoiler\][\s\S]*?\[\/spoiler\])/gi);
     return parts.map((part, i) => {
       if (/^\[spoiler\]([\s\S]*?)\[\/spoiler\]$/i.test(part)) {
         const match = part.match(/^\[spoiler\]([\s\S]*?)\[\/spoiler\]$/i);
@@ -215,56 +257,67 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
       else setIsMainSpoiler(!isMainSpoiler);
     };
 
+    const userAvatar = profile?.avatarUrl || user?.photoURL;
+    const userName = profile?.displayName || user?.displayName || 'کاربر';
+
     return (
-      <form onSubmit={(e) => handleSubmit(e, parentId)} className="mb-8 mt-2">
-        <div className="flex gap-4">
-          <div className="w-10 h-10 rounded-full bg-[var(--color-asura-accent)] flex items-center justify-center shrink-0 overflow-hidden border border-[var(--color-asura-border)]">
-            {profile?.avatarUrl ? (
-               <img src={profile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+      <form onSubmit={(e) => handleSubmit(e, parentId)} className="mb-6 mt-2" dir="rtl">
+        <div className="flex gap-3 sm:gap-4 items-start">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-900 flex items-center justify-center shrink-0 overflow-hidden border border-white/10 shadow-md">
+            {userAvatar ? (
+               <img src={userAvatar} alt={userName} className="w-full h-full object-cover" />
             ) : (
-              <UserIcon size={20} className="text-white" />
+              <UserIcon size={18} className="text-zinc-400" />
             )}
           </div>
           <div className="flex-1">
-            <textarea
-              id={textareaId}
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
-              autoFocus={autoFocus}
-              placeholder={isReply ? "پاسخ خود را بنویسید..." : "دیدگاه خود را بنویسید..."}
-              className={`w-full bg-[var(--color-asura-card)] border rounded-xl p-4 text-white focus:outline-none transition-colors resize-none h-24 ${isSpoilerActive ? 'border-amber-500/60 ring-1 ring-amber-500/30' : 'border-[var(--color-asura-border)] focus:border-[var(--color-asura-accent)]/50'}`}
-              dir="auto"
-            />
-            <div className="flex flex-wrap justify-between mt-2 gap-2 items-center" dir="rtl">
+            <div className="relative">
+              <textarea
+                id={textareaId}
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                autoFocus={autoFocus}
+                placeholder={isReply ? "پاسخ خود را بنویسید..." : "دیدگاه یا نظر خود را درباره این اثر بنویسید..."}
+                className={`w-full bg-[var(--color-asura-card)]/80 border rounded-2xl p-4 text-white text-xs sm:text-sm focus:outline-none transition-all resize-none min-h-[90px] placeholder:text-zinc-500 leading-relaxed ${
+                  isSpoilerActive 
+                    ? 'border-amber-500/60 ring-2 ring-amber-500/20' 
+                    : 'border-[var(--color-asura-border)] focus:border-[var(--color-asura-accent)]/60 focus:ring-2 focus:ring-[var(--color-asura-accent)]/20'
+                }`}
+                dir="auto"
+              />
+            </div>
+            
+            <div className="flex flex-wrap justify-between mt-2.5 gap-2 items-center">
               <button 
                 type="button" 
                 onClick={toggleSpoiler}
                 className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all flex items-center gap-1.5 ${
                   isSpoilerActive 
                     ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-md' 
-                    : 'bg-white/5 hover:bg-white/10 text-zinc-400 border-white/10'
+                    : 'bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white border-white/5'
                 }`}
               >
                 <AlertTriangle size={13} className={isSpoilerActive ? 'text-amber-400' : 'text-zinc-500'} />
-                <span>{isSpoilerActive ? 'حاوی اسپویلر (فعال)' : 'علامت‌گذاری به عنوان اسپویلر'}</span>
+                <span>{isSpoilerActive ? 'علامت اسپویلر (فعال)' : 'اسپویلر'}</span>
               </button>
 
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 {isReply && (
                   <button
                     type="button"
                     onClick={() => { setReplyingTo(null); setReplyText(''); setIsReplySpoiler(false); }}
-                    className="px-5 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl font-bold text-xs uppercase transition-colors"
+                    className="px-4 py-2 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-xl font-bold text-xs transition-colors"
                   >
                     انصراف
                   </button>
                 )}
                 <button
                   type="submit"
-                  disabled={!value.trim()}
-                  className="px-6 py-2 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs uppercase transition-colors shadow-lg"
+                  disabled={!value.trim() || isSubmitting}
+                  className="px-5 py-2 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-black text-xs transition-all shadow-lg flex items-center gap-1.5"
                 >
-                  {isReply ? 'ارسال پاسخ' : 'ارسال دیدگاه'}
+                  <Send size={13} className="shrink-0" />
+                  <span>{isSubmitting ? 'در حال ارسال...' : isReply ? 'ارسال پاسخ' : 'ثبت دیدگاه'}</span>
                 </button>
               </div>
             </div>
@@ -274,164 +327,267 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
     );
   };
 
-  const topLevelComments = comments.filter(c => !c.parentId).sort((a, b) => b.createdAt?.toDate?.()?.getTime() - a.createdAt?.toDate?.()?.getTime());
+  const topLevelComments = comments
+    .filter(c => !c.parentId)
+    .sort((a, b) => {
+      const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+      const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+      return timeB - timeA;
+    });
 
   return (
-    <div className="mt-8">
-      <h3 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-2 mb-6">
-        <span className="w-1.5 h-6 bg-[var(--color-asura-accent)] rounded-full"></span>
-        Discussion {comments.length > 0 && `(${comments.length})`}
-      </h3>
+    <div className="mt-8" dir="rtl">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-4 mb-6 border-b border-white/10 pb-4">
+        <h3 className="text-lg sm:text-xl font-black text-white flex items-center gap-2.5">
+          <span className="w-2 h-6 bg-[var(--color-asura-accent)] rounded-full shadow-[0_0_12px_var(--color-asura-accent)]"></span>
+          <span>نظرات و دیدگاه‌های کاربران</span>
+          <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-white/5 text-[var(--color-asura-accent-light)] border border-white/10">
+            {comments.length}
+          </span>
+        </h3>
+      </div>
 
+      {/* Notice Banner */}
       {pendingNotice && (
-        <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center gap-3 text-amber-300 text-xs font-bold" dir="rtl">
+        <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center gap-3 text-amber-300 text-xs font-bold animate-fadeIn">
           <AlertTriangle size={18} className="shrink-0 text-amber-400" />
           <span className="leading-relaxed">{pendingNotice}</span>
         </div>
       )}
 
+      {/* Main Form or Auth Prompt */}
       {user ? (
-        profile?.hasCompletedSetup ? (
-          !replyingTo && renderCommentForm()
-        ) : (
-          <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 text-center mb-8 flex flex-col items-center gap-3" dir="rtl">
-            <p className="text-zinc-300 text-sm font-bold">برای ارسال دیدگاه، ابتدا باید اطلاعات حساب کاربری خود را تکمیل کنید.</p>
-            <button
-              onClick={() => setShowSetupModal(true)}
-              className="py-2.5 px-6 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-xs rounded-xl transition-all shadow-lg"
-            >
-              تکمیل اطلاعات حساب کاربری
-            </button>
-          </div>
-        )
+        !replyingTo && renderCommentForm()
       ) : (
-        <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-xl p-6 text-center mb-8">
-          <p className="text-zinc-400 mb-4">Please log in to join the discussion.</p>
+        <div className="bg-[var(--color-asura-card)]/80 border border-white/10 rounded-2xl p-6 text-center mb-8 flex flex-col items-center justify-center gap-3">
+          <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-zinc-400 mb-1">
+            <LogIn size={22} className="text-[var(--color-asura-accent)]" />
+          </div>
+          <p className="text-zinc-300 text-sm font-bold">برای ارسال دیدگاه یا شرکت در گفتگو، لطفاً وارد حساب خود شوید.</p>
+          <button
+            onClick={() => {
+              const loginBtn = document.querySelector('[data-auth-trigger="login"]') as HTMLButtonElement;
+              if (loginBtn) {
+                loginBtn.click();
+              } else {
+                window.location.href = '/login';
+              }
+            }}
+            className="mt-1 px-6 py-2.5 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent-hover)] text-white font-black text-xs rounded-xl transition-all shadow-lg flex items-center gap-2"
+          >
+            <LogIn size={15} />
+            <span>ورود / ثبت‌نام سریع</span>
+          </button>
         </div>
       )}
 
-      <div className="space-y-6">
+      {/* Comments Feed */}
+      <div className="space-y-4">
         {topLevelComments.map((comment) => {
-          const replies = comments.filter(c => c.parentId === comment.id);
+          const replies = comments
+            .filter(c => c.parentId === comment.id)
+            .sort((a, b) => {
+              const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+              const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+              return timeA - timeB;
+            });
+
           const isPending = comment.status === 'pending';
+          const isRejected = comment.status === 'rejected';
+          const currentUid = user?.uid || user?.id;
+          const isAuthor = currentUid && currentUid === comment.authorId;
+          const canDelete = isAdmin || isAuthor;
+
           return (
-            <div key={comment.id} className="flex gap-4">
-              <div className="w-10 h-10 rounded-full bg-[var(--color-asura-dark)] flex items-center justify-center shrink-0 overflow-hidden border border-white/5">
-                 {comment.authorProfile?.avatarUrl ? (
-                   <img src={comment.authorProfile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                 ) : (
-                   <UserIcon size={20} className="text-zinc-500" />
-                 )}
+            <div key={comment.id} className="flex gap-3 sm:gap-4 items-start">
+              {/* Avatar */}
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-900 flex items-center justify-center shrink-0 overflow-hidden border border-white/10 shadow-md">
+                {comment.authorProfile?.avatarUrl ? (
+                  <img src={comment.authorProfile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <UserIcon size={18} className="text-zinc-400" />
+                )}
               </div>
-              <div className={`flex-1 border rounded-2xl p-4 relative group ${isPending ? 'bg-amber-500/5 border-amber-500/30' : 'bg-white/5 border-white/5'}`}>
-                <div className="flex justify-between items-center mb-2">
+
+              {/* Body */}
+              <div className={`flex-1 border rounded-2xl p-4 sm:p-5 relative transition-all duration-200 ${
+                isPending 
+                  ? 'bg-amber-500/5 border-amber-500/30' 
+                  : isRejected
+                  ? 'bg-red-500/5 border-red-500/30'
+                  : 'bg-white/[0.03] hover:bg-white/[0.05] border-white/5'
+              }`}>
+                {/* Top Info */}
+                <div className="flex justify-between items-center mb-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-bold text-white text-sm">
-                      {comment.authorProfile?.displayName || 'Anonymous User'}
+                    <span className="font-bold text-white text-xs sm:text-sm">
+                      {comment.authorProfile?.displayName || 'کاربر مانگا'}
                     </span>
-                    <span className="text-[10px] text-zinc-500">
-                      {comment.createdAt?.toDate ? formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true }) : 'Just now'}
-                    </span>
+                    
+                    {comment.createdAt?.toDate && (
+                      <span className="text-[11px] text-zinc-500 flex items-center gap-1 font-medium">
+                        <Clock size={11} className="text-zinc-600" />
+                        {formatDistanceToNow(comment.createdAt.toDate(), { addSuffix: true, locale: faIR })}
+                      </span>
+                    )}
+
                     {isPending && (
-                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1" dir="rtl">
+                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
                         ⏳ در انتظار تایید مدیریت
                       </span>
                     )}
+
+                    {isRejected && (
+                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-lg bg-red-500/20 text-red-300 border border-red-500/40 flex items-center gap-1">
+                        ❌ رد شده توسط مدیریت
+                      </span>
+                    )}
                   </div>
-                  {(isAdmin || user?.uid === comment.authorId) && (
+
+                  {canDelete && (
                     <button 
                       onClick={() => handleDelete(comment.id)}
-                      className="text-zinc-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                      title="Delete Comment"
+                      className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+                      title="حذف دیدگاه"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={15} />
                     </button>
                   )}
                 </div>
-                <p className="text-zinc-300 text-sm whitespace-pre-wrap leading-relaxed mb-4" dir="auto">
+
+                {/* Content */}
+                <div className="text-zinc-300 text-xs sm:text-sm whitespace-pre-wrap leading-relaxed mb-3.5" dir="auto">
                   {renderContentWithSpoiler(comment.content)}
-                </p>
+                </div>
                 
-                <div className="flex items-center gap-4 mt-2 pt-3 border-t border-white/5">
-                   <button onClick={() => handleVote(comment, 'up')} className={`flex items-center gap-1 text-xs font-bold ${comment.likes?.includes(user?.uid || '') ? 'text-[var(--color-asura-accent)]' : 'text-zinc-500 hover:text-white'} transition-colors`}>
-                     <ThumbsUp size={14} /> {comment.likes?.length || 0}
-                   </button>
-                   <button onClick={() => handleVote(comment, 'down')} className={`flex items-center gap-1 text-xs font-bold ${comment.dislikes?.includes(user?.uid || '') ? 'text-red-500' : 'text-zinc-500 hover:text-white'} transition-colors`}>
-                     <ThumbsDown size={14} /> {comment.dislikes?.length || 0}
-                   </button>
-                   {user && (
-                     <button 
-                       onClick={() => {
-                         if (profile?.hasCompletedSetup) {
-                           setReplyingTo(comment.id);
-                         } else {
-                           setShowSetupModal(true);
-                         }
-                       }}
-                       className="flex items-center gap-1 text-xs font-bold text-zinc-500 hover:text-white transition-colors ml-auto"
-                     >
-                       <MessageSquare size={14} /> Reply
-                     </button>
-                   )}
+                {/* Actions */}
+                <div className="flex items-center gap-4 pt-3 border-t border-white/5 text-xs">
+                  <button 
+                    onClick={() => handleVote(comment, 'up')} 
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold transition-all ${
+                      comment.likes?.includes(currentUid || '') 
+                        ? 'bg-[var(--color-asura-accent)]/20 text-[var(--color-asura-accent-light)] border border-[var(--color-asura-accent)]/40 shadow-sm' 
+                        : 'text-zinc-400 hover:text-white bg-white/5 hover:bg-white/10'
+                    }`}
+                  >
+                    <ThumbsUp size={13} /> 
+                    <span>{comment.likes?.length || 0}</span>
+                  </button>
+
+                  <button 
+                    onClick={() => handleVote(comment, 'down')} 
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold transition-all ${
+                      comment.dislikes?.includes(currentUid || '') 
+                        ? 'bg-red-500/20 text-red-400 border border-red-500/40 shadow-sm' 
+                        : 'text-zinc-400 hover:text-white bg-white/5 hover:bg-white/10'
+                    }`}
+                  >
+                    <ThumbsDown size={13} /> 
+                    <span>{comment.dislikes?.length || 0}</span>
+                  </button>
+
+                  {user && (
+                    <button 
+                      onClick={() => {
+                        setReplyingTo(replyingTo === comment.id ? null : comment.id);
+                        setReplyText('');
+                        setIsReplySpoiler(false);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-lg font-bold text-zinc-400 hover:text-white bg-white/5 hover:bg-white/10 transition-all mr-auto"
+                    >
+                      <CornerDownLeft size={13} /> 
+                      <span>پاسخ</span>
+                    </button>
+                  )}
                 </div>
 
+                {/* Reply Form */}
                 {replyingTo === comment.id && (
-                  <div className="mt-4 pt-4 border-t border-white/5">
+                  <div className="mt-4 pt-4 border-t border-white/10">
                     {renderCommentForm(comment.id, true)}
                   </div>
                 )}
 
+                {/* Nested Replies */}
                 {replies.length > 0 && (
-                  <div className="mt-4 space-y-4 pt-4 border-t border-white/5 pl-4 ml-2 border-l-2 border-white/10">
+                  <div className="mt-4 space-y-3 pt-3 border-t border-white/5 pr-3 sm:pr-4 border-r-2 border-[var(--color-asura-accent)]/40">
                     {replies.map(reply => {
                       const isReplyPending = reply.status === 'pending';
+                      const isReplyRejected = reply.status === 'rejected';
+                      const canDeleteReply = isAdmin || (currentUid && currentUid === reply.authorId);
+
                       return (
-                        <div key={reply.id} className="flex gap-3">
-                           <div className="w-8 h-8 rounded-full bg-black/40 flex items-center justify-center shrink-0 overflow-hidden border border-white/5">
-                             {reply.authorProfile?.avatarUrl ? (
-                               <img src={reply.authorProfile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
-                             ) : (
-                               <UserIcon size={16} className="text-zinc-500" />
-                             )}
-                           </div>
-                           <div className={`flex-1 rounded-xl p-3 relative group border ${isReplyPending ? 'bg-amber-500/5 border-amber-500/30' : 'bg-black/20 border-white/5'}`}>
-                              <div className="flex justify-between items-center mb-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold text-white text-xs">
-                                    {reply.authorProfile?.displayName || 'Anonymous User'}
+                        <div key={reply.id} className="flex gap-2.5 sm:gap-3 items-start">
+                          <div className="w-8 h-8 rounded-xl bg-zinc-800 flex items-center justify-center shrink-0 overflow-hidden border border-white/10 shadow-sm">
+                            {reply.authorProfile?.avatarUrl ? (
+                              <img src={reply.authorProfile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                            ) : (
+                              <UserIcon size={14} className="text-zinc-400" />
+                            )}
+                          </div>
+                          <div className={`flex-1 rounded-xl p-3 sm:p-3.5 relative border ${
+                            isReplyPending 
+                              ? 'bg-amber-500/5 border-amber-500/30' 
+                              : isReplyRejected
+                              ? 'bg-red-500/5 border-red-500/30'
+                              : 'bg-black/30 border-white/5'
+                          }`}>
+                            <div className="flex justify-between items-center mb-1.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-bold text-white text-xs">
+                                  {reply.authorProfile?.displayName || 'کاربر مانگا'}
+                                </span>
+                                {reply.createdAt?.toDate && (
+                                  <span className="text-[10px] text-zinc-500">
+                                    {formatDistanceToNow(reply.createdAt.toDate(), { addSuffix: true, locale: faIR })}
                                   </span>
-                                  <span className="text-[9px] text-zinc-500">
-                                    {reply.createdAt?.toDate ? formatDistanceToNow(reply.createdAt.toDate(), { addSuffix: true }) : 'Just now'}
+                                )}
+                                {isReplyPending && (
+                                  <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                    ⏳ در انتظار تایید
                                   </span>
-                                  {isReplyPending && (
-                                    <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-amber-500/20 text-amber-400 border border-amber-500/30" dir="rtl">
-                                      ⏳ در انتظار تایید
-                                    </span>
-                                  )}
-                                </div>
-                                {(isAdmin || user?.uid === reply.authorId) && (
-                                  <button 
-                                    onClick={() => handleDelete(reply.id)}
-                                    className="text-zinc-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 p-1"
-                                    title="Delete Reply"
-                                  >
-                                    <Trash2 size={12} />
-                                  </button>
+                                )}
+                                {isReplyRejected && (
+                                  <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-red-500/20 text-red-300 border border-red-500/40">
+                                    ❌ رد شده
+                                  </span>
                                 )}
                               </div>
-                              <p className="text-zinc-400 text-xs whitespace-pre-wrap leading-relaxed">
-                                {renderContentWithSpoiler(reply.content)}
-                              </p>
-                              
-                              <div className="flex items-center gap-3 mt-2 pt-2 border-t border-white/5">
-                                 <button onClick={() => handleVote(reply, 'up')} className={`flex items-center gap-1 text-[10px] font-bold ${reply.likes?.includes(user?.uid || '') ? 'text-[var(--color-asura-accent)]' : 'text-zinc-500 hover:text-white'} transition-colors`}>
-                                   <ThumbsUp size={12} /> {reply.likes?.length || 0}
-                                 </button>
-                                 <button onClick={() => handleVote(reply, 'down')} className={`flex items-center gap-1 text-[10px] font-bold ${reply.dislikes?.includes(user?.uid || '') ? 'text-red-500' : 'text-zinc-500 hover:text-white'} transition-colors`}>
-                                   <ThumbsDown size={12} /> {reply.dislikes?.length || 0}
-                                 </button>
-                              </div>
-                           </div>
+                              {canDeleteReply && (
+                                <button 
+                                  onClick={() => handleDelete(reply.id)}
+                                  className="p-1 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-all"
+                                  title="حذف پاسخ"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </div>
+                            
+                            <div className="text-zinc-300 text-xs whitespace-pre-wrap leading-relaxed mb-2" dir="auto">
+                              {renderContentWithSpoiler(reply.content)}
+                            </div>
+                            
+                            <div className="flex items-center gap-3 pt-2 border-t border-white/5 text-[11px]">
+                              <button 
+                                onClick={() => handleVote(reply, 'up')} 
+                                className={`flex items-center gap-1 font-bold ${
+                                  reply.likes?.includes(currentUid || '') ? 'text-[var(--color-asura-accent)]' : 'text-zinc-500 hover:text-white'
+                                } transition-colors`}
+                              >
+                                <ThumbsUp size={12} /> {reply.likes?.length || 0}
+                              </button>
+                              <button 
+                                onClick={() => handleVote(reply, 'down')} 
+                                className={`flex items-center gap-1 font-bold ${
+                                  reply.dislikes?.includes(currentUid || '') ? 'text-red-400' : 'text-zinc-500 hover:text-white'
+                                } transition-colors`}
+                              >
+                                <ThumbsDown size={12} /> {reply.dislikes?.length || 0}
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       );
                     })}
@@ -441,9 +597,12 @@ export function Comments({ seriesId, chapterId }: { seriesId: string, chapterId?
             </div>
           );
         })}
+
         {comments.length === 0 && (
-          <div className="text-center text-zinc-500 py-8">
-            Be the first to share your thoughts!
+          <div className="text-center text-zinc-500 py-12 bg-white/[0.02] border border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center gap-2">
+            <MessageSquare size={32} className="text-zinc-600 mb-1 opacity-50" />
+            <p className="text-xs font-bold text-zinc-400">هنوز دیدگاهی برای این بخش ثبت نشده است.</p>
+            <p className="text-[11px] text-zinc-600">اولین نفری باشید که نظر خود را به اشتراک می‌گذارد!</p>
           </div>
         )}
       </div>

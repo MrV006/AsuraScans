@@ -1724,6 +1724,15 @@ async function startServer() {
     }
   });
 
+  app.get("/api/users/:userId/comments", async (req, res) => {
+    try {
+      const list = await dbManager.getUserComments(req.params.userId);
+      res.json(list);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // -----------------------------------------------------------------
   // 6. BOOKMARKS, HISTORY & RATINGS API
   // -----------------------------------------------------------------
