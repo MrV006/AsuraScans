@@ -12,7 +12,6 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
   login: (emailOrUsername: string, password?: string) => Promise<any>;
   register: (email: string, displayName: string, password?: string) => Promise<any>;
-  loginWithGoogle: (googleProfile: any) => Promise<any>;
   logout: () => Promise<void>;
 }
 
@@ -27,7 +26,6 @@ const AuthContext = createContext<AuthContextType>({
   refreshProfile: async () => {},
   login: async () => {},
   register: async () => {},
-  loginWithGoogle: async () => {},
   logout: async () => {}
 });
 
@@ -104,27 +102,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const loginWithGoogle = async (googleProfile: { email: string; displayName: string; avatarUrl: string; firstName?: string; lastName?: string; phoneNumber?: string }) => {
-    try {
-      const loggedUser = await apiClient.googleLogin(googleProfile);
-      localStorage.setItem('asura_user_uid', loggedUser.id);
-      const enriched = enrichUser(loggedUser);
-      setUser(enriched);
-      setProfile(enriched);
-      if (loggedUser.hasCompletedSetup === false) {
-        setShowSetupModal(true);
-      } else {
-        setShowSetupModal(false);
-      }
-      return enriched;
-    } catch (err) {
-      console.error("Google login failed:", err);
-      throw err;
-    }
-  };
-
   const logout = async () => {
     localStorage.removeItem('asura_user_uid');
+    localStorage.removeItem('asura_user_id');
+    localStorage.removeItem('userUid');
     localStorage.removeItem('asura_simulate_user');
     setUser(null);
     setProfile(null);
@@ -137,13 +118,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const savedUid = localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid');
       if (savedUid) {
         try {
-          let userProfile = await apiClient.getUser(savedUid);
-          if (!userProfile) {
-            userProfile = await apiClient.getUser('amirrezaveisi45@gmail.com');
-          }
+          const userProfile = await apiClient.getUser(savedUid);
           if (userProfile) {
             if (userProfile.banned) {
               localStorage.removeItem('asura_user_uid');
+              localStorage.removeItem('asura_user_id');
+              localStorage.removeItem('userUid');
               setUser(null);
               setProfile(null);
               alert("حساب کاربری شما مسدود شده است.");
@@ -155,23 +135,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setShowSetupModal(true);
               }
             }
-          } else if (savedUid === 'admin' || savedUid === 'amirrezaveisi45@gmail.com' || savedUid === 'Mr.V@admin.com') {
-            const superAdminObj = {
-              id: 'admin',
-              uid: 'admin',
-              displayName: 'مدیریت کل',
-              email: 'amirrezaveisi45@gmail.com',
-              role: 'admin',
-              roles: ['super_admin', 'admin'],
-              permissions: ['all'],
-              canCreateSeries: true,
-              hasCompletedSetup: true
-            };
-            setUser(superAdminObj);
-            setProfile(superAdminObj);
+          } else {
+            // User ID in storage no longer valid in database - clear it
+            localStorage.removeItem('asura_user_uid');
+            localStorage.removeItem('asura_user_id');
+            localStorage.removeItem('userUid');
+            setUser(null);
+            setProfile(null);
           }
         } catch (e) {
           console.error("Failed to restore session:", e);
+          setUser(null);
+          setProfile(null);
         }
       }
       setLoading(false);
@@ -192,7 +167,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refreshProfile,
       login,
       register,
-      loginWithGoogle,
       logout
     }}>
       {children}

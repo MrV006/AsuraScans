@@ -1410,13 +1410,17 @@ class DatabaseManager {
   }
 
   async saveSeries(s: any): Promise<Series> {
-    const isEdit = !!(await this.getSeriesById(s.id));
+    const existingSeries = await this.getSeriesById(s.id);
+    const isEdit = !!existingSeries;
     const now = new Date().toISOString();
     
     const altTitlesStr = Array.isArray(s.alternativeTitles) ? s.alternativeTitles.join(',') : '';
     const genresStr = Array.isArray(s.genres) ? s.genres.join(',') : '';
     const tagsStr = Array.isArray(s.tags) ? s.tags.join(',') : '';
-    const contributorsStr = s.contributors ? JSON.stringify(s.contributors) : '[]';
+    const finalContributors = s.contributors !== undefined 
+      ? (Array.isArray(s.contributors) ? s.contributors : [])
+      : (existingSeries?.contributors || []);
+    const contributorsStr = JSON.stringify(finalContributors);
 
     if (this.isUsingMySQL && this.pool) {
       if (isEdit) {
@@ -1448,7 +1452,7 @@ class DatabaseManager {
       rating: s.rating || 0,
       type: s.type || 'Manhwa',
       views: s.views || 0,
-      contributors: s.contributors || [],
+      contributors: finalContributors,
       isHero: !!s.isHero,
       seoTitle: s.seoTitle || '',
       seoDescription: s.seoDescription || '',
@@ -1709,12 +1713,16 @@ class DatabaseManager {
   }
 
   async saveChapter(ch: any): Promise<Chapter> {
-    const isEdit = !!(await this.getChapterById(ch.seriesId, ch.id));
+    const existingChapter = await this.getChapterById(ch.seriesId, ch.id);
+    const isEdit = !!existingChapter;
     const now = new Date().toISOString();
     
     const imagesStr = Array.isArray(ch.images) ? ch.images.join(',') : '';
     const submissionsStr = ch.submissions ? JSON.stringify(ch.submissions) : '[]';
-    const contributorsStr = ch.contributors ? JSON.stringify(ch.contributors) : '{}';
+    const finalContributors = ch.contributors !== undefined 
+      ? (typeof ch.contributors === 'object' && ch.contributors !== null ? ch.contributors : {})
+      : (existingChapter?.contributors || {});
+    const contributorsStr = JSON.stringify(finalContributors);
     const isPendingVal = (ch.isPending === true || ch.isPending === 1) ? 1 : 0;
 
     if (this.isUsingMySQL && this.pool) {
@@ -1741,7 +1749,7 @@ class DatabaseManager {
       views: ch.views || 0,
       isPending: ch.isPending === true || ch.isPending === 1,
       submissions: ch.submissions || [],
-      contributors: ch.contributors || {},
+      contributors: finalContributors,
       seoTitle: ch.seoTitle || '',
       seoDescription: ch.seoDescription || '',
       seoKeywords: ch.seoKeywords || '',
@@ -1867,9 +1875,15 @@ class DatabaseManager {
   // -----------------------------------------------------------------
   // COMMENTS METHODS
   // -----------------------------------------------------------------
-  async getComments(chapterId: string, currentUserId?: string, isAdminOrModerator: boolean = false): Promise<Comment[]> {
+  async getComments(chapterId: string, currentUserId?: string, isAdminOrModerator: boolean = false, userObj?: any): Promise<Comment[]> {
+    const rawId = chapterId.replace(/^series-/, '');
+    const altChapterId = chapterId.startsWith('series-') ? rawId : `series-${chapterId}`;
+
     if (this.isUsingMySQL && this.pool) {
-      const [rows] = await this.pool.execute('SELECT * FROM comments WHERE chapterId = ? ORDER BY isPinned DESC, createdAt DESC', [chapterId]);
+      const [rows] = await this.pool.execute(
+        'SELECT * FROM comments WHERE (chapterId = ? OR chapterId = ? OR chapterId = ?) ORDER BY isPinned DESC, createdAt DESC', 
+        [chapterId, altChapterId, rawId]
+      );
       const mapped = (rows as any[]).map(r => ({
         ...r,
         status: r.status || 'approved',
@@ -1881,7 +1895,14 @@ class DatabaseManager {
       }));
       let filtered = mapped;
       if (!isAdminOrModerator) {
-        filtered = mapped.filter(c => c.status === 'approved' || (currentUserId && c.userId === currentUserId));
+        const uId = currentUserId || userObj?.id;
+        const uEmail = userObj?.email;
+        filtered = mapped.filter(c => {
+          const st = (c.status || 'approved').toLowerCase();
+          const isApp = st === 'approved' || st === 'published' || st === '1';
+          const isOwn = (uId && (c.userId === uId || String(c.userId) === String(uId))) || (uEmail && c.userId === uEmail);
+          return isApp || isOwn;
+        });
       }
       return filtered.sort((a, b) => {
         const aPin = a.isPinned ? 1 : 0;
@@ -1891,9 +1912,18 @@ class DatabaseManager {
       });
     }
 
-    let allForChapter = (this.localData.comments || []).filter(c => c.chapterId === chapterId);
+    let allForChapter = (this.localData.comments || []).filter(c => 
+      c.chapterId === chapterId || c.chapterId === altChapterId || (rawId && c.chapterId === rawId)
+    );
     if (!isAdminOrModerator) {
-      allForChapter = allForChapter.filter(c => (c.status || 'approved') === 'approved' || (currentUserId && c.userId === currentUserId));
+      const uId = currentUserId || userObj?.id;
+      const uEmail = userObj?.email;
+      allForChapter = allForChapter.filter(c => {
+        const st = (c.status || 'approved').toLowerCase();
+        const isApp = st === 'approved' || st === 'published' || st === '1';
+        const isOwn = (uId && (c.userId === uId || String(c.userId) === String(uId))) || (uEmail && c.userId === uEmail);
+        return isApp || isOwn;
+      });
     }
     return allForChapter.sort((a, b) => {
       const aPin = a.isPinned ? 1 : 0;

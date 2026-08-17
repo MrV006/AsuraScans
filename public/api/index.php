@@ -322,6 +322,7 @@ function ensureSchema($pdo) {
             userId VARCHAR(100) NOT NULL,
             seriesId VARCHAR(100) NOT NULL,
             chapterId VARCHAR(100) NOT NULL,
+            chapterNumber DOUBLE DEFAULT NULL,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_user_chap (userId, seriesId, chapterId)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
@@ -435,6 +436,20 @@ function ensureSchema($pdo) {
     // Migrate series table to add contributors column if not exists
     try {
         $pdo->exec("ALTER TABLE series ADD COLUMN contributors TEXT");
+    } catch (PDOException $e) {
+        // Ignored if column already exists
+    }
+
+    // Migrate series table to add isFeatured column if not exists
+    try {
+        $pdo->exec("ALTER TABLE series ADD COLUMN isFeatured TINYINT(1) DEFAULT 0");
+    } catch (PDOException $e) {
+        // Ignored if column already exists
+    }
+
+    // Migrate purchased_chapters table to add chapterNumber column if not exists
+    try {
+        $pdo->exec("ALTER TABLE purchased_chapters ADD COLUMN chapterNumber DOUBLE DEFAULT NULL");
     } catch (PDOException $e) {
         // Ignored if column already exists
     }
@@ -662,7 +677,12 @@ if ($method === 'POST' && $sub_path === '/auth/google') {
     $stmt->execute([strtolower($email)]);
     $user = $stmt->fetch();
     
+    $isOwner = strtolower($email) === 'amirrezaveisi45@gmail.com' || strtolower($email) === 'mr.v@admin.com';
+
     if ($user) {
+        if ($user['banned']) {
+            sendResponse(["error" => "حساب کاربری شما مسدود شده است."], 403);
+        }
         // Update blank fields
         $updates = [];
         $params = [];
@@ -670,6 +690,12 @@ if ($method === 'POST' && $sub_path === '/auth/google') {
         if (!$user['firstName'] && $firstName) { $updates[] = "firstName = ?"; $params[] = $firstName; }
         if (!$user['lastName'] && $lastName) { $updates[] = "lastName = ?"; $params[] = $lastName; }
         if (!$user['phoneNumber'] && $phoneNumber) { $updates[] = "phoneNumber = ?"; $params[] = $phoneNumber; }
+        if ($isOwner && $user['role'] !== 'admin') {
+            $updates[] = "role = 'admin'";
+            $updates[] = "canCreateSeries = 1";
+            $updates[] = "rolesText = 'super_admin,admin'";
+            $updates[] = "permissionsText = 'all'";
+        }
         
         if (!empty($updates)) {
             $params[] = $user['id'];
@@ -684,8 +710,13 @@ if ($method === 'POST' && $sub_path === '/auth/google') {
     } else {
         // Create new
         $id = 'user-google-' . round(microtime(true) * 1000);
-        $stmtInsert = $pdo->prepare("INSERT INTO users (id, email, displayName, avatarUrl, banned, role, melliCode, firstName, lastName, phoneNumber, canCreateSeries, walletBalance, hasCompletedSetup) VALUES (?, ?, ?, ?, 0, 'user', '', ?, ?, ?, 0, 0, 0)");
-        $stmtInsert->execute([$id, $email, $displayName, $avatarUrl, $firstName, $lastName, $phoneNumber]);
+        $role = $isOwner ? 'admin' : 'user';
+        $rolesText = $isOwner ? 'super_admin,admin' : 'user';
+        $permissionsText = $isOwner ? 'all' : '';
+        $canCreateSeries = $isOwner ? 1 : 0;
+        
+        $stmtInsert = $pdo->prepare("INSERT INTO users (id, email, displayName, avatarUrl, banned, role, rolesText, permissionsText, melliCode, firstName, lastName, phoneNumber, canCreateSeries, walletBalance, hasCompletedSetup) VALUES (?, ?, ?, ?, 0, ?, ?, ?, '', ?, ?, ?, ?, 0, 0)");
+        $stmtInsert->execute([$id, $email, $displayName, $avatarUrl, $role, $rolesText, $permissionsText, $firstName, $lastName, $phoneNumber, $canCreateSeries]);
         
         $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
         $stmt->execute([$id]);
@@ -1046,17 +1077,24 @@ if ($method === 'POST' && $sub_path === '/series') {
     $status = isset($input['status']) ? $input['status'] : 'Ongoing';
     $rating = isset($input['rating']) ? (double)$input['rating'] : 0.0;
     $type = isset($input['type']) ? $input['type'] : 'Manhwa';
-    $contributors = isset($input['contributors']) ? json_encode($input['contributors']) : '[]';
     $isHero = isset($input['isHero']) ? ($input['isHero'] ? 1 : 0) : 0;
     
     // Check if exists
-    $stmtCheck = $pdo->prepare("SELECT id FROM series WHERE id = ?");
+    $stmtCheck = $pdo->prepare("SELECT id, contributors FROM series WHERE id = ?");
     $stmtCheck->execute([$id]);
-    $exists = $stmtCheck->fetch();
+    $exists = $stmtCheck->fetch(PDO::FETCH_ASSOC);
+    
+    $existingContribs = [];
+    if ($exists && !empty($exists['contributors'])) {
+        $existingContribs = is_array($exists['contributors']) ? $exists['contributors'] : json_decode($exists['contributors'], true);
+    }
+    $contributors = isset($input['contributors']) 
+        ? (is_string($input['contributors']) ? $input['contributors'] : json_encode($input['contributors'], JSON_UNESCAPED_UNICODE)) 
+        : json_encode($existingContribs ?: [], JSON_UNESCAPED_UNICODE);
     
     if ($exists) {
-        $stmt = $pdo->prepare("UPDATE series SET title = ?, alternativeTitles = ?, cover = ?, banner = ?, author = ?, artist = ?, synopsis = ?, genres = ?, tags = ?, status = ?, type = ?, isHero = ? WHERE id = ?");
-        $stmt->execute([$title, $alternativeTitles, $cover, $banner, $author, $artist, $synopsis, $genres, $tags, $status, $type, $isHero, $id]);
+        $stmt = $pdo->prepare("UPDATE series SET title = ?, alternativeTitles = ?, cover = ?, banner = ?, author = ?, artist = ?, synopsis = ?, genres = ?, tags = ?, status = ?, type = ?, isHero = ?, contributors = ? WHERE id = ?");
+        $stmt->execute([$title, $alternativeTitles, $cover, $banner, $author, $artist, $synopsis, $genres, $tags, $status, $type, $isHero, $contributors, $id]);
     } else {
         $stmt = $pdo->prepare("INSERT INTO series (id, title, alternativeTitles, cover, banner, author, artist, synopsis, genres, tags, status, rating, type, views, isHero, contributors) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)");
         $stmt->execute([$id, $title, $alternativeTitles, $cover, $banner, $author, $artist, $synopsis, $genres, $tags, $status, $rating, $type, $isHero, $contributors]);
@@ -1294,6 +1332,8 @@ if ($method === 'GET' && matchRoute('/series/:seriesId/chapters', $sub_path, $pa
         $ch['images'] = $ch['images'] ? array_filter(explode(',', $ch['images'])) : [];
         $ch['submissions'] = $ch['submissions'] ? json_decode($ch['submissions'], true) : [];
         if (!is_array($ch['submissions'])) $ch['submissions'] = [];
+        $ch['contributors'] = !empty($ch['contributors']) ? (is_array($ch['contributors']) ? $ch['contributors'] : json_decode($ch['contributors'], true)) : new stdClass();
+        if (!$ch['contributors']) $ch['contributors'] = new stdClass();
         $ch['isPending'] = (bool)$ch['isPending'];
         $ch['number'] = (double)$ch['number'];
         $ch['views'] = (int)$ch['views'];
@@ -1315,6 +1355,8 @@ if ($method === 'GET' && matchRoute('/series/:seriesId/chapters/:id', $sub_path,
     $ch['images'] = $ch['images'] ? array_filter(explode(',', $ch['images'])) : [];
     $ch['submissions'] = $ch['submissions'] ? json_decode($ch['submissions'], true) : [];
     if (!is_array($ch['submissions'])) $ch['submissions'] = [];
+    $ch['contributors'] = !empty($ch['contributors']) ? (is_array($ch['contributors']) ? $ch['contributors'] : json_decode($ch['contributors'], true)) : new stdClass();
+    if (!$ch['contributors']) $ch['contributors'] = new stdClass();
     $ch['isPending'] = (bool)$ch['isPending'];
     $ch['number'] = (double)$ch['number'];
     $ch['views'] = (int)$ch['views'];
@@ -1335,21 +1377,29 @@ if ($method === 'POST' && matchRoute('/series/:seriesId/chapters', $sub_path, $p
     
     $number = (double)(isset($input['number']) ? $input['number'] : 1.0);
     $title = isset($input['title']) ? $input['title'] : '';
-    $images = isset($input['images']) ? implode(',', $input['images']) : '';
+    $images = isset($input['images']) ? (is_array($input['images']) ? implode(',', $input['images']) : $input['images']) : '';
     $isPending = isset($input['isPending']) ? ($input['isPending'] ? 1 : 0) : 0;
-    $submissions = isset($input['submissions']) ? json_encode($input['submissions']) : '[]';
+    $submissions = isset($input['submissions']) ? (is_string($input['submissions']) ? $input['submissions'] : json_encode($input['submissions'], JSON_UNESCAPED_UNICODE)) : '[]';
     $sortMode = isset($input['sortMode']) ? $input['sortMode'] : 'natural';
     
-    $stmtCheck = $pdo->prepare("SELECT id FROM chapters WHERE id = ?");
+    $stmtCheck = $pdo->prepare("SELECT id, contributors FROM chapters WHERE id = ?");
     $stmtCheck->execute([$id]);
-    $exists = $stmtCheck->fetch();
+    $exists = $stmtCheck->fetch(PDO::FETCH_ASSOC);
+    
+    $existingContribs = [];
+    if ($exists && !empty($exists['contributors'])) {
+        $existingContribs = is_array($exists['contributors']) ? $exists['contributors'] : json_decode($exists['contributors'], true);
+    }
+    $contributors = isset($input['contributors']) 
+        ? (is_string($input['contributors']) ? $input['contributors'] : json_encode($input['contributors'], JSON_UNESCAPED_UNICODE)) 
+        : json_encode($existingContribs ?: new stdClass(), JSON_UNESCAPED_UNICODE);
     
     if ($exists) {
-        $stmt = $pdo->prepare("UPDATE chapters SET number = ?, title = ?, images = ?, isPending = ?, submissions = ?, sortMode = ? WHERE id = ?");
-        $stmt->execute([$number, $title, $images, $isPending, $submissions, $sortMode, $id]);
+        $stmt = $pdo->prepare("UPDATE chapters SET number = ?, title = ?, images = ?, isPending = ?, submissions = ?, sortMode = ?, contributors = ? WHERE id = ?");
+        $stmt->execute([$number, $title, $images, $isPending, $submissions, $sortMode, $contributors, $id]);
     } else {
-        $stmt = $pdo->prepare("INSERT INTO chapters (id, seriesId, number, title, images, views, isPending, submissions, sortMode) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)");
-        $stmt->execute([$id, $params['seriesId'], $number, $title, $images, $isPending, $submissions, $sortMode]);
+        $stmt = $pdo->prepare("INSERT INTO chapters (id, seriesId, number, title, images, views, isPending, submissions, sortMode, contributors) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)");
+        $stmt->execute([$id, $params['seriesId'], $number, $title, $images, $isPending, $submissions, $sortMode, $contributors]);
     }
     
     // Fetch and return
@@ -1360,6 +1410,8 @@ if ($method === 'POST' && matchRoute('/series/:seriesId/chapters', $sub_path, $p
     $ch['images'] = $ch['images'] ? array_filter(explode(',', $ch['images'])) : [];
     $ch['submissions'] = $ch['submissions'] ? json_decode($ch['submissions'], true) : [];
     if (!is_array($ch['submissions'])) $ch['submissions'] = [];
+    $ch['contributors'] = !empty($ch['contributors']) ? (is_array($ch['contributors']) ? $ch['contributors'] : json_decode($ch['contributors'], true)) : new stdClass();
+    if (!$ch['contributors']) $ch['contributors'] = new stdClass();
     $ch['isPending'] = (bool)$ch['isPending'];
     $ch['number'] = (double)$ch['number'];
     $ch['views'] = (int)$ch['views'];
@@ -1577,23 +1629,23 @@ if ($method === 'POST' && matchRoute('/series/:seriesId/chapters/:id/submit', $s
 // 28. GET CHAPTER COMMENTS
 if ($method === 'GET' && matchRoute('/chapters/:chapterId/comments', $sub_path, $params)) {
     $user = getUserFromHeaders($pdo);
-    $isAdmin = $user && (
-        $user['role'] === 'admin' || 
-        $user['id'] === 'admin' || 
-        $user['email'] === 'amirrezaveisi45@gmail.com' || 
-        $user['email'] === 'Mr.V@admin.com' || 
-        (isset($user['roles']) && in_array('super_admin', json_decode($user['roles'] ?? '[]', true)))
-    );
+    $isAdmin = $user && ($user['role'] === 'admin' || isSuperAdminUser($user));
+    
+    $chapterId = $params['chapterId'];
+    $rawId = preg_replace('/^series-/', '', $chapterId);
+    $altChapterId = str_starts_with($chapterId, 'series-') ? $rawId : ('series-' . $chapterId);
     
     if ($isAdmin) {
-        $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? ORDER BY isPinned DESC, createdAt DESC");
-        $stmt->execute([$params['chapterId']]);
+        $stmt = $pdo->prepare("SELECT * FROM comments WHERE (chapterId = ? OR chapterId = ? OR chapterId = ?) ORDER BY isPinned DESC, createdAt DESC");
+        $stmt->execute([$chapterId, $altChapterId, $rawId]);
     } else if ($user) {
-        $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? AND (status = 'approved' OR status IS NULL OR status = '' OR userId = ?) ORDER BY isPinned DESC, createdAt DESC");
-        $stmt->execute([$params['chapterId'], $user['id']]);
+        $userId = $user['id'];
+        $userEmail = $user['email'] ?? '';
+        $stmt = $pdo->prepare("SELECT * FROM comments WHERE (chapterId = ? OR chapterId = ? OR chapterId = ?) AND (status = 'approved' OR status = 'published' OR status IS NULL OR status = '' OR status = '1' OR userId = ? OR userId = ?) ORDER BY isPinned DESC, createdAt DESC");
+        $stmt->execute([$chapterId, $altChapterId, $rawId, $userId, $userEmail]);
     } else {
-        $stmt = $pdo->prepare("SELECT * FROM comments WHERE chapterId = ? AND (status = 'approved' OR status IS NULL OR status = '') ORDER BY isPinned DESC, createdAt DESC");
-        $stmt->execute([$params['chapterId']]);
+        $stmt = $pdo->prepare("SELECT * FROM comments WHERE (chapterId = ? OR chapterId = ? OR chapterId = ?) AND (status = 'approved' OR status = 'published' OR status IS NULL OR status = '' OR status = '1') ORDER BY isPinned DESC, createdAt DESC");
+        $stmt->execute([$chapterId, $altChapterId, $rawId]);
     }
     $comments = $stmt->fetchAll();
     
@@ -3078,10 +3130,33 @@ if ($method === 'POST' && $sub_path === '/wallet/charge') {
 
 // 52. CHECK IF CHAPTER PURCHASED
 if ($method === 'GET' && matchRoute('/users/:userId/purchases/:seriesId/:chapterId', $sub_path, $params)) {
-    $stmt = $pdo->prepare("SELECT id FROM purchased_chapters WHERE userId = ? AND seriesId = ? AND chapterId = ?");
-    $stmt->execute([$params['userId'], $params['seriesId'], $params['chapterId']]);
-    $res = $stmt->fetch();
-    sendResponse(["purchased" => (bool)$res]);
+    $uid = $params['userId'];
+    $sId = $params['seriesId'];
+    $cId = $params['chapterId'];
+
+    // Resolve series & chapter
+    $sStmt = $pdo->prepare("SELECT id FROM series WHERE id = ? OR title = ? LIMIT 1");
+    $sStmt->execute([$sId, $sId]);
+    $sRow = $sStmt->fetch(PDO::FETCH_ASSOC);
+    $realSId = $sRow ? $sRow['id'] : $sId;
+
+    $cStmt = $pdo->prepare("SELECT id, number FROM chapters WHERE (id = ? OR number = ?) AND (seriesId = ? OR seriesId IS NULL) LIMIT 1");
+    $cStmt->execute([$cId, $cId, $realSId]);
+    $cRow = $cStmt->fetch(PDO::FETCH_ASSOC);
+    $realCId = $cRow ? $cRow['id'] : $cId;
+    $cNum = $cRow ? $cRow['number'] : null;
+
+    try {
+        $stmt = $pdo->prepare("SELECT id FROM purchased_chapters WHERE userId = ? AND (seriesId = ? OR seriesId = ?) AND (chapterId = ? OR chapterId = ? OR (chapterNumber IS NOT NULL AND chapterNumber = ?))");
+        $stmt->execute([$uid, $sId, $realSId, $cId, $realCId, $cNum]);
+        $res = $stmt->fetch();
+        sendResponse(["purchased" => (bool)$res]);
+    } catch (Exception $e) {
+        $stmt = $pdo->prepare("SELECT id FROM purchased_chapters WHERE userId = ? AND (seriesId = ? OR seriesId = ?) AND (chapterId = ? OR chapterId = ?)");
+        $stmt->execute([$uid, $sId, $realSId, $cId, $realCId]);
+        $res = $stmt->fetch();
+        sendResponse(["purchased" => (bool)$res]);
+    }
 }
 
 // 53. PURCHASE CHAPTER (WITH DYNAMIC REVENUE DISTRIBUTION & COMMISSIONS)
@@ -3103,24 +3178,42 @@ if ($method === 'POST' && $sub_path === '/chapters/purchase') {
     }
     
     // Fetch Series Info
-    $stmtSeries = $pdo->prepare("SELECT * FROM series WHERE id = ? LIMIT 1");
-    $stmtSeries->execute([$seriesId]);
+    $stmtSeries = $pdo->prepare("SELECT * FROM series WHERE id = ? OR title = ? LIMIT 1");
+    $stmtSeries->execute([$seriesId, $seriesId]);
     $series = $stmtSeries->fetch(PDO::FETCH_ASSOC);
+    $realSeriesId = $series ? $series['id'] : $seriesId;
     $seriesTitle = $series ? ($series['title'] ?: 'مانهوا') : 'مانهوا';
-    $seriesContribs = ($series && !empty($series['contributors'])) ? json_decode($series['contributors'], true) : [];
+    $seriesContribs = ($series && !empty($series['contributors'])) ? (is_array($series['contributors']) ? $series['contributors'] : json_decode($series['contributors'], true)) : [];
     if (!is_array($seriesContribs)) $seriesContribs = [];
 
     // Fetch Chapter Info
     $stmtCh = $pdo->prepare("SELECT * FROM chapters WHERE (id = ? OR number = ?) AND (seriesId = ? OR seriesId IS NULL) LIMIT 1");
-    $stmtCh->execute([$chapterId, $chapterId, $seriesId]);
+    $stmtCh->execute([$chapterId, $chapterId, $realSeriesId]);
     $chapter = $stmtCh->fetch(PDO::FETCH_ASSOC);
+    if (!$chapter) {
+        $stmtCh2 = $pdo->prepare("SELECT * FROM chapters WHERE id = ? LIMIT 1");
+        $stmtCh2->execute([$chapterId]);
+        $chapter = $stmtCh2->fetch(PDO::FETCH_ASSOC);
+    }
     $chapterNumber = $chapter ? ($chapter['number'] ?? 1) : 1;
-    $chContribs = ($chapter && !empty($chapter['contributors'])) ? json_decode($chapter['contributors'], true) : [];
+    $realChapterId = $chapter ? $chapter['id'] : $chapterId;
+    $chContribs = ($chapter && !empty($chapter['contributors'])) ? (is_array($chapter['contributors']) ? $chapter['contributors'] : json_decode($chapter['contributors'], true)) : [];
     if (!is_array($chContribs)) $chContribs = [];
 
+    // Ensure purchased_chapters has chapterNumber column safely
+    try {
+        $pdo->exec("ALTER TABLE purchased_chapters ADD COLUMN chapterNumber DOUBLE DEFAULT NULL");
+    } catch (Exception $e) {}
+
     // Check if already purchased
-    $stmtCheck = $pdo->prepare("SELECT id FROM purchased_chapters WHERE userId = ? AND seriesId = ? AND (chapterId = ? OR chapterNumber = ?)");
-    $stmtCheck->execute([$userId, $seriesId, $chapterId, $chapterNumber]);
+    try {
+        $stmtCheck = $pdo->prepare("SELECT id FROM purchased_chapters WHERE userId = ? AND (seriesId = ? OR seriesId = ?) AND (chapterId = ? OR chapterId = ? OR (chapterNumber IS NOT NULL AND chapterNumber = ?))");
+        $stmtCheck->execute([$userId, $seriesId, $realSeriesId, $chapterId, $realChapterId, $chapterNumber]);
+    } catch (Exception $e) {
+        $stmtCheck = $pdo->prepare("SELECT id FROM purchased_chapters WHERE userId = ? AND (seriesId = ? OR seriesId = ?) AND (chapterId = ? OR chapterId = ?)");
+        $stmtCheck->execute([$userId, $seriesId, $realSeriesId, $chapterId, $realChapterId]);
+    }
+    
     if ($stmtCheck->fetch()) {
         $stmtCurr = $pdo->prepare("SELECT walletBalance FROM users WHERE id = ?");
         $stmtCurr->execute([$userId]);
@@ -3164,8 +3257,13 @@ if ($method === 'POST' && $sub_path === '/chapters/purchase') {
         
         // Record purchase with chapterNumber
         $pid = 'pc-' . round(microtime(true) * 1000) . '-' . rand(100, 999);
-        $stmtPur = $pdo->prepare("INSERT INTO purchased_chapters (id, userId, seriesId, chapterId, chapterNumber, createdAt) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmtPur->execute([$pid, $userId, $seriesId, $chapter ? $chapter['id'] : $chapterId, $chapterNumber, $now]);
+        try {
+            $stmtPur = $pdo->prepare("INSERT INTO purchased_chapters (id, userId, seriesId, chapterId, chapterNumber, createdAt) VALUES (?, ?, ?, ?, ?, ?)");
+            $stmtPur->execute([$pid, $userId, $realSeriesId, $realChapterId, $chapterNumber, $now]);
+        } catch (Exception $e) {
+            $stmtPur = $pdo->prepare("INSERT INTO purchased_chapters (id, userId, seriesId, chapterId, createdAt) VALUES (?, ?, ?, ?, ?)");
+            $stmtPur->execute([$pid, $userId, $realSeriesId, $realChapterId, $now]);
+        }
         
         // Load Revenue Roles Setting
         $stmtRoles = $pdo->prepare("SELECT val FROM settings WHERE id = 'revenue_roles'");
@@ -3959,14 +4057,26 @@ if ($method === 'POST' && matchRoute('/series/:id/add-contributor', $sub_path, $
 if ($method === 'POST' && preg_match('/^\/series\/([^\/]+)\/chapters\/([^\/]+)\/contributors$/', $sub_path, $matches)) {
     requireAdmin($pdo);
     try {
-        $seriesId = $matches[1];
-        $chapterId = $matches[2];
+        $seriesId = urldecode($matches[1]);
+        $chapterId = urldecode($matches[2]);
         $input = getJsonInput();
         $contributors = $input['contributors'] ?? [];
 
-        $chStmt = $pdo->prepare("SELECT * FROM chapters WHERE id = ?");
-        $chStmt->execute([$chapterId]);
+        // Resolve real series
+        $stmtSeries = $pdo->prepare("SELECT id FROM series WHERE id = ? LIMIT 1");
+        $stmtSeries->execute([$seriesId]);
+        $sRow = $stmtSeries->fetch(PDO::FETCH_ASSOC);
+        $realSeriesId = $sRow ? $sRow['id'] : $seriesId;
+
+        // Try find chapter by ID or number or seriesId
+        $chStmt = $pdo->prepare("SELECT * FROM chapters WHERE (id = ? OR number = ?) AND (seriesId = ? OR seriesId IS NULL) LIMIT 1");
+        $chStmt->execute([$chapterId, $chapterId, $realSeriesId]);
         $ch = $chStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$ch) {
+            $chStmt2 = $pdo->prepare("SELECT * FROM chapters WHERE id = ? LIMIT 1");
+            $chStmt2->execute([$chapterId]);
+            $ch = $chStmt2->fetch(PDO::FETCH_ASSOC);
+        }
         if (!$ch) {
             sendResponse(["error" => "چپتر یافت نشد"], 404);
         }
@@ -3976,9 +4086,9 @@ if ($method === 'POST' && preg_match('/^\/series\/([^\/]+)\/chapters\/([^\/]+)\/
         } catch (Exception $e) {}
 
         $upStmt = $pdo->prepare("UPDATE chapters SET contributors = ? WHERE id = ?");
-        $upStmt->execute([json_encode($contributors, JSON_UNESCAPED_UNICODE), $chapterId]);
+        $upStmt->execute([json_encode($contributors, JSON_UNESCAPED_UNICODE), $ch['id']]);
 
-        sendResponse(["success" => true, "id" => $chapterId]);
+        sendResponse(["success" => true, "id" => $ch['id'], "contributors" => $contributors]);
     } catch (Exception $e) {
         sendResponse(["error" => $e->getMessage()], 500);
     }

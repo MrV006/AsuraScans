@@ -279,52 +279,50 @@ async function startServer() {
   };
 
   const requireAdmin = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    let adminUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.adminUid || req.query.uid) as string;
+    const adminUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.adminUid || req.query.uid) as string;
     if (!adminUid || adminUid === 'null' || adminUid === 'undefined') {
-      adminUid = 'admin';
+      return res.status(401).json({ error: 'Unauthorized. Admin credentials required.' });
     }
-    const lower = adminUid.toLowerCase();
-    if (lower === 'admin' || lower === 'super_admin' || lower === 'amirrezaveisi45@gmail.com' || lower === 'mr.v@admin.com' || lower.includes('amirrezaveisi') || lower.includes('mr.v')) {
-      return next();
-    }
+
     try {
       let user = await dbManager.getUser(adminUid);
       if (!user) {
         user = await dbManager.getUserByEmail(adminUid);
       }
       if (user) {
+        if (user.banned) {
+          return res.status(403).json({ error: 'حساب کاربری مسدود شده است.' });
+        }
         const userRoles = user.roles || [user.role || 'user'];
         const isSuperOrAdmin = userRoles.includes('super_admin') || 
                               userRoles.includes('admin') || 
                               user.role === 'admin' || 
-                              user.canCreateSeries ||
-                              (user.email && (user.email.toLowerCase().includes('amirrezaveisi') || user.email.toLowerCase().includes('mr.v')));
+                              (user.email && (user.email.toLowerCase() === 'amirrezaveisi45@gmail.com' || user.email.toLowerCase() === 'mr.v@admin.com'));
         if (isSuperOrAdmin) {
           return next();
         }
       }
     } catch (e) {
       console.error("Error checking requireAdmin:", e);
-      return next();
     }
-    res.status(403).json({ error: 'Forbidden. Admin or Super Admin permission required.' });
+    return res.status(403).json({ error: 'Forbidden. Admin or Super Admin permission required.' });
   };
 
   const requireStaffOrAdmin = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    let uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.adminUid || req.query.uid) as string;
+    const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.adminUid || req.query.uid) as string;
     if (!uid || uid === 'null' || uid === 'undefined') {
-      uid = 'admin';
+      return res.status(401).json({ error: 'Unauthorized. Staff or Admin credentials required.' });
     }
-    const lower = uid.toLowerCase();
-    if (lower === 'admin' || lower === 'super_admin' || lower === 'amirrezaveisi45@gmail.com' || lower === 'mr.v@admin.com' || lower.includes('amirrezaveisi') || lower.includes('mr.v')) {
-      return next();
-    }
+
     try {
       let user = await dbManager.getUser(uid);
       if (!user) {
         user = await dbManager.getUserByEmail(uid);
       }
       if (user) {
+        if (user.banned) {
+          return res.status(403).json({ error: 'حساب کاربری مسدود شده است.' });
+        }
         const userRoles = user.roles || [user.role || 'user'];
         const isStaffOrAdmin = userRoles.includes('super_admin') || 
                               userRoles.includes('admin') || 
@@ -334,19 +332,15 @@ async function startServer() {
                               user.role === 'admin' || 
                               user.role === 'staff' ||
                               user.canCreateSeries ||
-                              (user.email && (user.email.toLowerCase().includes('amirrezaveisi') || user.email.toLowerCase().includes('mr.v')));
+                              (user.email && (user.email.toLowerCase() === 'amirrezaveisi45@gmail.com' || user.email.toLowerCase() === 'mr.v@admin.com'));
         if (isStaffOrAdmin) {
           return next();
         }
-      } else {
-        // Fallback for initial bootstrap / single admin
-        return next();
       }
     } catch (e) {
       console.error("Error checking requireStaffOrAdmin:", e);
-      return next();
     }
-    res.status(403).json({ error: 'دسترسی غیرمجاز. این عملیات نیاز به سطح کاربری ادمین یا نویسنده دارد.' });
+    return res.status(403).json({ error: 'دسترسی غیرمجاز. این عملیات نیاز به سطح کاربری ادمین یا نویسنده دارد.' });
   };
 
   const upload = multer({ storage: multer.memoryStorage() });
@@ -461,9 +455,15 @@ async function startServer() {
         return res.status(400).json({ error: "ایمیل از گوگل دریافت نشد." });
       }
 
+      const isOwnerEmail = email.toLowerCase() === 'amirrezaveisi45@gmail.com' || email.toLowerCase() === 'mr.v@admin.com';
+
       let user = await dbManager.getUserByEmail(email);
       if (user) {
-        // User exists, update blank fields if any are present in google payload
+        if (user.banned) {
+          return res.status(403).json({ error: "حساب کاربری شما مسدود شده است." });
+        }
+
+        // User exists, update blank fields or ensure super admin permissions
         let updated = false;
         const updates: any = { ...user };
 
@@ -481,6 +481,13 @@ async function startServer() {
         }
         if (!user.phoneNumber && phoneNumber) {
           updates.phoneNumber = phoneNumber;
+          updated = true;
+        }
+        if (isOwnerEmail && (user.role !== 'admin' || !user.roles?.includes('super_admin'))) {
+          updates.role = 'admin';
+          updates.roles = ['super_admin', 'admin'];
+          updates.permissions = ['all'];
+          updates.canCreateSeries = true;
           updated = true;
         }
 
@@ -503,7 +510,10 @@ async function startServer() {
           lastName: lastName || "",
           phoneNumber: phoneNumber || "",
           hasCompletedSetup: false,
-          role: "user",
+          role: isOwnerEmail ? "admin" : "user",
+          roles: isOwnerEmail ? ["super_admin", "admin"] : ["user"],
+          permissions: isOwnerEmail ? ["all"] : [],
+          canCreateSeries: isOwnerEmail,
           walletBalance: 0
         });
 
@@ -1557,26 +1567,27 @@ async function startServer() {
     try {
       const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.uid) as string;
       let isAdminOrModerator = false;
+      let userRecord = null;
       if (uid) {
         if (uid === 'admin' || uid === 'super_admin' || uid === 'amirrezaveisi45@gmail.com' || uid === 'Mr.V@admin.com') {
           isAdminOrModerator = true;
         } else {
-          const user = await dbManager.getUser(uid);
-          if (user) {
-            const userRoles = user.roles || [user.role || 'user'];
-            const userPerms = user.permissions || [];
-            isAdminOrModerator = user.email === 'amirrezaveisi45@gmail.com' ||
-                              user.email === 'Mr.V@admin.com' ||
+          userRecord = await dbManager.getUser(uid);
+          if (userRecord) {
+            const userRoles = userRecord.roles || [userRecord.role || 'user'];
+            const userPerms = userRecord.permissions || [];
+            isAdminOrModerator = userRecord.email === 'amirrezaveisi45@gmail.com' ||
+                              userRecord.email === 'Mr.V@admin.com' ||
                               userRoles.includes('super_admin') || 
                               userRoles.includes('admin') || 
-                              user.role === 'admin' ||
+                              userRecord.role === 'admin' ||
                               userPerms.includes('delete_comment') ||
                               userPerms.includes('approve_comment') ||
                               userPerms.includes('manage_comments');
           }
         }
       }
-      const list = await dbManager.getComments(req.params.chapterId, uid, isAdminOrModerator);
+      const list = await dbManager.getComments(req.params.chapterId, uid, isAdminOrModerator, userRecord);
       res.json(list);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

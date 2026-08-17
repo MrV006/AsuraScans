@@ -731,18 +731,46 @@ export default function Admin() {
 
   const handleEditChapterClick = (chapter: any) => {
     setEditingChapterId(chapter.id);
-    const existingContribs = chapter.contributors || {};
+    let existingContribs = chapter.contributors || {};
+    if (typeof existingContribs === 'string') {
+      try {
+        existingContribs = JSON.parse(existingContribs);
+      } catch (e) {
+        existingContribs = {};
+      }
+    }
+
+    const normalizeRoleArray = (role: string) => {
+      if (Array.isArray(existingContribs)) {
+        const found = existingContribs.filter((c: any) => 
+          c.role === role || 
+          (role === 'translator' && c.role === 'trans') || 
+          (role === 'editor' && c.role === 'edit') || 
+          (role === 'cleaner' && c.role === 'clean')
+        );
+        return found.map((c: any) => c.userId || c.id).filter(Boolean);
+      }
+      const raw = existingContribs[role] || (
+        role === 'translator' ? existingContribs.trans : 
+        role === 'editor' ? existingContribs.edit : 
+        role === 'cleaner' ? existingContribs.clean : null
+      );
+      if (Array.isArray(raw)) return raw.map((item: any) => typeof item === 'string' ? item : (item.userId || item.id)).filter(Boolean);
+      if (typeof raw === 'string' && raw) return [raw];
+      return [];
+    };
+
     setChapterForm({
       seriesId: chapter.seriesId,
       number: chapter.number.toString(),
       title: chapter.title || "",
-      images: chapter.images.join("\n"),
+      images: Array.isArray(chapter.images) ? chapter.images.join("\n") : (chapter.images || ""),
       publishAt: chapter.publishAt || "",
       sortMode: chapter.sortMode || "natural",
       contributors: {
-        translator: Array.isArray(existingContribs.translator) ? existingContribs.translator : (existingContribs.translator ? [existingContribs.translator] : []),
-        cleaner: Array.isArray(existingContribs.cleaner) ? existingContribs.cleaner : (existingContribs.cleaner ? [existingContribs.cleaner] : []),
-        editor: Array.isArray(existingContribs.editor) ? existingContribs.editor : (existingContribs.editor ? [existingContribs.editor] : []),
+        translator: normalizeRoleArray('translator'),
+        cleaner: normalizeRoleArray('cleaner'),
+        editor: normalizeRoleArray('editor'),
       }
     });
   };

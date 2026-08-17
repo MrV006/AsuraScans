@@ -17,7 +17,11 @@ import {
   Send,
   Eye,
   EyeOff,
-  Pin
+  Pin,
+  Flame,
+  Sparkles,
+  History,
+  ArrowDownUp
 } from 'lucide-react';
 
 interface Comment {
@@ -79,8 +83,9 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
   const [isMainSpoiler, setIsMainSpoiler] = useState(false);
   const [isReplySpoiler, setIsReplySpoiler] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { user, profile, setShowSetupModal } = useAuth();
+  const { user, profile } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'most_liked' | 'most_replies'>('newest');
 
   const commentScopeId = chapterId || (seriesId.startsWith('series-') ? seriesId : `series-${seriesId}`);
 
@@ -88,7 +93,8 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
 
   const fetchComments = async () => {
     try {
-      const data = await apiClient.getComments(commentScopeId, user?.uid || user?.id);
+      const currentUid = user?.uid || user?.id;
+      const data = await apiClient.getComments(commentScopeId, currentUid);
       if (Array.isArray(data)) {
         const mappedComments: Comment[] = data.map((c: any) => ({
           id: c.id,
@@ -151,9 +157,10 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
     setIsSubmitting(true);
     try {
       const randomId = 'comment_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+      const currentUid = user.uid || user.id;
       const res = await apiClient.addComment(commentScopeId, {
         id: randomId,
-        userId: user.uid || user.id,
+        userId: currentUid,
         userName: profile?.displayName || user.displayName || user.email?.split('@')[0] || 'کاربر مانگا',
         userAvatar: profile?.avatarUrl || user.photoURL || '',
         content: finalContent,
@@ -349,25 +356,101 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
     );
   };
 
+  // Top level comments with strict pinned-first rule and flexible filtering
   const topLevelComments = comments
     .filter(c => !c.parentId)
     .sort((a, b) => {
+      // 1. PINNED COMMENTS ALWAYS AT THE VERY TOP
+      const pinA = a.isPinned ? 1 : 0;
+      const pinB = b.isPinned ? 1 : 0;
+      if (pinA !== pinB) {
+        return pinB - pinA;
+      }
+
+      // 2. SORT ACCORDING TO SELECTED FILTER
       const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
       const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
-      return timeB - timeA;
+
+      if (sortBy === 'oldest') {
+        return timeA - timeB;
+      } else if (sortBy === 'most_liked') {
+        const scoreA = (a.likes?.length || 0) - (a.dislikes?.length || 0);
+        const scoreB = (b.likes?.length || 0) - (b.dislikes?.length || 0);
+        if (scoreA !== scoreB) return scoreB - scoreA;
+        return timeB - timeA;
+      } else if (sortBy === 'most_replies') {
+        const repliesA = comments.filter(c => c.parentId === a.id).length;
+        const repliesB = comments.filter(c => c.parentId === b.id).length;
+        if (repliesA !== repliesB) return repliesB - repliesA;
+        return timeB - timeA;
+      } else {
+        // 'newest' (default)
+        return timeB - timeA;
+      }
     });
 
   return (
     <div className="mt-8" dir="rtl">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-4 mb-6 border-b border-white/10 pb-4">
-        <h3 className="text-lg sm:text-xl font-black text-white flex items-center gap-2.5">
+      {/* Header & Filter Controls */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 border-b border-white/10 pb-4">
+        <div className="flex items-center gap-2.5">
           <span className="w-2 h-6 bg-[var(--color-asura-accent)] rounded-full shadow-[0_0_12px_var(--color-asura-accent)]"></span>
-          <span>نظرات و دیدگاه‌های کاربران</span>
+          <h3 className="text-lg sm:text-xl font-black text-white">نظرات و دیدگاه‌های کاربران</h3>
           <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-white/5 text-[var(--color-asura-accent-light)] border border-white/10">
             {comments.length}
           </span>
-        </h3>
+        </div>
+
+        {/* Filter / Sort Switcher */}
+        <div className="flex items-center gap-1.5 bg-black/40 border border-white/10 p-1 rounded-xl self-start sm:self-auto overflow-x-auto max-w-full">
+          <button
+            onClick={() => setSortBy('newest')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+              sortBy === 'newest'
+                ? 'bg-[var(--color-asura-accent)] text-white shadow-md'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+            }`}
+          >
+            <Sparkles size={13} />
+            <span>جدیدترین</span>
+          </button>
+
+          <button
+            onClick={() => setSortBy('oldest')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+              sortBy === 'oldest'
+                ? 'bg-[var(--color-asura-accent)] text-white shadow-md'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+            }`}
+          >
+            <History size={13} />
+            <span>قدیمی‌ترین</span>
+          </button>
+
+          <button
+            onClick={() => setSortBy('most_liked')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+              sortBy === 'most_liked'
+                ? 'bg-[var(--color-asura-accent)] text-white shadow-md'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+            }`}
+          >
+            <Flame size={13} />
+            <span>پر لایک‌ترین</span>
+          </button>
+
+          <button
+            onClick={() => setSortBy('most_replies')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+              sortBy === 'most_replies'
+                ? 'bg-[var(--color-asura-accent)] text-white shadow-md'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+            }`}
+          >
+            <MessageSquare size={13} />
+            <span>بیشترین پاسخ</span>
+          </button>
+        </div>
       </div>
 
       {/* Notice Banner */}
@@ -418,7 +501,8 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
           const isPending = comment.status === 'pending';
           const isRejected = comment.status === 'rejected';
           const currentUid = user?.uid || user?.id;
-          const isAuthor = currentUid && currentUid === comment.authorId;
+          const currentEmail = user?.email;
+          const isAuthor = Boolean(currentUid && (comment.authorId === currentUid || (currentEmail && comment.authorId === currentEmail)));
           const canDelete = isAdmin || isAuthor;
 
           return (
@@ -435,7 +519,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
               {/* Body */}
               <div className={`flex-1 border rounded-2xl p-4 sm:p-5 relative transition-all duration-200 ${
                 comment.isPinned
-                  ? 'bg-amber-500/[0.04] border-amber-500/40 shadow-sm shadow-amber-500/5 ring-1 ring-amber-500/20'
+                  ? 'bg-amber-500/[0.06] border-amber-500/50 shadow-md shadow-amber-500/10 ring-1 ring-amber-500/30'
                   : isPending 
                   ? 'bg-amber-500/5 border-amber-500/30' 
                   : isRejected
@@ -457,9 +541,9 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
                     )}
 
                     {comment.isPinned && (
-                      <span className="px-2 py-0.5 text-[10px] font-bold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 shadow-sm">
+                      <span className="px-2.5 py-0.5 text-[10px] font-black rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/50 flex items-center gap-1 shadow-sm">
                         <Pin size={11} className="fill-amber-400 text-amber-400" />
-                        سنجاق شده
+                        📌 سنجاق شده توسط مدیریت
                       </span>
                     )}
 
@@ -482,7 +566,7 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
                         onClick={() => handleTogglePin(comment.id)}
                         className={`p-1.5 rounded-lg transition-all ${
                           comment.isPinned 
-                            ? 'text-amber-400 bg-amber-500/20 hover:bg-amber-500/30' 
+                            ? 'text-amber-400 bg-amber-500/20 hover:bg-amber-500/30 ring-1 ring-amber-500/40' 
                             : 'text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10'
                         }`}
                         title={comment.isPinned ? "برداشتن سنجاق" : "سنجاق کردن دیدگاه"}
@@ -545,6 +629,11 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
                     >
                       <CornerDownLeft size={13} /> 
                       <span>پاسخ</span>
+                      {replies.length > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.2 bg-white/10 rounded-full font-normal">
+                          {replies.length}
+                        </span>
+                      )}
                     </button>
                   )}
                 </div>
@@ -562,7 +651,8 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
                     {replies.map(reply => {
                       const isReplyPending = reply.status === 'pending';
                       const isReplyRejected = reply.status === 'rejected';
-                      const canDeleteReply = isAdmin || (currentUid && currentUid === reply.authorId);
+                      const isReplyAuthor = Boolean(currentUid && (reply.authorId === currentUid || (currentEmail && reply.authorId === currentEmail)));
+                      const canDeleteReply = isAdmin || isReplyAuthor;
 
                       return (
                         <div key={reply.id} className="flex gap-2.5 sm:gap-3 items-start">
@@ -656,3 +746,4 @@ export function Comments({ seriesId, chapterId }: { seriesId: string; chapterId?
     </div>
   );
 }
+

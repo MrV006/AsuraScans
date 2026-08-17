@@ -549,7 +549,7 @@ export const apiClient = {
       }
       if (meta.folderType) formData.append('folderType', String(meta.folderType));
     }
-    const adminUid = uid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid') || 'admin';
+    const adminUid = uid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid') || '';
     const res = await fetch(`${API_URL}/api/admin/upload?adminUid=${encodeURIComponent(adminUid)}`, {
       method: 'POST',
       headers: {
@@ -733,7 +733,7 @@ export const apiClient = {
   },
 
   async getDbStatus(uid?: string) {
-    const adminUid = uid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const adminUid = uid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || '';
     const res = await fetch(`${API_URL}/api/admin/db-status?adminUid=${encodeURIComponent(adminUid)}`, {
       headers: this.getHeaders(adminUid)
     });
@@ -741,7 +741,7 @@ export const apiClient = {
   },
 
   async fixCharset(uid?: string) {
-    const adminUid = uid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const adminUid = uid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || '';
     const res = await fetch(`${API_URL}/api/admin/fix-charset?adminUid=${encodeURIComponent(adminUid)}`, {
       method: 'POST',
       headers: this.getHeaders(adminUid)
@@ -750,7 +750,7 @@ export const apiClient = {
   },
 
   async getBackupSettings(adminUid?: string) {
-    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || '';
     const res = await fetch(`${API_URL}/api/admin/backup-settings`, {
       headers: this.getHeaders(uid)
     });
@@ -758,7 +758,7 @@ export const apiClient = {
   },
 
   async saveBackupSettings(settings: any, adminUid?: string) {
-    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || '';
     const res = await fetch(`${API_URL}/api/admin/backup-settings`, {
       method: 'POST',
       headers: this.getHeaders(uid),
@@ -768,7 +768,7 @@ export const apiClient = {
   },
 
   async runBackupNow(email?: string, adminUid?: string) {
-    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || '';
     const res = await fetch(`${API_URL}/api/admin/run-backup-now`, {
       method: 'POST',
       headers: this.getHeaders(uid),
@@ -778,7 +778,7 @@ export const apiClient = {
   },
 
   async downloadBackup(adminUid?: string) {
-    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || '';
     const res = await fetch(`${API_URL}/api/admin/backup?adminUid=${encodeURIComponent(uid)}`, {
       headers: this.getHeaders(uid)
     });
@@ -790,7 +790,7 @@ export const apiClient = {
   },
 
   async downloadMigrationManifest(adminUid?: string) {
-    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || '';
     const res = await fetch(`${API_URL}/api/admin/migration-manifest?adminUid=${encodeURIComponent(uid)}`, {
       headers: this.getHeaders(uid)
     });
@@ -802,7 +802,7 @@ export const apiClient = {
   },
 
   async restoreBackup(data: any, adminUid?: string) {
-    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'admin';
+    const uid = adminUid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || '';
     const res = await fetch(`${API_URL}/api/admin/restore?adminUid=${encodeURIComponent(uid)}`, {
       method: 'POST',
       headers: this.getHeaders(uid),
