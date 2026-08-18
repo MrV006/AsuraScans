@@ -1467,39 +1467,50 @@ async function startServer() {
       const series = await dbManager.getSeriesById(resolved.seriesId);
       if (!series) return res.status(404).json({ error: "Series not found" });
 
-      // Gating: verify that the user is an approved contributor or admin for this series
+      // Comprehensive Gating: Allow series contributors, chapter contributors, staff, translators, editors, cleaners, and admins
+      const userObj = await dbManager.getUser(userId) || (userId ? await dbManager.getUserByEmail(userId) : null);
+      const userEmail = userObj?.email || '';
+      const uRoles = (userObj as any)?.roles || [(userObj as any)?.role || 'user'];
+      const hasPrivilegedRole = uRoles.includes('admin') || 
+                                uRoles.includes('super_admin') || 
+                                uRoles.includes('staff') ||
+                                uRoles.includes('translator') ||
+                                uRoles.includes('cleaner') ||
+                                uRoles.includes('editor') ||
+                                (userObj as any)?.role === 'admin' ||
+                                (userObj as any)?.role === 'staff' ||
+                                userId === 'admin' ||
+                                userEmail.toLowerCase() === 'amirrezaveisi45@gmail.com' ||
+                                userEmail.toLowerCase() === 'mr.v@admin.com';
+
       const isSeriesContrib = Array.isArray(series.contributors) && series.contributors.some(
-        (c: any) => c.userId === userId && (c.status === "approved" || !c.status)
+        (c: any) => (c.userId === userId || c.id === userId || (userEmail && c.email === userEmail)) && (c.status === "approved" || !c.status)
       );
-      const isSuper = userId === 'admin' || userId === 'Mr.V@admin.com';
-      if (!isSeriesContrib && !isSuper) {
-        // Also check if user has admin permission
-        const userObj = await dbManager.getUser(userId);
-        const roles = userObj?.roles || [userObj?.role || 'user'];
-        const hasAdminRole = roles.includes('admin') || roles.includes('super_admin');
-        if (!hasAdminRole) {
-          return res.status(403).json({ error: "شما عضو تایید شده تیم تولید این اثر نیستید و اجازه ثبت کار ندارید." });
-        }
+
+      const chContribs = ch.contributors || {};
+      const isChapterContrib = Object.values(chContribs).some((arr: any) => Array.isArray(arr) && (arr.includes(userId) || (userEmail && arr.includes(userEmail))));
+
+      if (!isSeriesContrib && !isChapterContrib && !hasPrivilegedRole) {
+        return res.status(403).json({ error: "شما عضو تایید شده تیم تولید این اثر نیستید و اجازه ثبت کار ندارید." });
       }
 
       const submissions = ch.submissions || [];
 
-      // Duplicate submission conflict check:
-      // If another submission exists for the exact same role by a DIFFERENT user, flag conflict or require admin resolution
+      // Duplicate submission conflict check: allow if same user or admin
       const existingSameRoleSubmissions = submissions.filter(
         (s: any) => s.role === role && s.userId && s.userId !== userId
       );
 
-      if (existingSameRoleSubmissions.length > 0 && !isSuper) {
+      if (existingSameRoleSubmissions.length > 0 && !hasPrivilegedRole) {
         return res.status(409).json({
-          error: `تداخل ثبت: قبلاً برای بخش ${role === 'translator' ? 'ترجمه' : role === 'cleaner' ? 'کلین' : 'ادیت'} این چپتر فایلی توسط همکار دیگری ارسال شده است. جهت جلوگیری از تداخل، کار ثبت نشد تا توسط مدیریت کل تعیین تکلیف شود.`
+          error: `تداخل ثبت: قبلاً برای بخش ${role === 'translator' ? 'ترجمه' : role === 'cleaner' ? 'کلین' : 'ادیت'} این چپتر فایلی توسط همکار دیگری ارسال شده است.`
         });
       }
 
       const newSubmission = {
         id: `sub-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
         userId,
-        userName,
+        userName: userName || userObj?.displayName || userObj?.email || "همکار",
         role,
         fileUrl: fileUrl || "",
         note: note || "",
@@ -1508,7 +1519,7 @@ async function startServer() {
       submissions.push(newSubmission);
       ch.submissions = submissions;
 
-      // Auto-record this user as the active contributor for this role on this chapter (revenue attribution)
+      // Auto-record this user as active contributor for this role on this chapter (revenue attribution)
       if (!ch.contributors) ch.contributors = {};
 
       const rolesToAssign = [role];
@@ -1525,7 +1536,7 @@ async function startServer() {
         }
       }
 
-      // If the editor is submitting final images, update chapter images and mark as private pending approval
+      // If the editor is submitting final images, mark chapter as private/draft pending admin approval
       if ((role === "editor" || isAlsoEditor) && Array.isArray(images) && images.length > 0) {
         ch.images = images;
         ch.isPending = true;
@@ -1538,15 +1549,16 @@ async function startServer() {
       try {
         if (series && Array.isArray(series.contributors)) {
           for (const contrib of series.contributors) {
-            if (contrib.userId && contrib.userId !== userId) {
+            const cId = (contrib as any).userId || (contrib as any).id;
+            if (cId && cId !== userId) {
               const notif = await dbManager.addNotification(
-                contrib.userId,
-                "workflow",
+                cId,
+                'system',
                 `ارسال فایل جدید چپتر ${saved.number}`,
                 `${userName || 'همکار'} فایل بخش ${role === 'translator' ? 'ترجمه' : role === 'cleaner' ? 'کلین' : 'ادیت'} چپتر ${saved.number} را ثبت کرد.`,
-                "/admin"
+                `/admin`
               );
-              io.to(`user:${contrib.userId}`).emit("notification:new", notif);
+              io.to(`user:${cId}`).emit("notification:new", notif);
             }
           }
         }
@@ -1555,6 +1567,116 @@ async function startServer() {
       }
 
       res.json(saved);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Admin Approve & Publish Chapter + Auto-Cleanup Intermediate Files
+  app.post("/api/series/:seriesId/chapters/:id/approve-publish", requireAdmin, async (req, res) => {
+    try {
+      const resolved = await resolveSeriesAndChapter(req.params.seriesId, req.params.id);
+      const ch = await dbManager.getChapterById(resolved.seriesId, resolved.chapterId);
+      if (!ch) return res.status(404).json({ error: "Chapter not found" });
+
+      const series = await dbManager.getSeriesById(resolved.seriesId);
+      if (!series) return res.status(404).json({ error: "Series not found" });
+
+      // Publish chapter publicly
+      ch.isPending = false;
+      ch.status = 'published';
+      ch.publishAt = new Date().toISOString();
+
+      // Clean up intermediate draft files (Word documents & raw clean zip archives) from host disk
+      const submissions = ch.submissions || [];
+      let cleanedFilesCount = 0;
+
+      for (const sub of submissions) {
+        if ((sub.role === 'translator' || sub.role === 'cleaner') && sub.fileUrl) {
+          try {
+            let cleanRel = sub.fileUrl.replace(/\\/g, "/").replace(/^\/+/, "");
+            if (cleanRel.startsWith("uploads/")) {
+              cleanRel = cleanRel.substring("uploads/".length);
+            }
+            const absFilePath = path.join(uploadsDir, cleanRel);
+            if (fs.existsSync(absFilePath) && isPathSafe(uploadsDir, absFilePath)) {
+              await fs.promises.unlink(absFilePath);
+              cleanedFilesCount++;
+            }
+          } catch (delErr) {
+            console.error("Error auto-deleting intermediate draft file:", delErr);
+          }
+        }
+      }
+
+      const saved = await dbManager.saveChapter(ch);
+      io.emit("chapters:updated", { chapterId: saved.id, seriesId: saved.seriesId, isApproved: true });
+
+      // Send notifications to all contributors
+      try {
+        const notifTitle = `انتشار چپتر ${ch.number} از ${series.title}`;
+        const notifBody = `چپتر ${ch.number} اثر «${series.title}» توسط مدیریت کل تایید و بر روی وبسایت منتشر شد.`;
+
+        if (series && Array.isArray(series.contributors)) {
+          for (const contrib of series.contributors) {
+            const cId = (contrib as any).userId || (contrib as any).id;
+            if (cId) {
+              await dbManager.addNotification(
+                cId,
+                'system',
+                notifTitle,
+                notifBody,
+                `/manga/${series.id}/chapter-${ch.number}`
+              );
+            }
+          }
+        }
+      } catch (notifErr) {
+        console.error("Failed to send publication notifications:", notifErr);
+      }
+
+      res.json({
+        success: true,
+        message: "چپتر با موفقیت تایید و در سایت منتشر شد و فایل‌های میانی ترجمه و کلین از هاست پاکسازی شدند.",
+        chapter: saved,
+        cleanedFilesCount
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Admin Get All Pending Chapters Across All Series
+  app.get("/api/admin/pending-chapters", requireAdmin, async (req, res) => {
+    try {
+      const allSeries = await dbManager.getSeries();
+      const pendingList: any[] = [];
+
+      for (const s of allSeries) {
+        const chapters = await dbManager.getChapters(s.id);
+        for (const ch of chapters) {
+          const hasUnapprovedSubmissions = Array.isArray(ch.submissions) && ch.submissions.length > 0;
+          if (ch.isPending || hasUnapprovedSubmissions) {
+            pendingList.push({
+              seriesId: s.id,
+              seriesTitle: s.title,
+              seriesCover: s.cover || "",
+              chapterId: ch.id,
+              chapterNumber: ch.number,
+              chapterTitle: ch.title,
+              isPending: Boolean(ch.isPending),
+              imagesCount: Array.isArray(ch.images) ? ch.images.length : 0,
+              images: ch.images || [],
+              submissions: ch.submissions || [],
+              contributors: ch.contributors || {},
+              createdAt: ch.createdAt
+            });
+          }
+        }
+      }
+
+      pendingList.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      res.json(pendingList);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2966,89 +3088,87 @@ async function startServer() {
     }
   });
 
-  app.get("/api/admin/contributor-earnings/:userId", requireAdmin, async (req, res) => {
+  // Helper: Calculate rich, accurate contributor statistics for all assigned series & chapters
+  const calculateContributorDetailedStats = async (userId: string, targetMonth: string = 'all') => {
+    const userObj = await dbManager.getUser(userId) || (userId ? await dbManager.getUserByEmail(userId) : null);
+    if (!userObj) return null;
+
+    let rolesList = [
+      { id: "editor", name: "ادیتور", percentage: 30 },
+      { id: "translator", name: "مترجم", percentage: 20 },
+      { id: "cleaner", name: "کلینر", percentage: 30 },
+      { id: "website", name: "وبسایت", percentage: 20 }
+    ];
     try {
-      const { userId } = req.params;
-      const targetMonth = (req.query.month as string) || new Date().toISOString().slice(0, 7);
+      const savedRoles = await dbManager.getSettings("revenue_roles");
+      if (savedRoles) rolesList = savedRoles;
+    } catch (e) {}
 
-      const userObj = await dbManager.getUser(userId);
-      if (!userObj) {
-        return res.status(404).json({ error: "کاربر یافت نشد." });
+    const allSeries = await dbManager.getSeries();
+
+    let allPurchases: any[] = [];
+    if (dbManager.isUsingMySQL && dbManager.pool) {
+      const query = targetMonth && targetMonth !== 'all'
+        ? "SELECT * FROM purchased_chapters WHERE createdAt LIKE ?"
+        : "SELECT * FROM purchased_chapters";
+      const params = targetMonth && targetMonth !== 'all' ? [`${targetMonth}%`] : [];
+      const [rows] = await dbManager.pool.execute(query, params);
+      allPurchases = rows as any[];
+    } else {
+      const raw = (dbManager as any).localData?.purchased_chapters || [];
+      allPurchases = targetMonth && targetMonth !== 'all'
+        ? raw.filter((p: any) => p.createdAt && p.createdAt.startsWith(targetMonth))
+        : raw;
+    }
+
+    const purchasesByChapterId: Record<string, number> = {};
+    const purchasesBySeriesAndNum: Record<string, number> = {};
+    const purchasesBySeries: Record<string, number> = {};
+
+    allPurchases.forEach((p: any) => {
+      if (p.chapterId) {
+        purchasesByChapterId[p.chapterId] = (purchasesByChapterId[p.chapterId] || 0) + 1;
       }
-
-      let rolesList = [
-        { id: "editor", name: "ادیتور", percentage: 30 },
-        { id: "translator", name: "مترجم", percentage: 20 },
-        { id: "cleaner", name: "کلینر", percentage: 30 },
-        { id: "website", name: "وبسایت", percentage: 20 }
-      ];
-      try {
-        const savedRoles = await dbManager.getSettings("revenue_roles");
-        if (savedRoles) rolesList = savedRoles;
-      } catch (e) {}
-
-      let allPurchases: any[] = [];
-      if (dbManager.isUsingMySQL && dbManager.pool) {
-        const query = targetMonth !== 'all'
-          ? "SELECT * FROM purchased_chapters WHERE createdAt LIKE ?"
-          : "SELECT * FROM purchased_chapters";
-        const params = targetMonth !== 'all' ? [`${targetMonth}%`] : [];
-        const [rows] = await dbManager.pool.execute(query, params);
-        allPurchases = rows as any[];
-      } else {
-        const raw = (dbManager as any).localData?.purchased_chapters || [];
-        allPurchases = targetMonth !== 'all'
-          ? raw.filter((p: any) => p.createdAt && p.createdAt.startsWith(targetMonth))
-          : raw;
+      if (p.seriesId && (p.chapterNumber !== undefined && p.chapterNumber !== null)) {
+        const key = `${p.seriesId}_${p.chapterNumber}`;
+        purchasesBySeriesAndNum[key] = (purchasesBySeriesAndNum[key] || 0) + 1;
       }
-
-      const chapterSales: Record<string, number> = {};
-      allPurchases.forEach((p: any) => {
-        chapterSales[p.chapterId] = (chapterSales[p.chapterId] || 0) + 1;
-      });
-
-      if (Object.keys(chapterSales).length === 0) {
-        return res.json({
-          user: { id: userObj.id, displayName: userObj.displayName, email: userObj.email, role: userObj.role },
-          selectedMonth: targetMonth,
-          totalEarnings: 0,
-          totalSalesCount: 0,
-          seriesBreakdown: []
-        });
+      if (p.seriesId) {
+        purchasesBySeries[p.seriesId] = (purchasesBySeries[p.seriesId] || 0) + 1;
       }
+    });
 
-      const chapterIds = Object.keys(chapterSales);
-      const chapters: any[] = [];
-      for (const cid of chapterIds) {
-        const foundCh = await dbManager.getChapterById('', cid);
-        if (foundCh) chapters.push(foundCh);
-      }
+    const price = 400; // standard chapter price
+    const seriesBreakdownMap: Record<string, any> = {};
+    let grandTotalEarnings = 0;
+    let grandTotalSalesCount = 0;
+    let totalChaptersCount = 0;
 
-      const seriesMap: Record<string, any> = {};
-      for (const ch of chapters) {
-        if (ch.seriesId && !seriesMap[ch.seriesId]) {
-          const s = await dbManager.getSeriesById(ch.seriesId);
-          if (s) seriesMap[ch.seriesId] = s;
-        }
-      }
+    const userEmail = userObj.email || '';
 
-      const price = 400;
-      const seriesBreakdownMap: Record<string, any> = {};
-      let grandTotalEarnings = 0;
-      let grandTotalSalesCount = 0;
+    for (const series of allSeries) {
+      const serContribs = Array.isArray(series.contributors) ? series.contributors : [];
+      const isSeriesLevelContrib = serContribs.some(
+        (c: any) => (c.userId === userId || c.id === userId || (userEmail && c.email === userEmail)) && (!c.status || c.status === 'approved')
+      );
+
+      const chapters = await dbManager.getChapters(series.id);
+      const userChapters: any[] = [];
+      let seriesUserEarnings = 0;
+      let seriesUserSalesCount = 0;
 
       for (const ch of chapters) {
-        const series = seriesMap[ch.seriesId];
-        if (!series) continue;
-
-        const salesCount = chapterSales[ch.id] || 0;
-        const chapterTotalSalesAmount = salesCount * price;
-
-        const chContributors = ch.contributors || {};
-        const serContributors = series.contributors || [];
+        const chContributors = typeof ch.contributors === 'string' ? JSON.parse(ch.contributors || '{}') : (ch.contributors || {});
 
         const userRolesInChapter: any[] = [];
         let chapterUserEarnings = 0;
+
+        const salesCountById = purchasesByChapterId[ch.id] || 0;
+        const salesCountByNum = purchasesBySeriesAndNum[`${series.id}_${ch.number}`] || 0;
+        const chapterSalesCount = Math.max(salesCountById, salesCountByNum);
+        const chapterTotalSalesAmount = chapterSalesCount * price;
+
+        let isUserInChapter = false;
 
         for (const rl of rolesList) {
           const roleId = rl.id;
@@ -3057,7 +3177,8 @@ async function startServer() {
           const assignedStaffIds = chContributors[roleId];
 
           if (Array.isArray(assignedStaffIds)) {
-            if (assignedStaffIds.includes(userId)) {
+            if (assignedStaffIds.includes(userId) || (userEmail && assignedStaffIds.includes(userEmail))) {
+              isUserInChapter = true;
               const coWorkersCount = assignedStaffIds.length;
               const rolePct = Number(rl.percentage || 0);
               const rolePool = chapterTotalSalesAmount * (rolePct / 100);
@@ -3068,26 +3189,30 @@ async function startServer() {
                 roleId,
                 roleName: rl.name,
                 rolePercentage: rolePct,
+                userPercentage: coWorkersCount > 0 ? (rolePct / coWorkersCount) : 0,
                 rolePool,
                 coWorkersCount,
                 userEarnings: Math.round(userShare)
               });
             }
-          } else {
-            const matchingSeriesContribs = serContributors.filter((c: any) => c.role === roleId);
-            const matchingUserContrib = matchingSeriesContribs.filter((c: any) => c.userId === userId);
-
-            if (matchingUserContrib.length > 0) {
-              const coWorkersCount = matchingSeriesContribs.length;
+          } else if (isSeriesLevelContrib) {
+            const matchingSeriesContribs = serContribs.filter(
+              (c: any) => c.role === roleId && (c.userId === userId || c.id === userId || (userEmail && c.email === userEmail))
+            );
+            if (matchingSeriesContribs.length > 0) {
+              isUserInChapter = true;
+              const allInRole = serContribs.filter((c: any) => c.role === roleId && (!c.status || c.status === 'approved'));
+              const coWorkersCount = allInRole.length || 1;
               const rolePct = Number(rl.percentage || 0);
               const rolePool = chapterTotalSalesAmount * (rolePct / 100);
-              const userShare = coWorkersCount > 0 ? (rolePool / coWorkersCount) : 0;
+              const userShare = rolePool / coWorkersCount;
 
               chapterUserEarnings += userShare;
               userRolesInChapter.push({
                 roleId,
                 roleName: rl.name,
                 rolePercentage: rolePct,
+                userPercentage: rolePct / coWorkersCount,
                 rolePool,
                 coWorkersCount,
                 userEarnings: Math.round(userShare)
@@ -3096,40 +3221,94 @@ async function startServer() {
           }
         }
 
-        if (chapterUserEarnings > 0 || userRolesInChapter.length > 0) {
-          grandTotalEarnings += chapterUserEarnings;
-          grandTotalSalesCount += salesCount;
+        if (isUserInChapter) {
+          totalChaptersCount++;
+          seriesUserEarnings += chapterUserEarnings;
+          seriesUserSalesCount += chapterSalesCount;
 
-          if (!seriesBreakdownMap[series.id]) {
-            seriesBreakdownMap[series.id] = {
-              seriesId: series.id,
-              seriesTitle: series.title,
-              cover: series.cover || '',
-              seriesEarnings: 0,
-              chapters: []
-            };
-          }
-
-          seriesBreakdownMap[series.id].seriesEarnings += chapterUserEarnings;
-          seriesBreakdownMap[series.id].chapters.push({
+          userChapters.push({
             chapterId: ch.id,
             chapterNumber: ch.number,
-            chapterTitle: ch.title,
-            salesCount,
-            chapterTotalSales: chapterTotalSalesAmount,
+            chapterTitle: ch.title || `چپتر ${ch.number}`,
+            salesCount: chapterSalesCount,
+            chapterTotalSalesAmount,
             userRoles: userRolesInChapter,
-            chapterUserEarnings: Math.round(chapterUserEarnings)
+            userEarnings: Math.round(chapterUserEarnings),
+            isPending: Boolean(ch.isPending),
+            submissions: ch.submissions || []
           });
         }
       }
 
-      res.json({
-        user: { id: userObj.id, displayName: userObj.displayName, email: userObj.email, role: userObj.role },
-        selectedMonth: targetMonth,
-        totalEarnings: Math.round(grandTotalEarnings),
-        totalSalesCount: grandTotalSalesCount,
-        seriesBreakdown: Object.values(seriesBreakdownMap)
-      });
+      if (userChapters.length > 0 || isSeriesLevelContrib) {
+        grandTotalEarnings += seriesUserEarnings;
+        grandTotalSalesCount += seriesUserSalesCount;
+
+        const totalSeriesPurchases = purchasesBySeries[series.id] || 0;
+
+        seriesBreakdownMap[series.id] = {
+          seriesId: series.id,
+          seriesTitle: series.title,
+          cover: series.cover || "",
+          totalChapters: (series as any).totalChapters || chapters.length,
+          userContributedChaptersCount: userChapters.length,
+          totalSeriesSalesCount: totalSeriesPurchases,
+          totalSeriesRevenue: totalSeriesPurchases * price,
+          userSeriesSalesCount: seriesUserSalesCount,
+          userSeriesEarnings: Math.round(seriesUserEarnings),
+          chapters: userChapters.sort((a, b) => b.chapterNumber - a.chapterNumber)
+        };
+      }
+    }
+
+    return {
+      user: {
+        id: userObj.id,
+        displayName: userObj.displayName || userObj.email,
+        email: userObj.email,
+        role: userObj.role,
+        walletBalance: (userObj as any).walletBalance || 0
+      },
+      selectedMonth: targetMonth,
+      totalEarnings: Math.round(grandTotalEarnings),
+      totalSalesCount: grandTotalSalesCount,
+      totalChaptersContributed: totalChaptersCount,
+      seriesBreakdown: Object.values(seriesBreakdownMap).sort((a: any, b: any) => b.userSeriesEarnings - a.userSeriesEarnings)
+    };
+  };
+
+  // Contributor Endpoint: Get Self Detailed Statistics and Work History
+  app.get("/api/contributor/my-stats", async (req, res) => {
+    try {
+      const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.headers['x-user-id'] || req.query.uid) as string;
+      if (!uid || uid === 'null' || uid === 'undefined') {
+        return res.status(401).json({ error: "لطفاً ابتدا وارد حساب کاربری خود شوید." });
+      }
+
+      const targetMonth = (req.query.month as string) || "all";
+      const stats = await calculateContributorDetailedStats(uid, targetMonth);
+      if (!stats) {
+        return res.status(404).json({ error: "اطلاعات حساب کاربری یافت نشد." });
+      }
+
+      res.json(stats);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Admin Endpoint: Get Any Contributor Earnings & Statistics
+  app.get("/api/admin/contributor-earnings/:userId", requireAdmin, async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const targetMonth = (req.query.month as string) || (req.query.all === 'true' ? 'all' : new Date().toISOString().slice(0, 7));
+
+      const stats = await calculateContributorDetailedStats(userId, targetMonth);
+      if (!stats) {
+        return res.status(404).json({ error: "کاربر یافت نشد." });
+      }
+
+      res.json(stats);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

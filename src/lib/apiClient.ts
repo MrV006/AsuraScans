@@ -565,6 +565,23 @@ export const apiClient = {
     return res.json();
   },
 
+  async uploadFile(formData: FormData, uid?: string) {
+    const userUid = uid || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid') || '';
+    const res = await fetch(`${API_URL}/api/upload`, {
+      method: 'POST',
+      headers: {
+        'x-user-uid': userUid,
+        'x-admin-uid': userUid
+      },
+      body: formData
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'خطا در آپلود فایل' }));
+      throw new Error(err.error || 'خطا در آپلود فایل');
+    }
+    return res.json();
+  },
+
   // NOTIFICATIONS API
   async getNotifications(userId: string) {
     const res = await fetch(`${API_URL}/api/users/${userId}/notifications`, { headers: this.getHeaders() });

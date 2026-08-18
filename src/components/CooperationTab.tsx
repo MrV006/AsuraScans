@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { apiClient } from "../lib/apiClient";
+import ContributorDashboard from "./ContributorDashboard";
 import { 
   Users as UsersIcon, 
   Briefcase, 
@@ -41,21 +42,21 @@ interface CooperationTabProps {
   profile: any;
   isSuperAdmin: boolean;
   onUpdateSeries: (updatedSeries: Series) => void;
-  defaultSubTab?: "all_series" | "my_projects" | "settlements" | "admin_requests" | "admin_approval";
+  defaultSubTab?: "contributor_dashboard" | "all_series" | "my_projects" | "settlements" | "admin_requests" | "admin_approval";
 }
 
 export default function CooperationTab({ 
   seriesList, 
   user, 
   profile, 
-  isSuperAdmin,
+  isSuperAdmin, 
   onUpdateSeries,
   defaultSubTab
 }: CooperationTabProps) {
   const isGlobalAdmin = isSuperAdmin || profile?.role === "admin";
 
-  const [activeSubTab, setActiveSubTab] = useState<"all_series" | "my_projects" | "settlements" | "admin_requests" | "admin_approval">(
-    defaultSubTab || (isGlobalAdmin ? "admin_requests" : "all_series")
+  const [activeSubTab, setActiveSubTab] = useState<"contributor_dashboard" | "all_series" | "my_projects" | "settlements" | "admin_requests" | "admin_approval">(
+    defaultSubTab || "contributor_dashboard"
   );
 
   // Settlements state
@@ -610,6 +611,18 @@ export default function CooperationTab({
         <div className="flex flex-wrap gap-2">
           
           <button
+            onClick={() => setActiveSubTab("contributor_dashboard")}
+            className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 ${
+              activeSubTab === "contributor_dashboard"
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                : "bg-white/5 text-indigo-300 hover:text-white hover:bg-white/10"
+            }`}
+          >
+            <Sparkles size={15} />
+            پنل اختصاصی همکاران (آمار، ریز درآمدها، ارسال Word/Zip)
+          </button>
+
+          <button
             onClick={() => setActiveSubTab("all_series")}
             className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 ${
               activeSubTab === "all_series"
@@ -699,6 +712,19 @@ export default function CooperationTab({
           نقش شما: <strong className="text-amber-400">{isSuperAdmin ? "مدیریت کل (Super Admin)" : profile?.role === "admin" ? "ادمین" : profile?.role === "translator" ? "مترجم" : profile?.role === "cleaner" ? "کلینر" : profile?.role === "editor" ? "ادیتور" : "همکار"}</strong>
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* SUB-TAB 0: DEDICATED CONTRIBUTOR DASHBOARD (پنل اختصاصی همکاران) */}
+      {/* ========================================================================= */}
+      {activeSubTab === "contributor_dashboard" && (
+        <ContributorDashboard
+          seriesList={seriesList}
+          user={user}
+          profile={profile}
+          isSuperAdmin={isSuperAdmin}
+          onUpdateSeries={onUpdateSeries}
+        />
+      )}
 
       {/* ========================================================================= */}
       {/* SUB-TAB 1: CATALOG SEARCH & MEMBERSHIP REQUEST (کاتالوگ آثار و درخواست عضویت) */}
