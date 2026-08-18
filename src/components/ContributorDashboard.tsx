@@ -277,10 +277,12 @@ export default function ContributorDashboard({
 
     try {
       const formData = new FormData();
+      formData.append("files", file);
       formData.append("file", file);
-      const res = await apiClient.uploadFile(formData);
-      if (res && res.url) {
-        setSubmitFileUrl(res.url);
+      const res = await apiClient.uploadFile(formData, user?.uid);
+      const finalUrl = res?.url || (Array.isArray(res?.urls) ? res.urls[0] : "");
+      if (finalUrl) {
+        setSubmitFileUrl(finalUrl);
         setSubmitSuccess(`فایل «${file.name}» با موفقیت در سرور آپلود شد.`);
       } else {
         setSubmitError("خطا در ذخیره‌سازی فایل روی سرور.");
