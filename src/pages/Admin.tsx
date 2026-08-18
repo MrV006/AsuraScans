@@ -29,10 +29,14 @@ import {
   LifeBuoy,
   CheckCircle,
   AlertCircle,
-  Users
+  Users,
+  FileText,
+  FileArchive,
+  ShieldCheck
 } from "lucide-react";
 import { Series } from "../lib/types";
 import CooperationTab from "../components/CooperationTab";
+import ContributorDashboard from "../components/ContributorDashboard";
 import SeoTab from "../components/SeoTab";
 import BackupTab from "../components/BackupTab";
 import RevenueTab from "../components/RevenueTab";
@@ -221,6 +225,10 @@ export default function Admin() {
     | "settings"
     | "wallet"
     | "cooperation"
+    | "translator_panel"
+    | "cleaner_panel"
+    | "editor_panel"
+    | "approval_queue"
     | "slider"
     | "seo"
     | "revenue"
@@ -1160,6 +1168,46 @@ export default function Admin() {
               className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "cooperation" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
             >
               <UsersIcon size={18} /> کارهای تیمی و همکاری
+            </button>
+          )}
+
+          {(isSuperAdmin || profile?.role === 'translator' || userRoles.includes('translator')) && (
+            <button
+              id="admin-tab-translator"
+              onClick={() => setActiveTab("translator_panel")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "translator_panel" ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30" : "bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 border border-emerald-500/20"}`}
+            >
+              <FileText size={18} /> پنل اختصاصی مترجمین
+            </button>
+          )}
+
+          {(isSuperAdmin || profile?.role === 'cleaner' || userRoles.includes('cleaner')) && (
+            <button
+              id="admin-tab-cleaner"
+              onClick={() => setActiveTab("cleaner_panel")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "cleaner_panel" ? "bg-amber-600 text-white shadow-lg shadow-amber-600/30" : "bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border border-amber-500/20"}`}
+            >
+              <FileArchive size={18} /> پنل اختصاصی کلینرها
+            </button>
+          )}
+
+          {(isSuperAdmin || profile?.role === 'editor' || userRoles.includes('editor')) && (
+            <button
+              id="admin-tab-editor"
+              onClick={() => setActiveTab("editor_panel")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "editor_panel" ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30" : "bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 border border-blue-500/20"}`}
+            >
+              <Sparkles size={18} /> پنل اختصاصی ادیتورها
+            </button>
+          )}
+
+          {(isSuperAdmin || profile?.role === 'admin' || userRoles.includes('admin')) && (
+            <button
+              id="admin-tab-approval"
+              onClick={() => setActiveTab("approval_queue")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "approval_queue" ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30" : "bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 border border-purple-500/20"}`}
+            >
+              <ShieldCheck size={18} /> صف تایید و انتشار چپترها
             </button>
           )}
 
@@ -4038,6 +4086,70 @@ export default function Admin() {
               user={user}
               profile={profile}
               isSuperAdmin={isSuperAdmin}
+              onUpdateSeries={(updatedSeries: any) => {
+                if (updatedSeries && updatedSeries.id) {
+                  setSeriesList(prev => prev.map(s => s.id === updatedSeries.id ? updatedSeries : s));
+                }
+                fetchSeries();
+              }}
+            />
+          )}
+
+          {activeTab === "translator_panel" && (
+            <ContributorDashboard
+              seriesList={seriesList}
+              user={user}
+              profile={profile}
+              isSuperAdmin={isSuperAdmin}
+              roleMode="translator"
+              onUpdateSeries={(updatedSeries: any) => {
+                if (updatedSeries && updatedSeries.id) {
+                  setSeriesList(prev => prev.map(s => s.id === updatedSeries.id ? updatedSeries : s));
+                }
+                fetchSeries();
+              }}
+            />
+          )}
+
+          {activeTab === "cleaner_panel" && (
+            <ContributorDashboard
+              seriesList={seriesList}
+              user={user}
+              profile={profile}
+              isSuperAdmin={isSuperAdmin}
+              roleMode="cleaner"
+              onUpdateSeries={(updatedSeries: any) => {
+                if (updatedSeries && updatedSeries.id) {
+                  setSeriesList(prev => prev.map(s => s.id === updatedSeries.id ? updatedSeries : s));
+                }
+                fetchSeries();
+              }}
+            />
+          )}
+
+          {activeTab === "editor_panel" && (
+            <ContributorDashboard
+              seriesList={seriesList}
+              user={user}
+              profile={profile}
+              isSuperAdmin={isSuperAdmin}
+              roleMode="editor"
+              onUpdateSeries={(updatedSeries: any) => {
+                if (updatedSeries && updatedSeries.id) {
+                  setSeriesList(prev => prev.map(s => s.id === updatedSeries.id ? updatedSeries : s));
+                }
+                fetchSeries();
+              }}
+            />
+          )}
+
+          {activeTab === "approval_queue" && (
+            <ContributorDashboard
+              seriesList={seriesList}
+              user={user}
+              profile={profile}
+              isSuperAdmin={isSuperAdmin}
+              roleMode="approval"
               onUpdateSeries={(updatedSeries: any) => {
                 if (updatedSeries && updatedSeries.id) {
                   setSeriesList(prev => prev.map(s => s.id === updatedSeries.id ? updatedSeries : s));

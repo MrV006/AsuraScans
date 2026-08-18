@@ -38,6 +38,7 @@ interface ContributorDashboardProps {
   user: any;
   profile: any;
   isSuperAdmin: boolean;
+  roleMode?: "all" | "translator" | "cleaner" | "editor" | "approval";
   onUpdateSeries?: (updated: Series) => void;
 }
 
@@ -46,12 +47,15 @@ export default function ContributorDashboard({
   user,
   profile,
   isSuperAdmin,
+  roleMode = "all",
   onUpdateSeries
 }: ContributorDashboardProps) {
   const isGlobalAdmin = isSuperAdmin || profile?.role === "admin" || (profile?.roles && profile.roles.includes("admin"));
   
   // Dashboard Sub-tabs
-  const [activeTab, setActiveTab] = useState<"stats" | "workspace" | "approval" | "settlement">("stats");
+  const [activeTab, setActiveTab] = useState<"stats" | "workspace" | "approval" | "settlement">(
+    roleMode === "approval" ? "approval" : "stats"
+  );
 
   // Filter & Period
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
@@ -66,7 +70,9 @@ export default function ContributorDashboard({
   const [selectedChapterId, setSelectedChapterId] = useState<string>("");
 
   // Submission Form States
-  const [submittingRole, setSubmittingRole] = useState<"translator" | "cleaner" | "editor">("translator");
+  const [submittingRole, setSubmittingRole] = useState<"translator" | "cleaner" | "editor">(
+    roleMode === "cleaner" ? "cleaner" : roleMode === "editor" ? "editor" : "translator"
+  );
   const [submitFile, setSubmitFile] = useState<File | null>(null);
   const [submitFileUrl, setSubmitFileUrl] = useState<string>("");
   const [submitNote, setSubmitNote] = useState<string>("");
@@ -426,20 +432,48 @@ export default function ContributorDashboard({
         <div className="absolute top-0 left-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-inner">
-              <Briefcase className="w-7 h-7" />
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner ${
+              roleMode === 'translator' ? 'bg-emerald-600/20 border border-emerald-500/30 text-emerald-400' :
+              roleMode === 'cleaner' ? 'bg-amber-600/20 border border-amber-500/30 text-amber-400' :
+              roleMode === 'editor' ? 'bg-blue-600/20 border border-blue-500/30 text-blue-400' :
+              roleMode === 'approval' ? 'bg-purple-600/20 border border-purple-500/30 text-purple-400' :
+              'bg-indigo-600/20 border border-indigo-500/30 text-indigo-400'
+            }`}>
+              {roleMode === 'translator' ? <FileText className="w-7 h-7" /> :
+               roleMode === 'cleaner' ? <FileArchive className="w-7 h-7" /> :
+               roleMode === 'editor' ? <Sparkles className="w-7 h-7" /> :
+               roleMode === 'approval' ? <ShieldCheck className="w-7 h-7" /> :
+               <Briefcase className="w-7 h-7" />}
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-xl md:text-2xl font-black text-white">
-                  میز کار اختصاصی دست‌اندرکاران (مترجمین، کلینرها، ادیتورها)
+                  {roleMode === 'translator' ? 'پنل اختصاصی مترجمین و ارسال ترجمه چپترها' :
+                   roleMode === 'cleaner' ? 'پنل اختصاصی کلینرها و تمیزکاری صفحات' :
+                   roleMode === 'editor' ? 'پنل اختصاصی ادیتورها و تایپ‌ست نهایی' :
+                   roleMode === 'approval' ? 'پنل مدیریت تایید و انتشار عمومی چپترها' :
+                   'میز کار اختصاصی دست‌اندرکاران (مترجمین، کلینرها، ادیتورها)'}
                 </h1>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  {profile?.role === "admin" ? "مدیریت کل" : "همکار رسمی"}
+                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                  roleMode === 'translator' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+                  roleMode === 'cleaner' ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' :
+                  roleMode === 'editor' ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' :
+                  roleMode === 'approval' ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' :
+                  'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+                }`}>
+                  {roleMode === 'translator' ? 'بخش ترجمه' :
+                   roleMode === 'cleaner' ? 'بخش کلین' :
+                   roleMode === 'editor' ? 'بخش ادیت' :
+                   roleMode === 'approval' ? 'مدیریت کل' :
+                   (profile?.role === "admin" ? "مدیریت کل" : "همکار رسمی")}
                 </span>
               </div>
               <p className="text-sm text-slate-400 mt-1">
-                مشاهده ریز دقیق آمار فروش، درآمد لحظه‌ای به تفکیک چپتر و اثر، ارسال فایل ترجمه و کلین و مدیریت گردش کار
+                {roleMode === 'translator' ? 'مشاهده ریز درآمدها، تعداد فروش چپترهای ترجمه‌شده و ارسال فایل Word ترجمه برای ادامه کار کلینرها و ادیتورها' :
+                 roleMode === 'cleaner' ? 'مشاهده کارنامه مالی، دانلود فایل ترجمه مترجم و ارسال فایل فشرده Zip صفحات تمیزکاری شده' :
+                 roleMode === 'editor' ? 'دانلود فایل‌های ترجمه و کلین، ارسال فایل نهایی Zip و ارسال به صف تایید مدیریت کل جهت انتشار' :
+                 roleMode === 'approval' ? 'بررسی چپترهای تکمیل‌شده توسط ادیتورها، تایید انتشار عمومی و پاکسازی خودکار فایل‌های موقت هاست' :
+                 'مشاهده ریز دقیق آمار فروش، درآمد لحظه‌ای به تفکیک چپتر و اثر، ارسال فایل ترجمه و کلین و مدیریت گردش کار'}
               </p>
             </div>
           </div>
@@ -834,6 +868,65 @@ export default function ContributorDashboard({
                   </select>
                 </div>
               </div>
+
+              {/* Download Files from Previous Roles (Translator Word, Cleaner Zip, Editor Zip) */}
+              {selectedChapterId && (() => {
+                const currentCh = seriesChapters.find(c => c.id === selectedChapterId);
+                const chapterSubs = currentCh?.submissions || [];
+                if (chapterSubs.length === 0) return null;
+
+                return (
+                  <div className="bg-slate-950/70 border border-indigo-500/30 rounded-2xl p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-black text-indigo-300 flex items-center gap-2">
+                        <Download className="w-4 h-4 text-indigo-400" />
+                        فایل‌های ثبت‌شده همکاران برای چپتر {currentCh?.number} (دانلود جهت شروع کلین / ادیت):
+                      </h4>
+                      <span className="text-[11px] text-slate-400 font-bold">{chapterSubs.length} فایل ثبت‌شده</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {chapterSubs.map((sub: any, sIdx: number) => (
+                        <div key={sIdx} className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col justify-between gap-2.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                                sub.role === 'translator' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                                sub.role === 'cleaner' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
+                                'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                              }`}>
+                                {sub.role === 'translator' ? 'فایل ترجمه (Word)' : sub.role === 'cleaner' ? 'فایل کلین (Zip)' : 'فایل ادیت (Zip)'}
+                              </span>
+                              <span className="text-xs font-bold text-white">{sub.userName || 'همکار'}</span>
+                            </div>
+                          </div>
+
+                          {sub.note && (
+                            <p className="text-[11px] text-slate-400 bg-slate-950/40 p-2 rounded-lg border border-slate-800 line-clamp-2">
+                              {sub.note}
+                            </p>
+                          )}
+
+                          {sub.fileUrl ? (
+                            <a
+                              href={sub.fileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              download
+                              className="mt-1 w-full py-2 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              دانلود فایل ({sub.role === 'translator' ? 'متن Word' : 'آرشیو Zip'})
+                            </a>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 italic">بدون فایل پیوست</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Step 3: Select Role */}
               <div>

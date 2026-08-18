@@ -3005,20 +3005,59 @@ async function startServer() {
       let users: any[] = [];
       if (dbManager.isUsingMySQL && dbManager.pool) {
         const [rows] = await dbManager.pool.execute(
-          "SELECT id, email, displayName, role FROM users WHERE banned = 0 OR banned IS NULL ORDER BY (CASE WHEN role = 'super_admin' THEN 1 WHEN role = 'admin' THEN 2 WHEN role = 'staff' THEN 3 ELSE 4 END), displayName ASC, email ASC"
+          "SELECT id, email, displayName, role, roles, avatarUrl, walletBalance FROM users WHERE banned = 0 OR banned IS NULL ORDER BY (CASE WHEN role = 'super_admin' THEN 1 WHEN role = 'admin' THEN 2 WHEN role = 'staff' THEN 3 WHEN role = 'translator' THEN 4 WHEN role = 'editor' THEN 5 WHEN role = 'cleaner' THEN 6 ELSE 7 END), displayName ASC, email ASC"
         );
-        users = rows as any[];
+        users = (rows as any[]).map((u: any) => {
+          let parsedRoles: string[] = [];
+          if (Array.isArray(u.roles)) {
+            parsedRoles = u.roles;
+          } else if (typeof u.roles === 'string') {
+            try {
+              parsedRoles = JSON.parse(u.roles);
+            } catch (e) {
+              parsedRoles = [u.role || 'user'];
+            }
+          } else {
+            parsedRoles = [u.role || 'user'];
+          }
+          return {
+            id: u.id,
+            email: u.email,
+            displayName: u.displayName || u.email,
+            role: u.role,
+            roles: parsedRoles,
+            avatarUrl: u.avatarUrl || '',
+            walletBalance: Number(u.walletBalance) || 0
+          };
+        });
       } else {
         users = (dbManager.localData.users || [])
           .filter((u: any) => !u.banned)
           .sort((a: any, b: any) => {
-            const roleWeight = (r: string) => r === 'super_admin' ? 1 : r === 'admin' ? 2 : r === 'staff' ? 3 : 4;
+            const roleWeight = (r: string) => {
+              if (r === 'super_admin') return 1;
+              if (r === 'admin') return 2;
+              if (r === 'staff') return 3;
+              if (r === 'translator') return 4;
+              if (r === 'editor') return 5;
+              if (r === 'cleaner') return 6;
+              return 7;
+            };
             return roleWeight(a.role) - roleWeight(b.role);
           })
-          .map((u: any) => ({ id: u.id, email: u.email, displayName: u.displayName || u.email, role: u.role }));
+          .map((u: any) => ({
+            id: u.id,
+            email: u.email,
+            displayName: u.displayName || u.email,
+            role: u.role,
+            roles: u.roles || [u.role || 'user'],
+            avatarUrl: u.avatarUrl || '',
+            walletBalance: Number(u.walletBalance) || 0
+          }));
       }
       res.json(users);
     } catch (err: any) {
+      console.error("Error in /api/admin/staff:", err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -3148,9 +3187,17 @@ async function startServer() {
 
     for (const series of allSeries) {
       const serContribs = Array.isArray(series.contributors) ? series.contributors : [];
-      const isSeriesLevelContrib = serContribs.some(
-        (c: any) => (c.userId === userId || c.id === userId || (userEmail && c.email === userEmail)) && (!c.status || c.status === 'approved')
-      );
+      const matchContributor = (c: any) => {
+        if (!c) return false;
+        if (typeof c === 'string') {
+          return c === userId || (userEmail && c.toLowerCase() === userEmail.toLowerCase());
+        }
+        const cId = c.userId || c.id;
+        const cEmail = c.email;
+        return (cId === userId || (userEmail && cEmail && cEmail.toLowerCase() === userEmail.toLowerCase())) && (!c.status || c.status === 'approved');
+      };
+
+      const isSeriesLevelContrib = serContribs.some(matchContributor);
 
       const chapters = await dbManager.getChapters(series.id);
       const userChapters: any[] = [];
@@ -3158,7 +3205,16 @@ async function startServer() {
       let seriesUserSalesCount = 0;
 
       for (const ch of chapters) {
-        const chContributors = typeof ch.contributors === 'string' ? JSON.parse(ch.contributors || '{}') : (ch.contributors || {});
+        let chContributors: any = {};
+        if (typeof ch.contributors === 'string') {
+          try {
+            chContributors = JSON.parse(ch.contributors || '{}');
+          } catch (e) {
+            chContributors = {};
+          }
+        } else if (ch.contributors && typeof ch.contributors === 'object') {
+          chContributors = ch.contributors;
+        }
 
         const userRolesInChapter: any[] = [];
         let chapterUserEarnings = 0;
@@ -3174,12 +3230,22 @@ async function startServer() {
           const roleId = rl.id;
           if (roleId === 'website') continue;
 
-          const assignedStaffIds = chContributors[roleId];
+          const assignedStaffList = chContributors[roleId];
 
-          if (Array.isArray(assignedStaffIds)) {
-            if (assignedStaffIds.includes(userId) || (userEmail && assignedStaffIds.includes(userEmail))) {
+          if (Array.isArray(assignedStaffList) && assignedStaffList.length > 0) {
+            const hasMatch = assignedStaffList.some((item: any) => {
+              if (!item) return false;
+              if (typeof item === 'string') {
+                return item === userId || (userEmail && item.toLowerCase() === userEmail.toLowerCase());
+              }
+              const itId = item.userId || item.id;
+              const itEmail = item.email;
+              return itId === userId || (userEmail && itEmail && itEmail.toLowerCase() === userEmail.toLowerCase());
+            });
+
+            if (hasMatch) {
               isUserInChapter = true;
-              const coWorkersCount = assignedStaffIds.length;
+              const coWorkersCount = assignedStaffList.length;
               const rolePct = Number(rl.percentage || 0);
               const rolePool = chapterTotalSalesAmount * (rolePct / 100);
               const userShare = coWorkersCount > 0 ? (rolePool / coWorkersCount) : 0;
@@ -3192,16 +3258,21 @@ async function startServer() {
                 userPercentage: coWorkersCount > 0 ? (rolePct / coWorkersCount) : 0,
                 rolePool,
                 coWorkersCount,
-                userEarnings: Math.round(userShare)
+                userEarnings: Math.round(userShare),
+                chapterUserEarnings: Math.round(userShare)
               });
             }
           } else if (isSeriesLevelContrib) {
-            const matchingSeriesContribs = serContribs.filter(
-              (c: any) => c.role === roleId && (c.userId === userId || c.id === userId || (userEmail && c.email === userEmail))
-            );
+            const matchingSeriesContribs = serContribs.filter((c: any) => {
+              if (!c || c.role !== roleId) return false;
+              const cId = c.userId || c.id;
+              const cEmail = c.email;
+              return (cId === userId || (userEmail && cEmail && cEmail.toLowerCase() === userEmail.toLowerCase()));
+            });
+
             if (matchingSeriesContribs.length > 0) {
               isUserInChapter = true;
-              const allInRole = serContribs.filter((c: any) => c.role === roleId && (!c.status || c.status === 'approved'));
+              const allInRole = serContribs.filter((c: any) => c && c.role === roleId && (!c.status || c.status === 'approved'));
               const coWorkersCount = allInRole.length || 1;
               const rolePct = Number(rl.percentage || 0);
               const rolePool = chapterTotalSalesAmount * (rolePct / 100);
@@ -3215,7 +3286,8 @@ async function startServer() {
                 userPercentage: rolePct / coWorkersCount,
                 rolePool,
                 coWorkersCount,
-                userEarnings: Math.round(userShare)
+                userEarnings: Math.round(userShare),
+                chapterUserEarnings: Math.round(userShare)
               });
             }
           }
@@ -3228,12 +3300,17 @@ async function startServer() {
 
           userChapters.push({
             chapterId: ch.id,
-            chapterNumber: ch.number,
+            id: ch.id,
+            chapterNumber: Number(ch.number) || ch.number,
+            number: Number(ch.number) || ch.number,
             chapterTitle: ch.title || `چپتر ${ch.number}`,
             salesCount: chapterSalesCount,
+            chapterSalesCount,
+            chapterTotalSales: chapterTotalSalesAmount,
             chapterTotalSalesAmount,
             userRoles: userRolesInChapter,
             userEarnings: Math.round(chapterUserEarnings),
+            chapterUserEarnings: Math.round(chapterUserEarnings),
             isPending: Boolean(ch.isPending),
             submissions: ch.submissions || []
           });
@@ -3248,15 +3325,20 @@ async function startServer() {
 
         seriesBreakdownMap[series.id] = {
           seriesId: series.id,
+          id: series.id,
           seriesTitle: series.title,
+          title: series.title,
           cover: series.cover || "",
           totalChapters: (series as any).totalChapters || chapters.length,
           userContributedChaptersCount: userChapters.length,
           totalSeriesSalesCount: totalSeriesPurchases,
+          seriesSalesCount: totalSeriesPurchases,
           totalSeriesRevenue: totalSeriesPurchases * price,
+          seriesTotalRevenue: totalSeriesPurchases * price,
           userSeriesSalesCount: seriesUserSalesCount,
           userSeriesEarnings: Math.round(seriesUserEarnings),
-          chapters: userChapters.sort((a, b) => b.chapterNumber - a.chapterNumber)
+          seriesEarnings: Math.round(seriesUserEarnings),
+          chapters: userChapters.sort((a, b) => (Number(b.chapterNumber) || 0) - (Number(a.chapterNumber) || 0))
         };
       }
     }

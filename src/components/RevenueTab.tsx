@@ -1555,6 +1555,178 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
         </div>
       )}
 
+      {/* SECTION 2.5: All Staff & Collaborators Directory with Direct Resume & Financial Inspection */}
+      <div className="bg-[var(--color-asura-card)] border border-[var(--color-asura-border)] rounded-2xl p-6 shadow-xl space-y-5">
+        <div className="border-b border-white/5 pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h3 className="text-base font-black text-white flex items-center gap-2">
+              <Users className="text-emerald-400" size={18} />
+              جدول کارمندان و دست‌اندرکاران (مترجمین، ادیتورها، کلینرها و مدیران)
+            </h3>
+            <p className="text-xs text-zinc-400 mt-1">
+              بررسی مستقیم رزومه، عملکرد کاری، درآمدهای کسب‌شده و صدور فیش تسویه حساب برای هر یک از همکاران تیم
+            </p>
+          </div>
+
+          {/* Search and Role Filter */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Filter by Role */}
+            <select
+              value={staffRoleFilter}
+              onChange={e => setStaffRoleFilter(e.target.value)}
+              className="bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
+            >
+              <option value="all">تمام نقش‌ها</option>
+              <option value="translator">مترجمین</option>
+              <option value="editor">ادیتورها</option>
+              <option value="cleaner">کلینرها</option>
+              <option value="staff">پرسنل</option>
+              <option value="admin">مدیران</option>
+            </select>
+
+            {/* Search Input */}
+            <div className="relative w-48 sm:w-60">
+              <input
+                type="text"
+                placeholder="جستجوی نام یا ایمیل..."
+                value={staffSearchQuery}
+                onChange={e => setStaffSearchQuery(e.target.value)}
+                className="w-full bg-black/60 border border-white/10 rounded-xl pl-3 pr-9 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[var(--color-asura-accent)]"
+              />
+              <Search className="absolute right-3 top-2.5 text-zinc-500" size={14} />
+            </div>
+
+            <button
+              onClick={fetchStaff}
+              className="p-2 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-xl transition-colors"
+              title="تازه‌سازی لیست همکاران"
+            >
+              <RefreshCw size={14} className={loadingStaff ? "animate-spin" : ""} />
+            </button>
+          </div>
+        </div>
+
+        {/* Staff Table */}
+        <div className="overflow-x-auto bg-black/20 border border-white/5 rounded-xl">
+          <table className="w-full text-right text-xs">
+            <thead>
+              <tr className="border-b border-white/10 text-zinc-400 bg-black/40">
+                <th className="p-3 font-black">همکار / پرسنل</th>
+                <th className="p-3 font-black">ایمیل</th>
+                <th className="p-3 font-black">نقش در سیستم</th>
+                <th className="p-3 font-black">تعداد آثار منتسب</th>
+                <th className="p-3 font-black">موجودی کیف پول</th>
+                <th className="p-3 font-black text-center">عملیات مالی</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {loadingStaff ? (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center text-zinc-400">
+                    <div className="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                    در حال بارگذاری لیست پرسنل و همکاران...
+                  </td>
+                </tr>
+              ) : staff.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center text-zinc-500 italic">
+                    هیچ پرسنلی در سیستم ثبت نشده است.
+                  </td>
+                </tr>
+              ) : (
+                staff
+                  .filter(s => {
+                    const matchQuery = !staffSearchQuery.trim() ||
+                      (s.displayName && s.displayName.toLowerCase().includes(staffSearchQuery.toLowerCase())) ||
+                      (s.email && s.email.toLowerCase().includes(staffSearchQuery.toLowerCase()));
+                    
+                    const matchRole = staffRoleFilter === "all" ||
+                      s.role === staffRoleFilter ||
+                      (Array.isArray(s.roles) && s.roles.includes(staffRoleFilter));
+                    
+                    return matchQuery && matchRole;
+                  })
+                  .map(member => {
+                    // Count how many series this user is contributor in
+                    const userSeriesCount = seriesList.filter(s => {
+                      const cList = Array.isArray(s.contributors) ? s.contributors : [];
+                      return cList.some(c => (c.userId === member.id || c.id === member.id || (member.email && c.email === member.email)));
+                    }).length;
+
+                    return (
+                      <tr key={member.id} className="hover:bg-white/5 transition-colors">
+                        <td className="p-3">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 font-bold text-xs shrink-0 overflow-hidden">
+                              {member.avatarUrl ? (
+                                <img src={member.avatarUrl} alt={member.displayName} className="w-full h-full object-cover" />
+                              ) : (
+                                (member.displayName || member.email || "U").charAt(0).toUpperCase()
+                              )}
+                            </div>
+                            <span className="font-bold text-white block">
+                              {member.displayName || member.email}
+                            </span>
+                          </div>
+                        </td>
+
+                        <td className="p-3 font-mono text-zinc-400 text-[11px]">
+                          {member.email || "—"}
+                        </td>
+
+                        <td className="p-3">
+                          <div className="flex flex-wrap gap-1">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                              member.role === 'super_admin' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' :
+                              member.role === 'admin' ? 'bg-red-500/10 text-red-300 border-red-500/20' :
+                              member.role === 'translator' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' :
+                              member.role === 'editor' ? 'bg-blue-500/10 text-blue-300 border-blue-500/20' :
+                              member.role === 'cleaner' ? 'bg-purple-500/10 text-purple-300 border-purple-500/20' :
+                              'bg-zinc-800 text-zinc-300 border-white/5'
+                            }`}>
+                              {member.role === 'super_admin' ? 'مدیریت کل' :
+                               member.role === 'admin' ? 'مدیر' :
+                               member.role === 'translator' ? 'مترجم' :
+                               member.role === 'editor' ? 'ادیتور' :
+                               member.role === 'cleaner' ? 'کلینر' :
+                               member.role === 'staff' ? 'پرسنل' : member.role || 'کاربر'}
+                            </span>
+                          </div>
+                        </td>
+
+                        <td className="p-3 font-mono font-bold text-zinc-300 text-xs">
+                          {userSeriesCount > 0 ? (
+                            <span className="bg-white/5 px-2 py-0.5 rounded border border-white/5 text-emerald-400">
+                              {userSeriesCount} اثر
+                            </span>
+                          ) : (
+                            <span className="text-zinc-600">—</span>
+                          )}
+                        </td>
+
+                        <td className="p-3 font-mono font-bold text-amber-300 text-xs">
+                          {(member.walletBalance || 0).toLocaleString("fa-IR")} تومان
+                        </td>
+
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleInspectContributor(member.id, member.displayName || member.email)}
+                            className="px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 mx-auto shadow-sm"
+                          >
+                            <TrendingUp size={13} />
+                            مشاهده رزومه و فیش مالی
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* SECTION 3: Immutable Financial Ledger & Activity Logs */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* System Activity Logs */}
