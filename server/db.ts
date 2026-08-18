@@ -3258,6 +3258,44 @@ class DatabaseManager {
   }
 
   async hasPurchasedChapter(userId: string, seriesId: string, chapterId: string): Promise<boolean> {
+    if (!userId) return false;
+
+    // Check if user is an admin, staff or has free chapter access
+    const user = await this.getUser(userId);
+    if (user) {
+      const u = user as any;
+      const isPrivileged = u.role === 'admin' || u.role === 'super_admin' || u.role === 'staff' ||
+        (Array.isArray(u.roles) && (u.roles.includes('admin') || u.roles.includes('super_admin') || u.roles.includes('staff'))) ||
+        u.email === 'amirrezaveisi45@gmail.com' || u.email === 'Mr.V@admin.com';
+      if (isPrivileged) return true;
+
+      if (u.permissions && Array.isArray(u.permissions) && u.permissions.includes('free_chapters_access')) {
+        return true;
+      }
+    }
+
+    // Check if user is a contributor of this chapter or series
+    const chapter = await this.getChapterById(seriesId, chapterId);
+    if (chapter) {
+      let chContribs: any = chapter.contributors;
+      if (typeof chContribs === 'string') {
+        try { chContribs = JSON.parse(chContribs); } catch (e) { chContribs = {}; }
+      }
+      if (chContribs && typeof chContribs === 'object') {
+        const allAssigned = Object.values(chContribs).flat();
+        if (allAssigned.some((item: any) => item === userId || item?.id === userId || item?.userId === userId)) {
+          return true;
+        }
+      }
+    }
+
+    const series = await this.getSeriesById(seriesId);
+    if (series && Array.isArray(series.contributors)) {
+      if (series.contributors.some((c: any) => (c.userId === userId || c.id === userId) && (!c.status || c.status === 'approved'))) {
+        return true;
+      }
+    }
+
     let hasByChapterId = false;
     if (this.isUsingMySQL && this.pool) {
       const [rows] = await this.pool.execute(
@@ -3271,8 +3309,6 @@ class DatabaseManager {
     }
     if (hasByChapterId) return true;
 
-    // Fetch the current chapter to check by number
-    const chapter = await this.getChapterById(seriesId, chapterId);
     if (!chapter) return false;
 
     if (this.isUsingMySQL && this.pool) {

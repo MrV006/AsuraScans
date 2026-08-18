@@ -2883,13 +2883,17 @@ async function startServer() {
       let users: any[] = [];
       if (dbManager.isUsingMySQL && dbManager.pool) {
         const [rows] = await dbManager.pool.execute(
-          "SELECT id, email, displayName, role FROM users WHERE role = 'staff' OR role = 'admin'"
+          "SELECT id, email, displayName, role FROM users WHERE banned = 0 OR banned IS NULL ORDER BY (CASE WHEN role = 'super_admin' THEN 1 WHEN role = 'admin' THEN 2 WHEN role = 'staff' THEN 3 ELSE 4 END), displayName ASC, email ASC"
         );
         users = rows as any[];
       } else {
         users = (dbManager.localData.users || [])
-          .filter((u: any) => u.role === 'staff' || u.role === 'admin')
-          .map((u: any) => ({ id: u.id, email: u.email, displayName: u.displayName, role: u.role }));
+          .filter((u: any) => !u.banned)
+          .sort((a: any, b: any) => {
+            const roleWeight = (r: string) => r === 'super_admin' ? 1 : r === 'admin' ? 2 : r === 'staff' ? 3 : 4;
+            return roleWeight(a.role) - roleWeight(b.role);
+          })
+          .map((u: any) => ({ id: u.id, email: u.email, displayName: u.displayName || u.email, role: u.role }));
       }
       res.json(users);
     } catch (err: any) {

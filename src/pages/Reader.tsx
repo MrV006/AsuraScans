@@ -535,17 +535,29 @@ export default function Reader() {
 
         setDbUser(uData);
 
-        const isSuperAdmin = uData && (
+        const isSuperAdminOrStaff = uData && (
+          uData.role === 'admin' ||
+          uData.role === 'super_admin' ||
+          uData.role === 'staff' ||
           uData.email === 'amirrezaveisi45@gmail.com' ||
           uData.email === 'Mr.V@admin.com' ||
-          (uData.roles && uData.roles.includes('super_admin'))
+          (Array.isArray(uData.roles) && (uData.roles.includes('super_admin') || uData.roles.includes('admin') || uData.roles.includes('staff')))
         );
 
         const hasBypassPermission = uData && (
-          uData.permissions && uData.permissions.includes('free_chapters_access')
+          uData.permissions && Array.isArray(uData.permissions) && uData.permissions.includes('free_chapters_access')
         );
 
-        const bypass = !isSimulatingUser && (isSuperAdmin || hasBypassPermission);
+        const isContributor = uData && (
+          (chapter && chapter.contributors && (
+            (Array.isArray(chapter.contributors?.translator) && chapter.contributors.translator.includes(uData.id)) ||
+            (Array.isArray(chapter.contributors?.editor) && chapter.contributors.editor.includes(uData.id)) ||
+            (Array.isArray(chapter.contributors?.cleaner) && chapter.contributors.cleaner.includes(uData.id))
+          )) ||
+          (series && Array.isArray(series.contributors) && series.contributors.some((c: any) => c.userId === uData.id || c.id === uData.id))
+        );
+
+        const bypass = !isSimulatingUser && (isSuperAdminOrStaff || hasBypassPermission || isContributor);
 
         if (bypass || pResult?.purchased) {
           setIsPurchased(true);

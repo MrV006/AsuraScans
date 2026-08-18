@@ -3146,6 +3146,14 @@ if ($method === 'GET' && matchRoute('/users/:userId/purchases/:seriesId/:chapter
     $realCId = $cRow ? $cRow['id'] : $cId;
     $cNum = $cRow ? $cRow['number'] : null;
 
+    // Check if user is admin or staff
+    $uStmt = $pdo->prepare("SELECT role, email FROM users WHERE id = ? LIMIT 1");
+    $uStmt->execute([$uid]);
+    $uRow = $uStmt->fetch(PDO::FETCH_ASSOC);
+    if ($uRow && in_array($uRow['role'], ['admin', 'super_admin', 'staff'])) {
+        sendResponse(["purchased" => true]);
+    }
+
     try {
         $stmt = $pdo->prepare("SELECT id FROM purchased_chapters WHERE userId = ? AND (seriesId = ? OR seriesId = ?) AND (chapterId = ? OR chapterId = ? OR (chapterNumber IS NOT NULL AND chapterNumber = ?))");
         $stmt->execute([$uid, $sId, $realSId, $cId, $realCId, $cNum]);
@@ -3204,6 +3212,14 @@ if ($method === 'POST' && $sub_path === '/chapters/purchase') {
     try {
         $pdo->exec("ALTER TABLE purchased_chapters ADD COLUMN chapterNumber DOUBLE DEFAULT NULL");
     } catch (Exception $e) {}
+
+    // Check if user is admin, staff, or already purchased
+    $uStmtCheck = $pdo->prepare("SELECT role, walletBalance FROM users WHERE id = ? LIMIT 1");
+    $uStmtCheck->execute([$userId]);
+    $uRowCheck = $uStmtCheck->fetch(PDO::FETCH_ASSOC);
+    if ($uRowCheck && in_array($uRowCheck['role'], ['admin', 'super_admin', 'staff'])) {
+        sendResponse(["success" => true, "balance" => (int)($uRowCheck['walletBalance'] ?? 0)]);
+    }
 
     // Check if already purchased
     try {
@@ -3884,7 +3900,7 @@ if ($method === 'POST' && $sub_path === '/admin/settle-website-revenue') {
 if ($method === 'GET' && $sub_path === '/admin/staff') {
     requireAdmin($pdo);
     try {
-        $stmt = $pdo->prepare("SELECT id, email, displayName, role FROM users WHERE role = 'staff' OR role = 'admin'");
+        $stmt = $pdo->prepare("SELECT id, email, displayName, role FROM users WHERE banned = 0 OR banned IS NULL ORDER BY (CASE WHEN role = 'super_admin' THEN 1 WHEN role = 'admin' THEN 2 WHEN role = 'staff' THEN 3 ELSE 4 END), displayName ASC, email ASC");
         $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         sendResponse($rows ?: []);

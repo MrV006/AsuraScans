@@ -531,6 +531,57 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
   };
 
   // Chapter Level Contributors Handlers
+  const getAvailableMembers = () => {
+    const map = new Map<string, { id: string; displayName: string; email?: string; role?: string; seriesRole?: string }>();
+
+    // 1. Series contributors first
+    if (selectedSeries && Array.isArray(selectedSeries.contributors)) {
+      selectedSeries.contributors.forEach((c: any) => {
+        const id = c.userId || c.id;
+        if (id) {
+          map.set(id, {
+            id,
+            displayName: c.displayName || c.email || id,
+            email: c.email,
+            role: c.role,
+            seriesRole: c.role
+          });
+        }
+      });
+    }
+
+    // 2. Staff and users from server
+    staff.forEach((s: any) => {
+      if (s.id) {
+        if (!map.has(s.id)) {
+          map.set(s.id, {
+            id: s.id,
+            displayName: s.displayName || s.email || s.id,
+            email: s.email,
+            role: s.role
+          });
+        }
+      }
+    });
+
+    // 3. Any assigned users in chapter
+    Object.values(chapterAssignments).forEach((ids: any) => {
+      if (Array.isArray(ids)) {
+        ids.forEach((id: string) => {
+          if (id && !map.has(id)) {
+            map.set(id, {
+              id,
+              displayName: id,
+              role: 'همکار'
+            });
+          }
+        });
+      }
+    });
+
+    return Array.from(map.values());
+  };
+
   const startEditingContributors = (chapterId: string, currentContributors: any) => {
     setEditingChapterId(chapterId);
     setChapterAssignments(currentContributors || {});
@@ -1329,13 +1380,14 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                           <div className="flex flex-wrap gap-2 pt-1 border-t border-white/5 text-[11px]">
                             {roles.filter(r => r.id !== "website").map(r => {
                               const assigned = ch.contributors?.[r.id] || [];
+                              const allMembers = getAvailableMembers();
 
                               return (
                                 <div key={r.id} className="bg-black/60 px-2.5 py-1 rounded-lg border border-white/5 flex items-center gap-1.5">
                                   <span className="text-zinc-400 font-bold">{r.name}:</span>
                                   {assigned.length > 0 ? (
                                     assigned.map((uid: string, idx: number) => {
-                                      const member = staff.find(s => s.id === uid);
+                                      const member = allMembers.find(s => s.id === uid) || staff.find(s => s.id === uid);
                                       const name = member ? (member.displayName || member.email) : uid;
                                       return (
                                         <button
@@ -1367,31 +1419,40 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                             </h5>
 
                             <div className="space-y-3">
-                              {roles.filter(r => r.id !== "website").map(r => (
-                                <div key={r.id} className="space-y-1.5">
-                                  <span className="text-xs font-bold text-white block">{r.name}:</span>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {staff.map(member => {
-                                      const isSelected = (chapterAssignments[r.id] || []).includes(member.id);
+                              {roles.filter(r => r.id !== "website").map(r => {
+                                const available = getAvailableMembers();
+                                return (
+                                  <div key={r.id} className="space-y-1.5">
+                                    <span className="text-xs font-bold text-white block">{r.name}:</span>
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {available.map(member => {
+                                        const isSelected = (chapterAssignments[r.id] || []).includes(member.id);
+                                        const isSeriesRole = member.seriesRole === r.id;
 
-                                      return (
-                                        <button
-                                          key={member.id}
-                                          type="button"
-                                          onClick={() => handleToggleContributor(r.id, member.id)}
-                                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
-                                            isSelected
-                                              ? "bg-indigo-600 text-white border-indigo-500"
-                                              : "bg-black/40 border-white/10 text-zinc-400 hover:bg-white/5"
-                                          }`}
-                                        >
-                                          {member.displayName || member.email}
-                                        </button>
-                                      );
-                                    })}
+                                        return (
+                                          <button
+                                            key={member.id}
+                                            type="button"
+                                            onClick={() => handleToggleContributor(r.id, member.id)}
+                                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border flex items-center gap-1 ${
+                                              isSelected
+                                                ? "bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30"
+                                                : isSeriesRole
+                                                ? "bg-indigo-950/40 border-indigo-500/40 text-indigo-200 hover:bg-indigo-900/40"
+                                                : "bg-black/40 border-white/10 text-zinc-400 hover:bg-white/5"
+                                            }`}
+                                          >
+                                            <span>{member.displayName || member.email}</span>
+                                            {isSeriesRole && !isSelected && (
+                                              <span className="text-[9px] bg-indigo-500/20 text-indigo-300 px-1 py-0.2 rounded font-normal">تیم اثر</span>
+                                            )}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
 
                             <div className="flex gap-2 pt-2 border-t border-white/10">

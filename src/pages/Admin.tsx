@@ -2996,16 +2996,15 @@ export default function Admin() {
                         className="w-full bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
                       >
                         <option value="">-- بدون تعیین / پیش‌فرض اثر --</option>
-                        {usersList
-                          .filter((u) => {
-                            const r = u.roles || [u.role];
-                            return r.includes("translator") || r.includes("admin") || r.includes("super_admin") || isSuperAdmin;
-                          })
-                          .map((u) => (
+                        {usersList.map((u) => {
+                          const r = u.roles || [u.role];
+                          const isRole = r.includes("translator");
+                          return (
                             <option key={u.id || u.uid} value={u.id || u.uid}>
-                              {u.displayName || u.email} {u.melliCode ? `(${u.melliCode})` : ""}
+                              {u.displayName || u.email} {isRole ? "★ (مترجم)" : ""} {u.melliCode ? `(${u.melliCode})` : ""}
                             </option>
-                          ))}
+                          );
+                        })}
                       </select>
                     </div>
 
@@ -3029,16 +3028,15 @@ export default function Admin() {
                         className="w-full bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
                       >
                         <option value="">-- بدون تعیین / پیش‌فرض اثر --</option>
-                        {usersList
-                          .filter((u) => {
-                            const r = u.roles || [u.role];
-                            return r.includes("cleaner") || r.includes("admin") || r.includes("super_admin") || isSuperAdmin;
-                          })
-                          .map((u) => (
+                        {usersList.map((u) => {
+                          const r = u.roles || [u.role];
+                          const isRole = r.includes("cleaner");
+                          return (
                             <option key={u.id || u.uid} value={u.id || u.uid}>
-                              {u.displayName || u.email} {u.melliCode ? `(${u.melliCode})` : ""}
+                              {u.displayName || u.email} {isRole ? "★ (کلینر)" : ""} {u.melliCode ? `(${u.melliCode})` : ""}
                             </option>
-                          ))}
+                          );
+                        })}
                       </select>
                     </div>
 
@@ -3062,16 +3060,15 @@ export default function Admin() {
                         className="w-full bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[var(--color-asura-accent)]"
                       >
                         <option value="">-- بدون تعیین / پیش‌فرض اثر --</option>
-                        {usersList
-                          .filter((u) => {
-                            const r = u.roles || [u.role];
-                            return r.includes("editor") || r.includes("admin") || r.includes("super_admin") || isSuperAdmin;
-                          })
-                          .map((u) => (
+                        {usersList.map((u) => {
+                          const r = u.roles || [u.role];
+                          const isRole = r.includes("editor");
+                          return (
                             <option key={u.id || u.uid} value={u.id || u.uid}>
-                              {u.displayName || u.email} {u.melliCode ? `(${u.melliCode})` : ""}
+                              {u.displayName || u.email} {isRole ? "★ (ادیتور)" : ""} {u.melliCode ? `(${u.melliCode})` : ""}
                             </option>
-                          ))}
+                          );
+                        })}
                       </select>
                     </div>
                   </div>
