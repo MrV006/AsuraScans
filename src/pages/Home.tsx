@@ -333,113 +333,171 @@ export default function Home() {
             <HeroSkeleton />
           ) : (
             sliderItems.length > 0 && (
-              <div 
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-                className="relative w-full overflow-hidden bg-zinc-950 h-[300px] md:h-[420px] border-b border-white/10 group select-none shadow-2xl"
-              >
-                {/* Gradient Overlays for high-end cinematic feel */}
-                <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-asura-dark)] via-black/40 to-transparent z-10 pointer-events-none"></div>
-                <div className="absolute inset-0 bg-gradient-to-l from-transparent via-black/60 to-black/90 z-10 pointer-events-none"></div>
+              <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-3 sm:pt-6 pb-2">
+                <div 
+                  onTouchStart={handleTouchStart}
+                  onTouchMove={handleTouchMove}
+                  onTouchEnd={handleTouchEnd}
+                  className="relative w-full overflow-hidden rounded-3xl bg-zinc-950/90 border border-white/10 group select-none shadow-2xl min-h-[340px] sm:min-h-[380px] md:min-h-[420px] lg:min-h-[460px] flex items-center"
+                >
+                  {/* Slides Container */}
+                  <div className="relative w-full h-full min-h-[340px] sm:min-h-[380px] md:min-h-[420px] lg:min-h-[460px]">
+                    <AnimatePresence mode="wait">
+                      {sliderItems.map((series, i) => {
+                        if (i !== currentSlide) return null;
+                        const seriesSlugOrId = series.slug || series.id;
+                        const coverImg = series.cover || series.banner;
+                        const backdropImg = series.banner || series.cover;
+                        const genresList = (Array.isArray(series.genres) 
+                          ? series.genres 
+                          : (typeof series.genres === "string" ? series.genres.split(",") : [])
+                        ).map((g: string) => g.trim()).filter(Boolean);
 
-                {/* Slides Container */}
-                <div className="relative w-full h-full">
-                  <AnimatePresence mode="wait">
-                    {sliderItems.map((series, i) => {
-                      if (i !== currentSlide) return null;
-                      const seriesSlugOrId = series.slug || series.id;
-                      const displayImage = series.banner || series.cover;
-                      return (
-                        <motion.div
-                           key={series.id}
-                           initial={{ opacity: 0 }}
-                           animate={{ opacity: 1 }}
-                           exit={{ opacity: 0 }}
-                           transition={{ duration: 0.3, ease: "easeInOut" }}
-                           className="absolute inset-0 w-full h-full"
-                           dir="rtl"
-                           style={{ transform: 'translateZ(0)' }}
-                        >
-                          {/* Full-bleed clickable slide background Link */}
-                          <Link to={`/series/${seriesSlugOrId}`} className="absolute inset-0 z-25 cursor-pointer" />
+                        return (
+                          <motion.div
+                             key={series.id}
+                             initial={{ opacity: 0, scale: 0.98 }}
+                             animate={{ opacity: 1, scale: 1 }}
+                             exit={{ opacity: 0, scale: 1.01 }}
+                             transition={{ duration: 0.35, ease: "easeOut" }}
+                             className="absolute inset-0 w-full h-full flex items-center overflow-hidden"
+                             dir="rtl"
+                          >
+                            {/* Full-slide clickable Link */}
+                            <Link to={`/series/${seriesSlugOrId}`} className="absolute inset-0 z-20 cursor-pointer" />
 
-                          {/* Single High-Res Banner Backdrop */}
-                          <img 
-                            src={displayImage} 
-                            alt={series.title} 
-                            className="absolute inset-0 w-full h-full object-cover object-center opacity-70 transition-transform duration-500 ease-out hover:scale-105" 
-                            referrerPolicy="no-referrer"
-                            loading="eager"
-                            decoding="async"
-                          />
-                          
-                          {/* Slide details overlay */}
-                          <div className="absolute inset-0 max-w-7xl mx-auto px-6 md:px-12 flex items-center z-20">
-                            <div className="flex flex-col justify-end pb-8 md:pb-12 max-w-xl text-right">
+                            {/* 1. Atmospheric Glowing Backdrop (Vibrant, colorful ambient glow) */}
+                            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                              <img 
+                                src={backdropImg} 
+                                alt="" 
+                                className="w-full h-full object-cover object-center filter blur-2xl scale-125 opacity-35 brightness-110 saturate-150 transform transition-all duration-700" 
+                                referrerPolicy="no-referrer"
+                                loading="eager"
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/60 to-transparent"></div>
+                              <div className="absolute inset-0 bg-gradient-to-r from-zinc-950/90 via-zinc-950/60 to-transparent"></div>
+                            </div>
+
+                            {/* 2. Slide Content Grid: High-Res Cover Poster Card + Clean Information */}
+                            <div className="relative z-25 w-full h-full max-w-7xl mx-auto px-5 sm:px-10 md:px-14 py-6 flex flex-row items-center justify-between gap-4 sm:gap-8 md:gap-12 pointer-events-none">
                               
-                              {/* Genre Badges & Type */}
-                              <div className="flex items-center gap-2 mb-3">
-                                <span className="bg-[var(--color-asura-accent)] text-white text-[10px] md:text-xs font-black px-2.5 py-0.5 rounded-full shadow-md uppercase">
-                                  {series.type || "مانهوا"}
-                                </span>
-                                {(Array.isArray(series.genres) ? series.genres : (typeof series.genres === "string" ? series.genres.split(",") : [])).slice(0, 3).map(g => (
-                                  <span key={g} className="bg-black/80 text-zinc-200 text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-white/10">
-                                    {g.trim()}
+                              {/* Right Side: Series Details & Action (RTL) */}
+                              <div className="flex-1 flex flex-col justify-center text-right items-start max-w-xl">
+                                
+                                {/* Top Badges */}
+                                <div className="flex items-center flex-wrap gap-2 mb-2.5 sm:mb-3 pointer-events-auto">
+                                  <span className="bg-gradient-to-r from-[var(--color-asura-accent)] to-[#ff843a] text-white text-[10px] sm:text-xs font-black px-3 py-1 rounded-full shadow-lg shadow-[var(--color-asura-accent)]/25 flex items-center gap-1">
+                                    <Sparkles size={12} />
+                                    {series.type || "مانهوا"}
                                   </span>
-                                ))}
+                                  {series.isHero && (
+                                    <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] sm:text-[11px] font-black px-2.5 py-0.5 rounded-full">
+                                      ★ برگزیده
+                                    </span>
+                                  )}
+                                  {genresList.slice(0, 2).map((g: string) => (
+                                    <span key={g} className="bg-black/60 backdrop-blur-md text-zinc-300 text-[10px] sm:text-xs font-bold px-2.5 py-0.5 rounded-full border border-white/10">
+                                      {g}
+                                    </span>
+                                  ))}
+                                </div>
+
+                                {/* Title */}
+                                <h1 className="text-lg sm:text-2xl md:text-3xl lg:text-4xl font-black text-white mb-2 sm:mb-3 leading-snug line-clamp-2 drop-shadow-lg">
+                                  {series.title}
+                                </h1>
+
+                                {/* Meta stats */}
+                                <div className="flex items-center gap-3 text-xs text-zinc-300 mb-3 sm:mb-4 font-medium flex-wrap">
+                                  {series.rating && (
+                                    <span className="flex items-center gap-1 text-amber-400 font-bold bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg border border-white/10 text-xs">
+                                      <Star size={13} className="fill-amber-400" />
+                                      {series.rating}
+                                    </span>
+                                  )}
+                                  {series.status && (
+                                    <span className="text-zinc-300 text-[11px] sm:text-xs bg-white/5 px-2.5 py-1 rounded-lg border border-white/5">
+                                      وضعیت: <span className="text-white font-bold">{series.status === 'Ongoing' ? 'در حال انتشار' : series.status === 'Completed' ? 'تکمیل شده' : series.status}</span>
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Description (Shortened, elegant) */}
+                                {series.description && (
+                                  <p className="text-xs sm:text-sm text-zinc-300/90 line-clamp-2 mb-4 sm:mb-6 max-w-lg leading-relaxed hidden sm:block">
+                                    {series.description}
+                                  </p>
+                                )}
+
+                                {/* CTA Button */}
+                                <div className="flex items-center gap-3 pointer-events-auto pt-1">
+                                  <Link 
+                                    to={`/series/${seriesSlugOrId}`} 
+                                    className="bg-gradient-to-r from-[var(--color-asura-accent)] to-[#ff843a] hover:opacity-90 active:scale-95 text-white px-5 py-2.5 sm:px-7 sm:py-3 rounded-2xl font-black text-xs sm:text-sm transition-all shadow-xl shadow-[var(--color-asura-accent)]/30 flex items-center gap-2"
+                                  >
+                                    <span>شروع خواندن</span>
+                                    <ChevronLeft size={16} />
+                                  </Link>
+                                </div>
+
                               </div>
 
-                              {/* Title */}
-                              <h1 className="text-xl md:text-4xl font-black text-white mb-4 leading-tight drop-shadow-md">
-                                {series.title}
-                              </h1>
-
-                              {/* Action Buttons */}
-                              <div className="flex items-center gap-3 relative z-30 pt-1">
+                              {/* Left Side: Gorgeous Full Cover Poster Card (100% Crisp Artwork Showcase) */}
+                              <div className="shrink-0 pointer-events-auto relative group/card">
                                 <Link 
-                                  to={`/series/${seriesSlugOrId}`} 
-                                  className="bg-gradient-to-r from-[var(--color-asura-accent)] to-[#ff843a] hover:opacity-95 active:scale-95 text-white px-6 py-2.5 md:px-8 md:py-3 rounded-xl font-black text-xs transition-all shadow-lg shadow-[var(--color-asura-accent)]/20 relative z-30 flex items-center gap-2"
+                                  to={`/series/${seriesSlugOrId}`}
+                                  className="block relative w-[110px] sm:w-[150px] md:w-[200px] lg:w-[230px] aspect-[2/3] rounded-2xl overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.85)] border-2 border-white/20 hover:border-[var(--color-asura-accent)] transition-all duration-300 hover:scale-105"
                                 >
-                                  <span>شروع خواندن</span>
-                                  <ChevronLeft size={16} />
+                                  <img 
+                                    src={coverImg} 
+                                    alt={series.title} 
+                                    className="w-full h-full object-cover object-center"
+                                    referrerPolicy="no-referrer"
+                                    loading="eager"
+                                  />
+                                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover/card:opacity-100 transition-opacity flex items-end justify-center p-3">
+                                    <span className="text-[11px] font-black text-white bg-[var(--color-asura-accent)] px-3 py-1 rounded-full shadow-lg">
+                                      مشاهده اثر
+                                    </span>
+                                  </div>
                                 </Link>
-                                <span className="text-xs font-bold text-amber-400 bg-black/80 px-3 py-2 rounded-xl border border-white/10 flex items-center gap-1">
-                                  ★ {series.rating || 5.0}
-                                </span>
                               </div>
 
                             </div>
-                          </div>
-                        </motion.div>
-                      );
-                    })}
-                  </AnimatePresence>
-                </div>
+                          </motion.div>
+                        );
+                      })}
+                    </AnimatePresence>
+                  </div>
 
-                {/* Nav Controls */}
-                <button 
-                  onClick={handlePrevSlide}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-black/75 hover:bg-[var(--color-asura-accent)] active:scale-95 text-white rounded-xl flex items-center justify-center transition-all duration-200 border border-white/10"
-                >
-                  <ChevronLeft size={20} />
-                </button>
-                <button 
-                  onClick={handleNextSlide}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 z-30 w-10 h-10 bg-black/75 hover:bg-[var(--color-asura-accent)] active:scale-95 text-white rounded-xl flex items-center justify-center transition-all duration-200 border border-white/10"
-                >
-                  <ChevronRight size={20} />
-                </button>
+                  {/* Prev / Next Navigation Arrows */}
+                  <button 
+                    onClick={handlePrevSlide}
+                    className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 z-30 w-9 h-9 sm:w-11 sm:h-11 bg-black/60 hover:bg-[var(--color-asura-accent)] active:scale-90 text-white rounded-full flex items-center justify-center transition-all duration-200 border border-white/10 backdrop-blur-md shadow-xl cursor-pointer"
+                    title="اسلاید قبلی"
+                  >
+                    <ChevronLeft size={20} />
+                  </button>
+                  <button 
+                    onClick={handleNextSlide}
+                    className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 z-30 w-9 h-9 sm:w-11 sm:h-11 bg-black/60 hover:bg-[var(--color-asura-accent)] active:scale-90 text-white rounded-full flex items-center justify-center transition-all duration-200 border border-white/10 backdrop-blur-md shadow-xl cursor-pointer"
+                    title="اسلاید بعدی"
+                  >
+                    <ChevronRight size={20} />
+                  </button>
 
-                {/* Slide dots */}
-                <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex gap-2 bg-black/75 px-3 py-1.5 rounded-full border border-white/10">
-                  {sliderItems.map((_, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => setCurrentSlide(idx)}
-                      className={`h-2 rounded-full transition-all duration-300 ${idx === currentSlide ? "w-6 bg-[var(--color-asura-accent)]" : "w-2 bg-zinc-600 hover:bg-zinc-400"}`}
-                    />
-                  ))}
+                  {/* Slide Indicators */}
+                  <div className="absolute bottom-3 sm:bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
+                    {sliderItems.map((_, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setCurrentSlide(idx)}
+                        className={`h-2 rounded-full transition-all duration-300 cursor-pointer ${idx === currentSlide ? "w-6 bg-[var(--color-asura-accent)]" : "w-2 bg-white/30 hover:bg-white/60"}`}
+                        title={`اسلاید ${idx + 1}`}
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
             )

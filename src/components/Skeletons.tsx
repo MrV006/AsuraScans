@@ -77,33 +77,18 @@ export function SeriesDetailSkeleton() {
 
 export function HeroSkeleton() {
   return (
-    <div className="relative w-full overflow-hidden bg-[var(--color-asura-dark)] animate-pulse">
-      <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-asura-dark)]/80 via-transparent to-[var(--color-asura-dark)] z-10 pointer-events-none"></div>
-      <div className="h-[400px] md:h-[500px] bg-zinc-900/40 relative">
-        <div className="absolute bottom-0 left-0 w-full p-6 md:p-12 z-20 max-w-7xl mx-auto flex gap-8 items-end">
-          {/* Cover Poster Skeleton (Visible on md+) */}
-          <div className="hidden md:block w-48 h-64 shrink-0 rounded-lg bg-zinc-800 border border-white/5 relative -bottom-6"></div>
-          
-          {/* Details Skeleton */}
-          <div className="flex-1 pb-6 md:pb-12">
-            {/* Genre Badges */}
-            <div className="flex gap-2 mb-4">
-              <div className="w-16 h-4 bg-zinc-700/50 rounded"></div>
-              <div className="w-16 h-4 bg-zinc-700/50 rounded"></div>
-              <div className="w-16 h-4 bg-zinc-700/50 rounded"></div>
-            </div>
-            {/* Title */}
-            <div className="w-2/3 h-12 bg-zinc-700/50 rounded mb-3"></div>
-            {/* Synopsis lines */}
-            <div className="space-y-2 mb-6">
-              <div className="h-3.5 bg-zinc-700/30 rounded w-full"></div>
-              <div className="h-3.5 bg-zinc-700/30 rounded w-5/6"></div>
-              <div className="h-3.5 bg-zinc-700/30 rounded w-2/3"></div>
-            </div>
-            {/* CTA Button */}
-            <div className="w-32 h-10 bg-zinc-700/50 rounded-lg"></div>
+    <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-3 sm:pt-6 pb-2">
+      <div className="relative w-full overflow-hidden rounded-3xl bg-zinc-950/80 border border-white/10 min-h-[340px] sm:min-h-[380px] md:min-h-[420px] lg:min-h-[460px] flex items-center p-6 sm:p-10 md:p-14 animate-pulse" dir="rtl">
+        <div className="flex-1 flex flex-col justify-center items-start max-w-xl">
+          <div className="flex gap-2 mb-3">
+            <div className="w-20 h-6 bg-zinc-800 rounded-full"></div>
+            <div className="w-16 h-6 bg-zinc-800/60 rounded-full"></div>
           </div>
+          <div className="w-3/4 h-10 bg-zinc-800 rounded-xl mb-4"></div>
+          <div className="w-1/2 h-5 bg-zinc-800/60 rounded-lg mb-6"></div>
+          <div className="w-36 h-11 bg-zinc-800 rounded-2xl"></div>
         </div>
+        <div className="shrink-0 w-[110px] sm:w-[150px] md:w-[200px] lg:w-[230px] aspect-[2/3] rounded-2xl bg-zinc-800 border border-white/10 shadow-2xl"></div>
       </div>
     </div>
   );

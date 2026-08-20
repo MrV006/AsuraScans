@@ -400,9 +400,9 @@ export default function Reader() {
     }
     const targetId = seriesId || series?.id || series?.slug;
     if (targetId && targetId !== 'undefined') {
-      navigate(`/series/${targetId}`);
+      window.location.replace(`/series/${targetId}`);
     } else {
-      navigate('/');
+      window.location.replace('/');
     }
   };
 
@@ -411,8 +411,26 @@ export default function Reader() {
       e.preventDefault();
       e.stopPropagation();
     }
-    navigate('/');
+    window.location.replace('/');
   };
+
+  // Hardware Back button (popstate) trap for mobile devices
+  useEffect(() => {
+    // Intercept back button so pressing back on device smoothly lands on series page or home without reader history loop
+    const handlePopState = () => {
+      const targetId = seriesId || series?.id || series?.slug;
+      if (targetId && targetId !== 'undefined') {
+        window.location.replace(`/series/${targetId}`);
+      } else {
+        window.location.replace('/');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [seriesId, series?.id, series?.slug]);
 
   // Reset scroll position and page index on chapter or series change
   useEffect(() => {
