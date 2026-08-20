@@ -3015,11 +3015,13 @@ async function startServer() {
   app.get("/api/admin/staff", requireAdmin, async (req, res) => {
     try {
       let users: any[] = [];
+      const userMap = new Map<string, any>();
+
       if (dbManager.isUsingMySQL && dbManager.pool) {
         const [rows] = await dbManager.pool.execute(
-          "SELECT id, email, displayName, role, roles, avatarUrl, walletBalance FROM users WHERE banned = 0 OR banned IS NULL ORDER BY (CASE WHEN role = 'super_admin' THEN 1 WHEN role = 'admin' THEN 2 WHEN role = 'staff' THEN 3 WHEN role = 'translator' THEN 4 WHEN role = 'editor' THEN 5 WHEN role = 'cleaner' THEN 6 ELSE 7 END), displayName ASC, email ASC"
+          "SELECT id, email, displayName, role, roles, avatarUrl, walletBalance FROM users WHERE banned = 0 OR banned IS NULL"
         );
-        users = (rows as any[]).map((u: any) => {
+        (rows as any[]).forEach((u: any) => {
           let parsedRoles: string[] = [];
           if (Array.isArray(u.roles)) {
             parsedRoles = u.roles;
@@ -3032,7 +3034,7 @@ async function startServer() {
           } else {
             parsedRoles = [u.role || 'user'];
           }
-          return {
+          const userObj = {
             id: u.id,
             email: u.email,
             displayName: u.displayName || u.email,
@@ -3041,33 +3043,72 @@ async function startServer() {
             avatarUrl: u.avatarUrl || '',
             walletBalance: Number(u.walletBalance) || 0
           };
+          userMap.set(u.id, userObj);
+          if (u.email) userMap.set(u.email.toLowerCase(), userObj);
         });
       } else {
-        users = (dbManager.localData.users || [])
+        (dbManager.localData.users || [])
           .filter((u: any) => !u.banned)
-          .sort((a: any, b: any) => {
-            const roleWeight = (r: string) => {
-              if (r === 'super_admin') return 1;
-              if (r === 'admin') return 2;
-              if (r === 'staff') return 3;
-              if (r === 'translator') return 4;
-              if (r === 'editor') return 5;
-              if (r === 'cleaner') return 6;
-              return 7;
+          .forEach((u: any) => {
+            const userObj = {
+              id: u.id,
+              email: u.email,
+              displayName: u.displayName || u.email,
+              role: u.role,
+              roles: Array.isArray(u.roles) ? u.roles : [u.role || 'user'],
+              avatarUrl: u.avatarUrl || '',
+              walletBalance: Number(u.walletBalance) || 0
             };
-            return roleWeight(a.role) - roleWeight(b.role);
-          })
-          .map((u: any) => ({
-            id: u.id,
-            email: u.email,
-            displayName: u.displayName || u.email,
-            role: u.role,
-            roles: u.roles || [u.role || 'user'],
-            avatarUrl: u.avatarUrl || '',
-            walletBalance: Number(u.walletBalance) || 0
-          }));
+            userMap.set(u.id, userObj);
+            if (u.email) userMap.set(u.email.toLowerCase(), userObj);
+          });
       }
-      res.json(users);
+
+      // Also gather all contributors across all series and chapters to ensure none are missing
+      const allSeries = await dbManager.getSeries();
+      for (const s of allSeries) {
+        if (Array.isArray(s.contributors)) {
+          for (const c of (s.contributors as any[])) {
+            const cId = c.userId || c.id;
+            const cEmail = c.email ? c.email.toLowerCase() : '';
+            const existing = (cId && userMap.get(cId)) || (cEmail && userMap.get(cEmail));
+            if (existing) {
+              if (c.role && !existing.roles.includes(c.role)) {
+                existing.roles.push(c.role);
+              }
+            } else if (cId || cEmail) {
+              const syntheticUser = {
+                id: cId || `contrib-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                email: c.email || '',
+                displayName: c.name || c.displayName || c.email || 'همکار',
+                role: c.role || 'translator',
+                roles: [c.role || 'translator'],
+                avatarUrl: '',
+                walletBalance: 0
+              };
+              userMap.set(syntheticUser.id, syntheticUser);
+            }
+          }
+        }
+      }
+
+      const roleWeight = (r: string, roles: string[] = []) => {
+        if (r === 'super_admin' || roles.includes('super_admin')) return 1;
+        if (r === 'admin' || roles.includes('admin')) return 2;
+        if (r === 'staff' || roles.includes('staff')) return 3;
+        if (r === 'translator' || roles.includes('translator')) return 4;
+        if (r === 'editor' || roles.includes('editor')) return 5;
+        if (r === 'cleaner' || roles.includes('cleaner')) return 6;
+        return 7;
+      };
+
+      const uniqueUsers = Array.from(new Set(userMap.values())).sort((a, b) => {
+        const weightDiff = roleWeight(a.role, a.roles) - roleWeight(b.role, b.roles);
+        if (weightDiff !== 0) return weightDiff;
+        return (a.displayName || a.email || '').localeCompare(b.displayName || b.email || '');
+      });
+
+      res.json(uniqueUsers);
     } catch (err: any) {
       console.error("Error in /api/admin/staff:", err);
       res.status(500).json({ error: err.message });
@@ -3298,6 +3339,45 @@ async function startServer() {
                 userPercentage: rolePct / coWorkersCount,
                 rolePool,
                 coWorkersCount,
+                userEarnings: Math.round(userShare),
+                chapterUserEarnings: Math.round(userShare)
+              });
+            }
+          }
+        }
+
+        let chSubmissions: any[] = [];
+        if (Array.isArray(ch.submissions)) {
+          chSubmissions = ch.submissions;
+        } else if (typeof ch.submissions === 'string') {
+          try {
+            chSubmissions = JSON.parse(ch.submissions);
+          } catch (e) {
+            chSubmissions = [];
+          }
+        }
+
+        // Also check if user submitted work directly in chapter submissions
+        for (const sub of chSubmissions) {
+          const sUid = sub.userId || sub.id;
+          const sRole = sub.role;
+          if (sUid === userId || (userEmail && sub.userEmail && sub.userEmail.toLowerCase() === userEmail.toLowerCase())) {
+            const alreadyHasRole = userRolesInChapter.some(ur => ur.roleId === sRole);
+            if (!alreadyHasRole && sRole) {
+              const matchedRoleObj = rolesList.find(r => r.id === sRole);
+              const rolePct = Number(matchedRoleObj?.percentage || 0);
+              const rolePool = chapterTotalSalesAmount * (rolePct / 100);
+              const userShare = rolePool; // Default full pool if sole submitter
+
+              isUserInChapter = true;
+              chapterUserEarnings += userShare;
+              userRolesInChapter.push({
+                roleId: sRole,
+                roleName: matchedRoleObj?.name || sRole,
+                rolePercentage: rolePct,
+                userPercentage: rolePct,
+                rolePool,
+                coWorkersCount: 1,
                 userEarnings: Math.round(userShare),
                 chapterUserEarnings: Math.round(userShare)
               });
@@ -3643,13 +3723,19 @@ function resolveTargetUploadDir(baseUploadsDir: string, reqBody: any, reqQuery: 
 
   let parts: string[] = [];
   const safeSeries = sanitizeFolderName(seriesTitle);
-  const isChapter = Boolean(chapterNumber !== "" || folderType === "chapters" || folderType === "chapter");
+  const isSubmission = folderType === "submission" || folderType === "draft" || folderType === "raw" || folderType === "document";
+  const isChapter = Boolean((chapterNumber !== "" || folderType === "chapters" || folderType === "chapter" || folderType === "chapter_pages") && !isSubmission);
   const safeChapterNum = chapterNumber !== "" ? sanitizeFolderName(chapterNumber) : "";
 
-  if (safeSeries) {
+  if (safeSeries && safeSeries !== "general") {
     parts.push("series", safeSeries);
 
-    if (isChapter) {
+    if (isSubmission) {
+      parts.push("submissions");
+      if (safeChapterNum) {
+        parts.push(`ch-${safeChapterNum}`);
+      }
+    } else if (isChapter) {
       parts.push("chapters");
     } else if (folderType) {
       const safeFolder = sanitizeFolderName(folderType);
@@ -3751,7 +3837,7 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
         return res.status(400).json({ error: "فایلی برای آپلود انتخاب نشده است." });
       }
 
-      const { targetDir, relPrefix, isChapter, safeSeries, safeChapterNum } = resolveTargetUploadDir(uploadsDir, req.body, req.query);
+      const { targetDir, relPrefix, isChapter, safeSeries, safeChapterNum, folderType } = resolveTargetUploadDir(uploadsDir, req.body, req.query);
       await fs.promises.mkdir(targetDir, { recursive: true });
 
       let dbFtpConfig: any = null;
@@ -3763,8 +3849,19 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
 
       const isFtpEnabled = dbFtpConfig?.enabled ?? (process.env.FTP_ENABLED === "true" || Boolean(process.env.FTP_HOST));
 
-      // CASE 1: Chapter Upload (Package into a single chapter-.zip archive to save host storage & stream on-the-fly)
-      if (isChapter && safeSeries) {
+      // Check if any file is a document or if it's explicitly a submission / draft
+      const hasDocFile = files.some(f => {
+        const ext = path.extname(f.originalname).toLowerCase();
+        return [".doc", ".docx", ".pdf", ".txt", ".rtf"].includes(ext) || 
+               f.mimetype.includes("word") || 
+               f.mimetype.includes("document") || 
+               f.mimetype.includes("text/");
+      });
+
+      const isSubmissionUpload = folderType === "submission" || folderType === "draft" || folderType === "raw" || folderType === "document" || hasDocFile;
+
+      // CASE 1: Chapter Pages Upload (Package into a single chapter-.zip archive for reader streaming)
+      if (isChapter && safeSeries && !isSubmissionUpload) {
         const zipFileName = `chapter-${safeChapterNum || Date.now()}.zip`;
         const absZipPath = path.join(targetDir, zipFileName);
         const relZipPath = `uploads/${relPrefix}/${zipFileName}`;
@@ -3861,7 +3958,7 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
         });
       }
 
-      // CASE 2: Non-Chapter Uploads (Covers, Banners, Logos, Documents)
+      // CASE 2: Non-Chapter / Submission Uploads (Word Docs, Clean/Edit ZIP archives, Covers, Banners, Logos)
       const itemsToUpload: { buffer: Buffer; fileName: string }[] = [];
 
       for (let i = 0; i < files.length; i++) {
@@ -3875,7 +3972,7 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
 
         const ext = path.extname(file.originalname).toLowerCase();
 
-        const isDoc = [".doc", ".docx", ".pdf", ".txt", ".rtf", ".zip", ".rar", ".7z"].includes(ext) || 
+        const isDoc = [".doc", ".docx", ".pdf", ".txt", ".rtf", ".zip", ".rar", ".7z", ".tar"].includes(ext) || 
                       file.mimetype.includes("word") || 
                       file.mimetype.includes("document") || 
                       file.mimetype.includes("zip") ||
@@ -3883,7 +3980,8 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
                       file.mimetype.includes("text/");
 
         if (isDoc) {
-          const safeName = sanitizeSafeFileName(`doc-${Date.now()}-${Math.floor(Math.random() * 1000000)}${ext || '.docx'}`);
+          const originalBase = path.basename(file.originalname, ext);
+          const safeName = sanitizeSafeFileName(`${sanitizeFolderName(originalBase)}-${Date.now()}-${Math.floor(Math.random() * 1000)}${ext || '.docx'}`);
           itemsToUpload.push({ buffer: file.buffer, fileName: safeName });
           continue;
         }
@@ -3925,7 +4023,7 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
         return `/uploads/${relPrefix}/${item.fileName}`;
       });
 
-      res.json({ success: true, urls, url: urls[0] || '' });
+      res.json({ success: true, urls, url: urls[0] || '', count: urls.length });
     } catch (err: any) {
       console.error("Upload processing error:", err);
       res.status(500).json({ error: err.message });

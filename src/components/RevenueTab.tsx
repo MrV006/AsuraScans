@@ -891,22 +891,12 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                   (member.email || "").toLowerCase().includes(staffSearchQuery.toLowerCase());
                 const matchRole =
                   staffRoleFilter === "all" ||
-                  (member.role || "").toLowerCase() === staffRoleFilter.toLowerCase();
+                  (member.role || "").toLowerCase() === staffRoleFilter.toLowerCase() ||
+                  (Array.isArray(member.roles) && member.roles.some((r: string) => r.toLowerCase() === staffRoleFilter.toLowerCase()));
                 return matchSearch && matchRole;
               })
               .map(member => {
-                const roleFa =
-                  member.role === "translator" ? "مترجم" :
-                  member.role === "editor" ? "ادیتور" :
-                  member.role === "cleaner" ? "کلینر" :
-                  member.role === "admin" ? "مدیر" :
-                  member.role === "superadmin" ? "مدیر ارشد" : member.role;
-
-                const roleColor =
-                  member.role === "translator" ? "bg-blue-500/10 text-blue-300 border-blue-500/30" :
-                  member.role === "editor" ? "bg-purple-500/10 text-purple-300 border-purple-500/30" :
-                  member.role === "cleaner" ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" :
-                  "bg-amber-500/10 text-amber-300 border-amber-500/30";
+                const rolesList = Array.isArray(member.roles) && member.roles.length > 0 ? member.roles : [member.role || "user"];
 
                 return (
                   <div
@@ -921,10 +911,28 @@ export default function RevenueTab({ seriesList, isSuperAdmin }: RevenueTabProps
                         <span className="font-bold text-white text-xs block truncate" title={member.displayName || member.email}>
                           {member.displayName || member.email}
                         </span>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <span className={`text-[10px] px-2 py-0.5 rounded-md border font-bold ${roleColor}`}>
-                            {roleFa}
-                          </span>
+                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                          {rolesList.map((r: string) => {
+                            const roleFa =
+                              r === "translator" ? "مترجم" :
+                              r === "editor" ? "ادیتور" :
+                              r === "cleaner" ? "کلینر" :
+                              r === "admin" ? "مدیر" :
+                              r === "superadmin" || r === "super_admin" ? "مدیر ارشد" :
+                              r === "staff" ? "کادر تیم" : r;
+
+                            const roleColor =
+                              r === "translator" ? "bg-blue-500/10 text-blue-300 border-blue-500/30" :
+                              r === "editor" ? "bg-purple-500/10 text-purple-300 border-purple-500/30" :
+                              r === "cleaner" ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" :
+                              "bg-amber-500/10 text-amber-300 border-amber-500/30";
+
+                            return (
+                              <span key={r} className={`text-[10px] px-1.5 py-0.5 rounded-md border font-bold ${roleColor}`}>
+                                {roleFa}
+                              </span>
+                            );
+                          })}
                           <span className="text-[10px] text-zinc-500 font-mono truncate">{member.email}</span>
                         </div>
                       </div>

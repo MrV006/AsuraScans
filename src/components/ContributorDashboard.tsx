@@ -29,7 +29,11 @@ import {
   ChevronDown,
   ChevronUp,
   Info,
-  CheckSquare
+  CheckSquare,
+  Plus,
+  Edit,
+  List,
+  ExternalLink
 } from "lucide-react";
 import { Series, Chapter } from "../lib/types";
 
@@ -53,7 +57,7 @@ export default function ContributorDashboard({
   const isGlobalAdmin = isSuperAdmin || profile?.role === "admin" || (profile?.roles && profile.roles.includes("admin"));
   
   // Dashboard Sub-tabs
-  const [activeTab, setActiveTab] = useState<"stats" | "workspace" | "approval" | "settlement">(
+  const [activeTab, setActiveTab] = useState<"stats" | "workspace" | "manage_chapters" | "approval" | "settlement">(
     roleMode === "approval" ? "approval" : "stats"
   );
 
@@ -63,11 +67,27 @@ export default function ContributorDashboard({
   const [loadingStats, setLoadingStats] = useState(false);
   const [statsError, setStatsError] = useState("");
 
-  // Series selection in Workspace
+  // Series selection in Workspace & Chapter Management
   const [selectedSeriesId, setSelectedSeriesId] = useState<string>("");
   const [seriesChapters, setSeriesChapters] = useState<Chapter[]>([]);
   const [loadingChapters, setLoadingChapters] = useState(false);
   const [selectedChapterId, setSelectedChapterId] = useState<string>("");
+
+  // Chapter Management Specific States
+  const [chapterSearchQuery, setChapterSearchQuery] = useState("");
+  const [chapterStatusFilter, setChapterStatusFilter] = useState<"all" | "pending" | "published">("all");
+  const [showChapterModal, setShowChapterModal] = useState(false);
+  const [editingChapter, setEditingChapter] = useState<Chapter | null>(null);
+  const [modalSeriesId, setModalSeriesId] = useState<string>("");
+  const [chapterNumberInput, setChapterNumberInput] = useState<string>("");
+  const [chapterTitleInput, setChapterTitleInput] = useState<string>("");
+  const [chapterPriceInput, setChapterPriceInput] = useState<string>("0");
+  const [chapterPagesText, setChapterPagesText] = useState<string>("");
+  const [uploadingChapterPages, setUploadingChapterPages] = useState(false);
+  const [chapterModalError, setChapterModalError] = useState("");
+  const [chapterModalSuccess, setChapterModalSuccess] = useState("");
+  const [savingChapter, setSavingChapter] = useState(false);
+  const [previewChapter, setPreviewChapter] = useState<Chapter | null>(null);
 
   // Submission Form States
   const [submittingRole, setSubmittingRole] = useState<"translator" | "cleaner" | "editor">(
@@ -343,6 +363,169 @@ export default function ContributorDashboard({
     }
   };
 
+  // Open Add Chapter Modal
+  const handleOpenAddChapter = () => {
+    setEditingChapter(null);
+    const targetSerId = selectedSeriesId || (userAssignedSeries[0]?.id || "");
+    setModalSeriesId(targetSerId);
+    
+    // Auto increment chapter number
+    let nextNum = 1;
+    if (seriesChapters.length > 0) {
+      const maxNum = Math.max(...seriesChapters.map(c => Number(c.number) || 0));
+      nextNum = isFinite(maxNum) ? maxNum + 1 : seriesChapters.length + 1;
+    }
+    setChapterNumberInput(String(nextNum));
+    setChapterTitleInput("");
+    setChapterPriceInput("0");
+    setChapterPagesText("");
+    setChapterModalError("");
+    setChapterModalSuccess("");
+    setShowChapterModal(true);
+  };
+
+  // Open Edit Chapter Modal
+  const handleOpenEditChapter = (ch: any) => {
+    setEditingChapter(ch);
+    setModalSeriesId(selectedSeriesId);
+    setChapterNumberInput(String(ch.number));
+    setChapterTitleInput(ch.title || "");
+    setChapterPriceInput(String(ch.price || 0));
+    setChapterPagesText(Array.isArray(ch.images) ? ch.images.join("\n") : (ch.images || ""));
+    setChapterModalError("");
+    setChapterModalSuccess("");
+    setShowChapterModal(true);
+  };
+
+  // Upload Chapter Pages (Images / Zip)
+  const handleChapterPagesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setUploadingChapterPages(true);
+    setChapterModalError("");
+    setChapterModalSuccess("");
+
+    try {
+      const formData = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        formData.append("files", files[i]);
+      }
+      
+      const foundSeries = seriesList.find(s => s.id === (modalSeriesId || selectedSeriesId));
+      if (foundSeries) {
+        formData.append("seriesTitle", foundSeries.title);
+        formData.append("seriesId", foundSeries.id);
+      }
+      if (chapterNumberInput) {
+        formData.append("chapterNumber", chapterNumberInput.trim());
+      }
+      formData.append("folderType", "chapters");
+
+      const res = await apiClient.uploadFile(formData, user?.uid);
+      if (res && (res.urls || res.url)) {
+        const newUrls: string[] = Array.isArray(res.urls) ? res.urls : (res.url ? [res.url] : []);
+        setChapterPagesText(prev => {
+          const existing = prev.split("\n").map(s => s.trim()).filter(Boolean);
+          const combined = [...existing, ...newUrls];
+          return combined.join("\n");
+        });
+        setChapterModalSuccess(`تعداد ${newUrls.length} تصویر با موفقیت آپلود و اضافه شد.`);
+      } else {
+        setChapterModalError("خطا در پردازش و ذخیره تصاویر بر روی سرور.");
+      }
+    } catch (err: any) {
+      console.error("Chapter pages upload error:", err);
+      setChapterModalError(err.message || "خطا در آپلود صفحات");
+    } finally {
+      setUploadingChapterPages(false);
+    }
+  };
+
+  // Save Chapter Submit
+  const handleSaveChapterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!modalSeriesId) {
+      setChapterModalError("لطفا یک اثر را انتخاب کنید.");
+      return;
+    }
+    if (!chapterNumberInput.trim()) {
+      setChapterModalError("شماره چپتر الزامی است.");
+      return;
+    }
+
+    const pages = chapterPagesText.split("\n").map(s => s.trim()).filter(Boolean);
+    if (pages.length === 0) {
+      setChapterModalError("حداقل یک صفحه یا تصویر برای چپتر الزامی است.");
+      return;
+    }
+
+    setSavingChapter(true);
+    setChapterModalError("");
+    setChapterModalSuccess("");
+
+    try {
+      const parsedPrice = parseInt(chapterPriceInput) || 0;
+      const parsedNum = parseFloat(chapterNumberInput) || chapterNumberInput;
+      
+      const chapterData: any = {
+        ...(editingChapter || {}),
+        id: editingChapter?.id || `${modalSeriesId}-ch-${chapterNumberInput.trim()}`,
+        number: parsedNum,
+        title: chapterTitleInput.trim(),
+        price: parsedPrice,
+        images: pages,
+        // Contributors default to pending approval unless global admin
+        isPending: isGlobalAdmin ? (editingChapter?.isPending ?? false) : true,
+        createdAt: editingChapter?.createdAt || new Date().toISOString()
+      };
+
+      const res = await apiClient.saveChapter(modalSeriesId, chapterData);
+      if (res && res.id) {
+        setChapterModalSuccess(
+          isGlobalAdmin
+            ? "چپتر با موفقیت ذخیره شد."
+            : "چپتر با موفقیت ثبت شد و در صف تایید مدیریت قرار گرفت."
+        );
+        // Refresh chapters
+        const chs = await apiClient.getChapters(modalSeriesId);
+        if (Array.isArray(chs)) {
+          setSeriesChapters(chs);
+        }
+        fetchMyStats();
+        if (onUpdateSeries) {
+          const found = seriesList.find(s => s.id === modalSeriesId);
+          if (found) onUpdateSeries(found);
+        }
+        setTimeout(() => {
+          setShowChapterModal(false);
+        }, 1200);
+      } else {
+        setChapterModalError(res?.error || "خطا در ذخیره چپتر");
+      }
+    } catch (err: any) {
+      console.error("Save chapter error:", err);
+      setChapterModalError(err.message || "خطا در برقراری ارتباط با سرور");
+    } finally {
+      setSavingChapter(false);
+    }
+  };
+
+  // Delete Chapter
+  const handleDeleteChapter = async (chapterId: string, chapterNum: string | number) => {
+    if (!window.confirm(`آیا از حذف کامل چپتر ${chapterNum} اطمینان دارید؟`)) {
+      return;
+    }
+    try {
+      await apiClient.deleteChapter(selectedSeriesId, chapterId, user?.uid);
+      const chs = await apiClient.getChapters(selectedSeriesId);
+      setSeriesChapters(chs);
+      fetchMyStats();
+    } catch (err: any) {
+      alert("خطا در حذف چپتر: " + err.message);
+    }
+  };
+
   // Admin Approve & Publish Chapter + Auto Cleanup Intermediate Files
   const handleApproveAndPublish = async (seriesId: string, chapterId: string, chapterNum: string | number) => {
     if (!window.confirm(`آیا از تایید و انتشار عمومی چپتر ${chapterNum} اطمینان دارید؟ فایل‌های میانی ترجمه و کلین به صورت خودکار از فضای هاست پاکسازی خواهند شد.`)) {
@@ -526,6 +709,24 @@ export default function ContributorDashboard({
           >
             <UploadCloud className="w-4 h-4" />
             میز ارسال کار (Word / Zip)
+          </button>
+
+          <button
+            id="tab-manage-chapters"
+            onClick={() => setActiveTab("manage_chapters")}
+            className={`px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition whitespace-nowrap ${
+              activeTab === "manage_chapters"
+                ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30"
+                : "bg-slate-800/60 hover:bg-slate-800 text-slate-300 hover:text-white"
+            }`}
+          >
+            <List className="w-4 h-4 text-purple-300" />
+            مدیریت و آپلود مستقیم چپترها
+            {seriesChapters.length > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-xs bg-purple-500/20 text-purple-200 font-bold border border-purple-500/30">
+                {seriesChapters.length}
+              </span>
+            )}
           </button>
 
           {isGlobalAdmin && (
@@ -1088,7 +1289,267 @@ export default function ContributorDashboard({
         </div>
       )}
 
-      {/* TAB 3: ADMIN APPROVAL & AUTO DISK CLEANUP (Admin only) */}
+      {/* TAB 3: INTEGRATED CHAPTER MANAGEMENT & UPLOAD */}
+      {activeTab === "manage_chapters" && (
+        <div id="manage-chapters-tab-content" className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-6 border-b border-slate-800">
+              <div>
+                <h2 className="text-lg font-black text-white flex items-center gap-2">
+                  <List className="w-5 h-5 text-purple-400" />
+                  مدیریت، ویرایش و آپلود چپترها
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  در این بخش می‌توانید چپترهای مانهوا را مدیریت نموده، چپتر جدید آپلود کنید یا صفحات را ویرایش فرمایید.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  id="add-new-chapter-btn"
+                  onClick={handleOpenAddChapter}
+                  className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-sm flex items-center gap-2 transition shadow-lg shadow-purple-600/30"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>آپلود و افزودن چپتر جدید</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Series Filter and Chapter Controls */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+              {/* Series Selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">انتخاب مانهوا / کمیک:</label>
+                <select
+                  id="filter-series-select"
+                  value={selectedSeriesId}
+                  onChange={(e) => setSelectedSeriesId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white text-sm focus:border-purple-500 outline-none"
+                >
+                  {userAssignedSeries.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Search Chapter */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">جستجو در چپترها:</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    id="search-chapters-input"
+                    value={chapterSearchQuery}
+                    onChange={(e) => setChapterSearchQuery(e.target.value)}
+                    placeholder="شماره چپتر یا عنوان..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pr-10 pl-4 py-2.5 text-white text-sm focus:border-purple-500 outline-none"
+                  />
+                  <Search className="w-4 h-4 text-slate-500 absolute right-3.5 top-3" />
+                </div>
+              </div>
+
+              {/* Status Filter */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">وضعیت انتشار:</label>
+                <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setChapterStatusFilter("all")}
+                    className={`py-1.5 text-xs font-bold rounded-lg transition ${
+                      chapterStatusFilter === "all" ? "bg-purple-600 text-white" : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    همه ({seriesChapters.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChapterStatusFilter("published")}
+                    className={`py-1.5 text-xs font-bold rounded-lg transition ${
+                      chapterStatusFilter === "published" ? "bg-purple-600 text-white" : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    منتشر شده ({seriesChapters.filter((c) => !c.isPending).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChapterStatusFilter("pending")}
+                    className={`py-1.5 text-xs font-bold rounded-lg transition ${
+                      chapterStatusFilter === "pending" ? "bg-purple-600 text-white" : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    در انتظار ({seriesChapters.filter((c) => c.isPending).length})
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Chapters List Table */}
+            <div className="mt-6">
+              {loadingChapters ? (
+                <div className="p-12 text-center">
+                  <RefreshCw className="w-8 h-8 text-purple-400 animate-spin mx-auto mb-3" />
+                  <span className="text-sm text-slate-400">در حال بارگذاری لیست چپترها...</span>
+                </div>
+              ) : seriesChapters.length === 0 ? (
+                <div className="p-12 text-center bg-slate-950/40 rounded-xl border border-slate-800">
+                  <BookOpen className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                  <h3 className="text-sm font-bold text-slate-300">چپتری برای این اثر یافت نشد.</h3>
+                  <p className="text-xs text-slate-500 mt-1">با زدن دکمه «آپلود و افزودن چپتر جدید» نخستین چپتر را اضافه فرمایید.</p>
+                  <button
+                    type="button"
+                    onClick={handleOpenAddChapter}
+                    className="mt-4 px-4 py-2 rounded-xl bg-purple-600 text-white text-xs font-bold inline-flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    افزودن اولین چپتر
+                  </button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-xs font-bold text-slate-400">
+                        <th className="py-3.5 px-4">شماره چپتر</th>
+                        <th className="py-3.5 px-4">عنوان</th>
+                        <th className="py-3.5 px-4">صفحات</th>
+                        <th className="py-3.5 px-4">قیمت</th>
+                        <th className="py-3.5 px-4">بازدید</th>
+                        <th className="py-3.5 px-4">وضعیت</th>
+                        <th className="py-3.5 px-4">فایل‌های ارسالی</th>
+                        <th className="py-3.5 px-4 text-center">عملیات</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-sm">
+                      {seriesChapters
+                        .filter((c) => {
+                          if (chapterStatusFilter === "pending") return !!c.isPending;
+                          if (chapterStatusFilter === "published") return !c.isPending;
+                          return true;
+                        })
+                        .filter((c) => {
+                          if (!chapterSearchQuery.trim()) return true;
+                          const q = chapterSearchQuery.toLowerCase();
+                          return (
+                            String(c.number).includes(q) ||
+                            (c.title && c.title.toLowerCase().includes(q))
+                          );
+                        })
+                        .sort((a, b) => (Number(b.number) || 0) - (Number(a.number) || 0))
+                        .map((ch) => {
+                          const pageCount = Array.isArray(ch.images) ? ch.images.length : (ch.images ? 1 : 0);
+                          const submissionsCount = Array.isArray(ch.submissions) ? ch.submissions.length : 0;
+                          return (
+                            <tr key={ch.id} className="hover:bg-slate-800/30 transition">
+                              <td className="py-3.5 px-4 font-black text-white flex items-center gap-2">
+                                <span className="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center font-mono">
+                                  {ch.number}
+                                </span>
+                                <span>چپتر {ch.number}</span>
+                              </td>
+                              <td className="py-3.5 px-4 text-slate-300">
+                                {ch.title ? ch.title : <span className="text-slate-600 text-xs">-</span>}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <span className="px-2.5 py-1 rounded-md bg-slate-800 text-xs font-mono text-slate-300">
+                                  {pageCount} صفحه
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                {ch.price && ch.price > 0 ? (
+                                  <span className="text-amber-400 font-bold text-xs">
+                                    {ch.price.toLocaleString("fa-IR")} ت
+                                  </span>
+                                ) : (
+                                  <span className="text-emerald-400 font-bold text-xs">رایگان</span>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-4 text-xs text-slate-400 font-mono">
+                                {((ch as any).views || 0).toLocaleString("fa-IR")}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                {ch.isPending ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                    <Clock className="w-3 h-3" />
+                                    در انتظار تایید
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                    <CheckCircle className="w-3 h-3" />
+                                    منتشر شده
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                {submissionsCount > 0 ? (
+                                  <div className="flex items-center gap-1">
+                                    {ch.submissions?.map((sub: any, idx: number) => (
+                                      <a
+                                        key={idx}
+                                        href={sub.fileUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="p-1 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 text-xs inline-flex items-center gap-1"
+                                        title={`${sub.userName} (${sub.role})`}
+                                      >
+                                        <Download className="w-3 h-3" />
+                                        <span>{sub.role === "translator" ? "Word" : "Zip"}</span>
+                                      </a>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-600 text-xs">-</span>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <div className="flex items-center justify-center gap-2">
+                                  {/* Preview */}
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewChapter(ch)}
+                                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                                    title="پیش‌نمایش چپتر"
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                  </button>
+
+                                  {/* Edit */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditChapter(ch)}
+                                    className="p-2 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 transition"
+                                    title="ویرایش چپتر"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+
+                                  {/* Delete */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteChapter(ch.id, ch.number)}
+                                    className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 transition"
+                                    title="حذف چپتر"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: ADMIN APPROVAL & AUTO DISK CLEANUP (Admin only) */}
       {activeTab === "approval" && isGlobalAdmin && (
         <div id="approval-tab-content" className="space-y-6">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
@@ -1347,6 +1808,285 @@ export default function ContributorDashboard({
                       </span>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ADD / EDIT CHAPTER */}
+      {showChapterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center">
+                  <BookOpen className="w-4 h-4" />
+                </div>
+                <h3 className="font-black text-white text-base">
+                  {editingChapter ? `ویرایش چپتر ${editingChapter.number}` : "افزودن و آپلود چپتر جدید"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowChapterModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleSaveChapterSubmit} className="p-6 overflow-y-auto space-y-4 flex-1">
+              {/* Series Select */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">انتخاب مانهوا / اثر:</label>
+                <select
+                  value={modalSeriesId}
+                  onChange={(e) => setModalSeriesId(e.target.value)}
+                  disabled={!!editingChapter}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white text-sm focus:border-purple-500 outline-none disabled:opacity-60"
+                >
+                  {userAssignedSeries.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Number and Price */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5">شماره چپتر (مثلاً 1 یا 1.5):</label>
+                  <input
+                    type="text"
+                    required
+                    value={chapterNumberInput}
+                    onChange={(e) => setChapterNumberInput(e.target.value)}
+                    placeholder="1"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white text-sm font-mono focus:border-purple-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5">قیمت چپتر (تومان - 0 برای رایگان):</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="500"
+                    value={chapterPriceInput}
+                    onChange={(e) => setChapterPriceInput(e.target.value)}
+                    placeholder="0"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white text-sm font-mono focus:border-purple-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Title */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">عنوان چپتر (اختیاری):</label>
+                <input
+                  type="text"
+                  value={chapterTitleInput}
+                  onChange={(e) => setChapterTitleInput(e.target.value)}
+                  placeholder="مثال: آغاز نبرد"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white text-sm focus:border-purple-500 outline-none"
+                />
+              </div>
+
+              {/* Page Images Upload Box */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">
+                  آپلود صفحات چپتر (تصاویر مستقیم یا فایل ZIP):
+                </label>
+                <div className="border-2 border-dashed border-slate-800 hover:border-purple-500/50 bg-slate-950/40 rounded-xl p-5 text-center transition relative">
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*,.zip,.rar"
+                    onChange={handleChapterPagesUpload}
+                    disabled={uploadingChapterPages}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full disabled:cursor-not-allowed"
+                  />
+                  {uploadingChapterPages ? (
+                    <div className="py-3 flex flex-col items-center">
+                      <RefreshCw className="w-8 h-8 text-purple-400 animate-spin mb-2" />
+                      <span className="text-xs text-purple-300 font-bold">در حال بارگذاری و بهینه‌سازی تصاویر...</span>
+                    </div>
+                  ) : (
+                    <div className="py-2 flex flex-col items-center">
+                      <UploadCloud className="w-8 h-8 text-purple-400 mb-2" />
+                      <span className="text-xs font-bold text-white mb-1">
+                        برای انتخاب یا کشیدن فایل‌ها (چندین عکس یا فایل زیپ) اینجا کلیک کنید
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        فرمت‌های مجاز: JPG, PNG, WEBP, ZIP, RAR (ترتیب تصاویر به صورت هوشمند و طبیعی مرتب خواهد شد)
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* URLs Textarea */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-400">لینک‌های صفحات (هر خط یک آدرس):</label>
+                  <span className="text-[11px] text-purple-400 font-mono">
+                    {chapterPagesText.split("\n").filter(s => s.trim()).length} صفحه درج شده
+                  </span>
+                </div>
+                <textarea
+                  rows={4}
+                  value={chapterPagesText}
+                  onChange={(e) => setChapterPagesText(e.target.value)}
+                  placeholder="https://.../page1.webp&#10;https://.../page2.webp"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white text-xs font-mono focus:border-purple-500 outline-none resize-y"
+                  dir="ltr"
+                />
+              </div>
+
+              {/* Thumbnail Strip */}
+              {chapterPagesText.split("\n").filter(s => s.trim()).length > 0 && (
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                  <span className="text-xs font-bold text-slate-400 mb-2 block">پیش‌نمایش بندانگشتی صفحات:</span>
+                  <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                    {chapterPagesText
+                      .split("\n")
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .slice(0, 15)
+                      .map((url, idx) => (
+                        <div key={idx} className="w-14 h-20 rounded-lg overflow-hidden flex-shrink-0 bg-slate-900 border border-slate-800 relative group">
+                          <img
+                            src={url}
+                            alt={`page-${idx + 1}`}
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                            onError={(e: any) => {
+                              e.target.style.display = 'none';
+                            }}
+                          />
+                          <span className="absolute bottom-0 right-0 bg-black/80 text-[10px] text-white px-1 font-mono">
+                            {idx + 1}
+                          </span>
+                        </div>
+                      ))}
+                    {chapterPagesText.split("\n").filter(s => s.trim()).length > 15 && (
+                      <div className="w-14 h-20 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-xs font-mono text-slate-400 flex-shrink-0">
+                        +{chapterPagesText.split("\n").filter(s => s.trim()).length - 15}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Status Notice */}
+              <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-300 text-xs">
+                {isGlobalAdmin ? (
+                  <span>به عنوان مدیر کل، این چپتر مستقیماً ثبت و منتشر خواهد شد.</span>
+                ) : (
+                  <span>پس از ثبت، چپتر در صف تایید مدیریت قرار گرفته و پس از بررسی منتشر خواهد شد.</span>
+                )}
+              </div>
+
+              {/* Error and Success Alerts */}
+              {chapterModalError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{chapterModalError}</span>
+                </div>
+              )}
+
+              {chapterModalSuccess && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{chapterModalSuccess}</span>
+                </div>
+              )}
+
+              {/* Modal Footer */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowChapterModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                >
+                  انصراف
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingChapter || uploadingChapterPages}
+                  className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-2 disabled:opacity-50"
+                >
+                  {savingChapter ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>در حال ذخیره...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>{editingChapter ? "ذخیره تغییرات چپتر" : "ثبت و ارسال چپتر"}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: PREVIEW CHAPTER */}
+      {previewChapter && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md overflow-hidden">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-6 py-3 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center font-mono font-bold">
+                  {previewChapter.number}
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-sm">
+                    پیش‌نمایش چپتر {previewChapter.number} {previewChapter.title ? `- ${previewChapter.title}` : ""}
+                  </h3>
+                  <span className="text-xs text-slate-400 font-mono">
+                    {Array.isArray(previewChapter.images) ? previewChapter.images.length : 1} صفحه
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewChapter(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Scrollable Reader */}
+            <div className="flex-1 overflow-y-auto bg-black p-4 space-y-2 flex flex-col items-center">
+              {Array.isArray(previewChapter.images) && previewChapter.images.length > 0 ? (
+                previewChapter.images.map((imgUrl: string, idx: number) => (
+                  <div key={idx} className="w-full max-w-xl relative flex flex-col items-center">
+                    <img
+                      src={imgUrl}
+                      alt={`Page ${idx + 1}`}
+                      className="w-full h-auto rounded shadow-lg"
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                    />
+                    <span className="text-[10px] text-slate-500 font-mono py-1">
+                      صفحه {idx + 1} از {previewChapter.images.length}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="py-20 text-center text-slate-500 text-sm">
+                  هیچ صفحه‌ای برای این چپتر ثبت نشده است.
                 </div>
               )}
             </div>

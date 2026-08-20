@@ -985,8 +985,30 @@ export default function Admin() {
     );
   }
 
-  const showSeriesTabs = isSuperAdmin || hasFrontendPermission('create_series') || hasFrontendPermission('edit_series');
-  const showChapterTabs = isSuperAdmin || hasFrontendPermission('add_chapter') || hasFrontendPermission('edit_chapter');
+  const isTranslator = profile?.role === 'translator' || userRoles.includes('translator');
+  const isCleaner = profile?.role === 'cleaner' || userRoles.includes('cleaner');
+  const thrivesAsEditor = profile?.role === 'editor' || userRoles.includes('editor');
+  const isContributorRole = isTranslator || isCleaner || thrivesAsEditor;
+  const isStaffOrAdmin = isSuperAdmin || profile?.role === 'admin' || userRoles.includes('admin') || userRoles.includes('staff');
+  const isOnlyContributor = isContributorRole && !isStaffOrAdmin;
+
+  useEffect(() => {
+    if (isOnlyContributor) {
+      if (activeTab === "dashboard" || activeTab === "manage" || activeTab === "series" || activeTab === "manage_chapters" || activeTab === "chapters") {
+        if (isTranslator) {
+          setActiveTab("translator_panel");
+        } else if (isCleaner) {
+          setActiveTab("cleaner_panel");
+        } else if (thrivesAsEditor) {
+          setActiveTab("editor_panel");
+        }
+      }
+    }
+  }, [isOnlyContributor, isTranslator, isCleaner, thrivesAsEditor, activeTab]);
+
+  const showGeneralDashboard = !isOnlyContributor;
+  const showSeriesTabs = !isOnlyContributor && (isSuperAdmin || hasFrontendPermission('create_series') || hasFrontendPermission('edit_series'));
+  const showChapterTabs = !isOnlyContributor && (isSuperAdmin || hasFrontendPermission('add_chapter') || hasFrontendPermission('edit_chapter'));
   const showUsersTab = isSuperAdmin || hasFrontendPermission('manage_users');
   const showCommentsTab = isSuperAdmin || hasFrontendPermission('delete_comment');
   const showTaxonomyTab = isSuperAdmin || hasFrontendPermission('manage_settings');
@@ -1004,12 +1026,14 @@ export default function Admin() {
         </h1>
 
         <div className="flex flex-wrap gap-4 mb-8">
-          <button
-            onClick={() => setActiveTab("dashboard")}
-            className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "dashboard" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
-          >
-            <BarChart2 size={18} /> داشبورد عمومی
-          </button>
+          {showGeneralDashboard && (
+            <button
+              onClick={() => setActiveTab("dashboard")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "dashboard" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <BarChart2 size={18} /> داشبورد عمومی
+            </button>
+          )}
 
           {showSeriesTabs && (
             <>
