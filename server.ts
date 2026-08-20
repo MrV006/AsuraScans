@@ -1015,9 +1015,65 @@ async function startServer() {
 
       const isAdmin = isSuper || (user && (user.role === 'admin' || (user.roles && (user.roles.includes('super_admin') || user.roles.includes('admin')))));
 
+      const { claimedRoles, submittingUserId, submittingUserName } = req.body;
+      const effectiveUserId = submittingUserId || uid || (user ? user.id : '');
+      const effectiveUserName = submittingUserName || (user ? user.displayName || user.email : 'همکار');
+
+      let contributorsMap: Record<string, string[]> = req.body.contributors || {};
+      if (typeof contributorsMap === 'string') {
+        try { contributorsMap = JSON.parse(contributorsMap); } catch (e) { contributorsMap = {}; }
+      }
+      if (!contributorsMap || typeof contributorsMap !== 'object') {
+        contributorsMap = {};
+      }
+
+      if (claimedRoles && typeof claimedRoles === 'object' && effectiveUserId) {
+        if (claimedRoles.editor) {
+          if (!contributorsMap['editor']) contributorsMap['editor'] = [];
+          if (!contributorsMap['editor'].includes(effectiveUserId)) contributorsMap['editor'].push(effectiveUserId);
+        }
+        if (claimedRoles.translator) {
+          if (!contributorsMap['translator']) contributorsMap['translator'] = [];
+          if (!contributorsMap['translator'].includes(effectiveUserId)) contributorsMap['translator'].push(effectiveUserId);
+        }
+        if (claimedRoles.cleaner) {
+          if (!contributorsMap['cleaner']) contributorsMap['cleaner'] = [];
+          if (!contributorsMap['cleaner'].includes(effectiveUserId)) contributorsMap['cleaner'].push(effectiveUserId);
+        }
+      }
+
+      let subs = req.body.submissions || [];
+      if (typeof subs === 'string') {
+        try { subs = JSON.parse(subs); } catch (e) { subs = []; }
+      }
+      if (!Array.isArray(subs)) subs = [];
+
+      if (claimedRoles && effectiveUserId) {
+        const rolesList = [];
+        if (claimedRoles.editor) rolesList.push("editor");
+        if (claimedRoles.translator) rolesList.push("translator");
+        if (claimedRoles.cleaner) rolesList.push("cleaner");
+
+        for (const r of rolesList) {
+          if (!subs.some((s: any) => (s.userId === effectiveUserId || s.id === effectiveUserId) && s.role === r)) {
+            subs.push({
+              id: `sub-${Date.now()}-${Math.floor(Math.random() * 100000)}-${r}`,
+              userId: effectiveUserId,
+              userName: effectiveUserName,
+              role: r,
+              fileUrl: "",
+              note: `ثبت نقش ${r === 'editor' ? 'ادیتور' : r === 'translator' ? 'مترجم' : 'کلینر'} توسط همکار`,
+              createdAt: new Date().toISOString()
+            });
+          }
+        }
+      }
+
       const chapterData = {
         ...req.body,
         seriesId: resolvedSeriesId,
+        contributors: contributorsMap,
+        submissions: subs,
         isPending: req.body.isPending !== undefined ? req.body.isPending : !isAdmin
       };
 
@@ -1544,6 +1600,17 @@ async function startServer() {
           if (!ch.contributors[r]) ch.contributors[r] = [];
           if (!ch.contributors[r].includes(userId)) {
             ch.contributors[r].push(userId);
+          }
+          if (r !== role && !submissions.some((s: any) => (s.userId === userId || s.id === userId) && s.role === r)) {
+            submissions.push({
+              id: `sub-${Date.now()}-${Math.floor(Math.random() * 100000)}-${r}`,
+              userId,
+              userName: userName || userObj?.displayName || userObj?.email || "همکار",
+              role: r,
+              fileUrl: fileUrl || "",
+              note: note ? `${note} (همزمان با نقش ${role})` : `ثبت همزمان نقش ${r === 'editor' ? 'ادیتور' : r === 'translator' ? 'مترجم' : 'کلینر'} توسط همکار`,
+              createdAt: new Date().toISOString()
+            });
           }
         }
       }

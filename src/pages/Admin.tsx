@@ -995,12 +995,12 @@ export default function Admin() {
   useEffect(() => {
     if (isOnlyContributor) {
       if (activeTab === "dashboard" || activeTab === "manage" || activeTab === "series" || activeTab === "manage_chapters" || activeTab === "chapters") {
-        if (isTranslator) {
+        if (thrivesAsEditor) {
+          setActiveTab("editor_panel");
+        } else if (isTranslator) {
           setActiveTab("translator_panel");
         } else if (isCleaner) {
           setActiveTab("cleaner_panel");
-        } else if (thrivesAsEditor) {
-          setActiveTab("editor_panel");
         }
       }
     }

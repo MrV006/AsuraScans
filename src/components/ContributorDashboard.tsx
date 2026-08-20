@@ -33,7 +33,8 @@ import {
   Plus,
   Edit,
   List,
-  ExternalLink
+  ExternalLink,
+  Coins
 } from "lucide-react";
 import { Series, Chapter } from "../lib/types";
 
@@ -89,6 +90,11 @@ export default function ContributorDashboard({
   const [savingChapter, setSavingChapter] = useState(false);
   const [previewChapter, setPreviewChapter] = useState<Chapter | null>(null);
 
+  // Claimed roles for chapter modal (revenue attribution for multiple roles)
+  const [claimedEditor, setClaimedEditor] = useState(roleMode === "editor" || roleMode === "approval");
+  const [claimedTranslator, setClaimedTranslator] = useState(roleMode === "translator");
+  const [claimedCleaner, setClaimedCleaner] = useState(roleMode === "cleaner");
+
   // Submission Form States
   const [submittingRole, setSubmittingRole] = useState<"translator" | "cleaner" | "editor">(
     roleMode === "cleaner" ? "cleaner" : roleMode === "editor" ? "editor" : "translator"
@@ -96,6 +102,7 @@ export default function ContributorDashboard({
   const [submitFile, setSubmitFile] = useState<File | null>(null);
   const [submitFileUrl, setSubmitFileUrl] = useState<string>("");
   const [submitNote, setSubmitNote] = useState<string>("");
+  const [isAlsoTranslator, setIsAlsoTranslator] = useState(false);
   const [isAlsoCleaner, setIsAlsoCleaner] = useState(false);
   const [isAlsoEditor, setIsAlsoEditor] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -339,15 +346,19 @@ export default function ContributorDashboard({
         fileUrl: submitFileUrl,
         note: submitNote.trim(),
         isAlsoCleaner,
-        isAlsoEditor
+        isAlsoEditor,
+        isAlsoTranslator
       };
 
       const res = await apiClient.post(`/api/series/${selectedSeriesId}/chapters/${selectedChapterId}/submit`, payload);
       if (res && res.id) {
-        setSubmitSuccess("کار شما با موفقیت ثبت شد و در سیستم قرار گرفت. سهم درآمدی این چپتر نیز برای شما فعال گردید.");
+        setSubmitSuccess("کار شما با موفقیت ثبت شد و در سیستم قرار گرفت. سهم درآمدی تمام نقش‌های انتخاب‌شده این چپتر برای شما فعال گردید.");
         setSubmitFile(null);
         setSubmitFileUrl("");
         setSubmitNote("");
+        setIsAlsoTranslator(false);
+        setIsAlsoCleaner(false);
+        setIsAlsoEditor(false);
         fetchMyStats();
         // Refresh chapter list
         const updated = await apiClient.getChapters(selectedSeriesId);
@@ -379,6 +390,9 @@ export default function ContributorDashboard({
     setChapterTitleInput("");
     setChapterPriceInput("0");
     setChapterPagesText("");
+    setClaimedEditor(roleMode === "editor" || roleMode === "approval");
+    setClaimedTranslator(roleMode === "translator");
+    setClaimedCleaner(roleMode === "cleaner");
     setChapterModalError("");
     setChapterModalSuccess("");
     setShowChapterModal(true);
@@ -392,6 +406,34 @@ export default function ContributorDashboard({
     setChapterTitleInput(ch.title || "");
     setChapterPriceInput(String(ch.price || 0));
     setChapterPagesText(Array.isArray(ch.images) ? ch.images.join("\n") : (ch.images || ""));
+    
+    const uid = user?.uid;
+    const email = user?.email?.toLowerCase();
+    const chContribs = ch.contributors || {};
+    const subs = ch.submissions || [];
+
+    const hasRoleInContributors = (roleKey: string) => {
+      const arr = chContribs[roleKey];
+      if (Array.isArray(arr)) {
+        return arr.some((item: any) => {
+          if (typeof item === 'string') return item === uid || (email && item.toLowerCase() === email);
+          return (item?.userId === uid || item?.id === uid) || (email && item?.email?.toLowerCase() === email);
+        });
+      }
+      return false;
+    };
+
+    const hasRoleInSubmissions = (roleKey: string) => {
+      if (Array.isArray(subs)) {
+        return subs.some((s: any) => (s.userId === uid || s.id === uid || (email && s.userEmail?.toLowerCase() === email)) && s.role === roleKey);
+      }
+      return false;
+    };
+
+    setClaimedEditor(hasRoleInContributors('editor') || hasRoleInSubmissions('editor') || roleMode === "editor");
+    setClaimedTranslator(hasRoleInContributors('translator') || hasRoleInSubmissions('translator') || roleMode === "translator");
+    setClaimedCleaner(hasRoleInContributors('cleaner') || hasRoleInSubmissions('cleaner') || roleMode === "cleaner");
+
     setChapterModalError("");
     setChapterModalSuccess("");
     setShowChapterModal(true);
@@ -468,6 +510,22 @@ export default function ContributorDashboard({
       const parsedPrice = parseInt(chapterPriceInput) || 0;
       const parsedNum = parseFloat(chapterNumberInput) || chapterNumberInput;
       
+      const contributorsMap: Record<string, string[]> = {
+        ...(editingChapter?.contributors || {})
+      };
+      
+      const claimedRolesList: string[] = [];
+      if (claimedEditor) claimedRolesList.push("editor");
+      if (claimedTranslator) claimedRolesList.push("translator");
+      if (claimedCleaner) claimedRolesList.push("cleaner");
+
+      for (const roleKey of claimedRolesList) {
+        if (!contributorsMap[roleKey]) contributorsMap[roleKey] = [];
+        if (user?.uid && !contributorsMap[roleKey].includes(user.uid)) {
+          contributorsMap[roleKey].push(user.uid);
+        }
+      }
+
       const chapterData: any = {
         ...(editingChapter || {}),
         id: editingChapter?.id || `${modalSeriesId}-ch-${chapterNumberInput.trim()}`,
@@ -475,6 +533,14 @@ export default function ContributorDashboard({
         title: chapterTitleInput.trim(),
         price: parsedPrice,
         images: pages,
+        contributors: contributorsMap,
+        claimedRoles: {
+          editor: claimedEditor,
+          translator: claimedTranslator,
+          cleaner: claimedCleaner
+        },
+        submittingUserId: user?.uid,
+        submittingUserName: profile?.displayName || user?.email || "همکار",
         // Contributors default to pending approval unless global admin
         isPending: isGlobalAdmin ? (editingChapter?.isPending ?? false) : true,
         createdAt: editingChapter?.createdAt || new Date().toISOString()
@@ -1236,6 +1302,72 @@ export default function ContributorDashboard({
                 )}
               </div>
 
+              {/* Multi-role revenue attribution checkboxes */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-5 space-y-3">
+                <label className="text-xs font-black text-amber-300 flex items-center gap-2">
+                  <Coins className="w-4 h-4 text-amber-400" />
+                  ثبت همزمان نقش‌های چندگانه (اختصاص درآمد تمام نقش‌های انتخاب‌شده به شما):
+                </label>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  اگر علاوه بر ارسال اصلی، وظایف دیگری را نیز برای این چپتر شخصاً انجام داده‌اید (مثلاً هم کلینر بوده‌اید و هم مترجم یا ادیتور)، تیک آن‌ها را فعال کنید تا درصد سود آن نقش‌ها نیز برای این چپتر در پنل و کیف پول شما محاسبه و واریز شود:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                  <label className={`flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer transition select-none ${
+                    isAlsoEditor || submittingRole === "editor"
+                      ? "bg-blue-500/15 border-blue-500/50 text-white"
+                      : "bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-850"
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={isAlsoEditor || submittingRole === "editor"}
+                      disabled={submittingRole === "editor"}
+                      onChange={(e) => setIsAlsoEditor(e.target.checked)}
+                      className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-white">نقش ادیتور / تایپیست</span>
+                      <span className="text-[10px] text-slate-400">ادیت و جاگذاری متن</span>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer transition select-none ${
+                    isAlsoTranslator || submittingRole === "translator"
+                      ? "bg-emerald-500/15 border-emerald-500/50 text-white"
+                      : "bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-850"
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={isAlsoTranslator || submittingRole === "translator"}
+                      disabled={submittingRole === "translator"}
+                      onChange={(e) => setIsAlsoTranslator(e.target.checked)}
+                      className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-white">نقش مترجم</span>
+                      <span className="text-[10px] text-slate-400">ترجمه متن به فارسی</span>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer transition select-none ${
+                    isAlsoCleaner || submittingRole === "cleaner"
+                      ? "bg-amber-500/15 border-amber-500/50 text-white"
+                      : "bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-850"
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={isAlsoCleaner || submittingRole === "cleaner"}
+                      disabled={submittingRole === "cleaner"}
+                      onChange={(e) => setIsAlsoCleaner(e.target.checked)}
+                      className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-white">نقش کلینر</span>
+                      <span className="text-[10px] text-slate-400">تمیزکاری و حذف متون خام</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
               {/* Step 5: Notes */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-2">
@@ -1982,6 +2114,66 @@ export default function ContributorDashboard({
                   </div>
                 </div>
               )}
+
+              {/* Role Attribution & Revenue Claiming Checkboxes */}
+              <div className="bg-slate-950/80 border border-purple-500/30 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-purple-300 flex items-center gap-2">
+                    <Coins className="w-4 h-4 text-purple-400" />
+                    انتساب نقش‌های این چپتر به من (تقسیم سود و درآمد):
+                  </label>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  اگر علاوه بر ادیت نهایی، نقش‌های دیگری (ترجمه یا کلین) را نیز برای این چپتر شخصاً انجام داده‌اید، تیک آن‌ها را فعال کنید تا سهم درآمد و درصد سود آن نقش‌ها برای فروش این چپتر به شما تعلق گیرد.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  <label className={`flex items-center gap-2.5 p-3 rounded-xl border cursor-pointer transition select-none ${
+                    claimedEditor ? 'bg-blue-500/15 border-blue-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-850'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={claimedEditor}
+                      onChange={(e) => setClaimedEditor(e.target.checked)}
+                      className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold">نقش ادیتور / تایپ</span>
+                      <span className="text-[10px] text-slate-400">تایپ و ادیت صفحات</span>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-center gap-2.5 p-3 rounded-xl border cursor-pointer transition select-none ${
+                    claimedTranslator ? 'bg-emerald-500/15 border-emerald-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-850'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={claimedTranslator}
+                      onChange={(e) => setClaimedTranslator(e.target.checked)}
+                      className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold">نقش مترجم</span>
+                      <span className="text-[10px] text-slate-400">ترجمه متن چپتر</span>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-center gap-2.5 p-3 rounded-xl border cursor-pointer transition select-none ${
+                    claimedCleaner ? 'bg-amber-500/15 border-amber-500/50 text-white' : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-850'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={claimedCleaner}
+                      onChange={(e) => setClaimedCleaner(e.target.checked)}
+                      className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold">نقش کلینر</span>
+                      <span className="text-[10px] text-slate-400">پاکسازی تصاویر</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
 
               {/* Status Notice */}
               <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-300 text-xs">
