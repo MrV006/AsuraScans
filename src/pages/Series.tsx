@@ -658,14 +658,26 @@ export default function Series() {
             {seriesTab === 'chapters' && (
               <div>
                 {settings?.globalFreeMode && (
-                  <div className="mb-4 p-3.5 bg-gradient-to-r from-emerald-950/80 via-emerald-900/40 to-emerald-950/80 border border-emerald-500/30 rounded-xl flex items-center justify-between gap-3 text-emerald-300 text-xs font-bold shadow-lg shadow-emerald-950/30 animate-fade-in">
+                  <div className="mb-4 p-3.5 bg-gradient-to-r from-emerald-950/80 via-emerald-900/40 to-emerald-950/80 border border-emerald-500/30 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-emerald-300 text-xs font-bold shadow-lg shadow-emerald-950/30 animate-fade-in">
                     <div className="flex items-center gap-2">
                       <Sparkles size={16} className="text-emerald-400 shrink-0 animate-pulse" />
-                      <span>{settings.globalFreeBannerText || '🎉 جشنواره دسترسی رایگان سراسری فعال است! تمامی چپترها برای همه کاربران رایگان شده است.'}</span>
+                      <span>
+                        {settings.globalFreeBannerText || '🎉 جشنواره دسترسی رایگان سراسری فعال است!'}
+                        {!user && ' (جهت مطالعه رایگان کافیست وارد حساب کاربری خود شوید یا ثبت‌نام کنید)'}
+                      </span>
                     </div>
-                    <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2.5 py-1 rounded-full shrink-0 border border-emerald-500/30">
-                      دسترسی رایگان
-                    </span>
+                    {!user ? (
+                      <Link
+                        to="/profile"
+                        className="bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-black px-3 py-1 rounded-lg shrink-0 transition-colors shadow"
+                      >
+                        ورود / ثبت‌نام رایگان
+                      </Link>
+                    ) : (
+                      <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2.5 py-1 rounded-full shrink-0 border border-emerald-500/30">
+                        دسترسی رایگان برای شما فعال است
+                      </span>
+                    )}
                   </div>
                 )}
 

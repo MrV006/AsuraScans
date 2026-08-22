@@ -207,13 +207,13 @@ export default function FreeModeTab({ adminUid }: FreeModeTabProps) {
 
             <h3 className="text-xl md:text-2xl font-black text-white">
               {isEnabled
-                ? "تمامی چپترها برای همه کاربران رایگان است"
+                ? "تمامی چپترها برای اعضای ثبت‌نام‌شده سایت کاملاً رایگان است"
                 : "سیستم فروش و خرید چپترها در حالت استاندارد است"}
             </h3>
 
             <p className="text-sm text-zinc-300 leading-relaxed">
               {isEnabled
-                ? "در این حالت هر کاربری که وارد سایت شود یا روی هر چپتری کلیک کند، می‌تواند بدون پرداخت هیچ هزینه‌ای و بدون کسر از کیف پول آن را مطالعه نماید. هیچ رکوردی در جدول خریدها ثبت نمی‌شود و هیچ سودی بین دست‌اندرکاران توزیع نمی‌گردد."
+                ? "در این حالت تنها شرط مطالعه رایگان تمامی چپترها، ورود یا ثبت‌نام در وب‌سایت است. هر کاربری که وارد حساب خود شده باشد بدون پرداخت هیچ هزینه‌ای و بدون کسر از کیف پول چپترها را می‌خواند. کاربران مهمان با صفحه ترغیب به ثبت‌نام/ورود برای مطالعه رایگان روبرو خواهند شد."
                 : "در این حالت کاربران برای باز کردن چپترهای غیررایگان باید ۴۰۰ تومان از موجودی کیف پول خود پرداخت کنند. به ازای هر خرید، درصد سهم مترجم، ادیتور، کلینر و مدیر سایت طبق تنظیمات به حساب آن‌ها واریز می‌شود."}
             </p>
           </div>
@@ -251,7 +251,7 @@ export default function FreeModeTab({ adminUid }: FreeModeTabProps) {
             <span className="text-[11px] text-zinc-400 font-bold">
               {isEnabled
                 ? "برای بازگرداندن به حالت پولی عادی کلیک کنید"
-                : "برای رایگان شدن کل چپترها برای همه کلیک کنید"}
+                : "برای رایگان شدن کل چپترها برای اعضا کلیک کنید"}
             </span>
           </div>
         </div>
@@ -272,7 +272,19 @@ export default function FreeModeTab({ adminUid }: FreeModeTabProps) {
             <li className="flex items-start gap-2">
               <Check size={16} className="text-emerald-400 shrink-0 mt-0.5" />
               <span>
-                <strong>مطالعه نامحدود:</strong> تمام کاربران و بازدیدکنندگان می‌توانند هر چند بار که بخواهند تمام چپترها را بدون پرداخت مطالعه کنند.
+                <strong>تنها شرط دسترسی رایگان:</strong> کاربر باید وارد حساب کاربری خود شده یا ثبت‌نام کرده باشد.
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check size={16} className="text-emerald-400 shrink-0 mt-0.5" />
+              <span>
+                <strong>کاربران مهمان (خارج از حساب):</strong> با صفحه جذاب درخواست ورود یا ثبت‌نام مواجه می‌شوند تا پس از ورود بلافاصله رایگان بخوانند.
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check size={16} className="text-emerald-400 shrink-0 mt-0.5" />
+              <span>
+                <strong>مطالعه نامحدود برای کاربران:</strong> اعضای وارد شده می‌توانند بدون پرداخت وجه، تمام چپترها را بدون محدودیت بخوانند.
               </span>
             </li>
             <li className="flex items-start gap-2">
@@ -284,13 +296,7 @@ export default function FreeModeTab({ adminUid }: FreeModeTabProps) {
             <li className="flex items-start gap-2">
               <Check size={16} className="text-emerald-400 shrink-0 mt-0.5" />
               <span>
-                <strong>عدم کسر وجه:</strong> موجودی کیف پول کاربران صفر تومان کسر می‌شود و هیچ تراکنشی ثبت نمی‌گردد.
-              </span>
-            </li>
-            <li className="flex items-start gap-2">
-              <Check size={16} className="text-emerald-400 shrink-0 mt-0.5" />
-              <span>
-                <strong>عدم توزیع سود:</strong> از آنجا که خریدی صورت نگرفته، پولی هم بین مترجم، ادیتور، کلینر یا وب‌سایت پخش نخواهد شد.
+                <strong>عدم کسر وجه و عدم توزیع سود:</strong> موجودی کاربران دست‌نخورده می‌ماند و پولی توزیع نمی‌شود.
               </span>
             </li>
           </ul>

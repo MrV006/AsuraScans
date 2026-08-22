@@ -519,11 +519,8 @@ export default function Reader() {
   useEffect(() => {
     if (!user) {
       setDbUser(null);
-      if (settings?.globalFreeMode) {
-        setIsPurchased(true);
-      } else {
-        setIsPurchased(false);
-      }
+      // When user is not logged in, they must log in to get free access or purchase
+      setIsPurchased(false);
       setCheckingPurchase(false);
       return;
     }
@@ -564,6 +561,7 @@ export default function Reader() {
         const isGlobalFree = !!settings?.globalFreeMode || !!pResult?.isGlobalFree || !!pResult?.freeAccess;
         const bypass = !isSimulatingUser && (isSuperAdminOrStaff || hasBypassPermission || isContributor);
 
+        // When logged in: Global free mode grants instant free access
         if (bypass || isGlobalFree || pResult?.purchased) {
           setIsPurchased(true);
         } else {
@@ -671,6 +669,70 @@ export default function Reader() {
 
   // If chapter is locked
   if (!isPurchased) {
+    // If Global Free Mode is active, the ONLY requirement is logging in or registering!
+    if (settings?.globalFreeMode && !user) {
+      return (
+        <div className="bg-[#0a0a0c] min-h-screen text-zinc-300 flex flex-col justify-center items-center px-4 py-12" dir="rtl">
+          <div className="max-w-md w-full bg-[#111217] border border-emerald-500/30 rounded-3xl p-8 text-center shadow-2xl shadow-emerald-950/40 relative overflow-hidden animate-fade-in">
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-48 bg-emerald-500/15 blur-3xl rounded-full -z-10"></div>
+            
+            <div className="w-18 h-18 bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/40 rounded-3xl flex items-center justify-center mx-auto mb-6 text-emerald-400 shadow-lg shadow-emerald-950/50">
+              <Sparkles size={32} className="animate-pulse" />
+            </div>
+
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-black mb-3">
+              <span>🎉 جشنواره دسترسی رایگان سراسری</span>
+            </div>
+
+            <h2 className="text-xl md:text-2xl font-black text-white mb-3 font-sans">
+              مطالعه کاملاً رایگان چپتر {chapter?.number}
+            </h2>
+            
+            <p className="text-sm text-zinc-300 leading-relaxed mb-6">
+              تمامی چپترهای اثر <span className="text-emerald-400 font-black">{series?.title}</span> و کل وب‌سایت هم‌اکنون به صورت <span className="text-white font-bold underline decoration-emerald-500 decoration-2">کاملاً رایگان</span> در دسترس قرار دارند.
+            </p>
+
+            <div className="bg-emerald-950/40 border border-emerald-500/20 rounded-2xl p-4 mb-6 text-right space-y-2.5">
+              <div className="text-xs font-black text-emerald-300 flex items-center gap-1.5 border-b border-emerald-500/20 pb-2">
+                <Check size={14} className="text-emerald-400" />
+                <span>تنها شرط مطالعه رایگان: ورود یا ثبت‌نام در سایت</span>
+              </div>
+              <ul className="text-[11px] text-zinc-300 space-y-1.5 pr-1">
+                <li className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+                  <span>بدون نیاز به پرداخت هیچ هزینه‌ای یا شارژ کیف پول</span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+                  <span>دسترسی آنی بلافاصله پس از ورود به حساب کاربری</span>
+                </li>
+                <li className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+                  <span>ثبت‌نام سریع در کمتر از ۳۰ ثانیه</span>
+                </li>
+              </ul>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <Link
+                to="/profile"
+                className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-black font-black text-sm rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <span>ورود یا ثبت‌نام برای مطالعه رایگان</span>
+              </Link>
+
+              <Link
+                to={`/series/${series?.id || seriesId || ''}`}
+                className="w-full py-3 px-4 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white font-black text-xs rounded-xl transition-all border border-white/5 text-center"
+              >
+                بازگشت به صفحه مانهوا
+              </Link>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="bg-[#0a0a0c] min-h-screen text-zinc-300 flex flex-col justify-center items-center px-4 py-12" dir="rtl">
         <div className="max-w-md w-full bg-[#111217] border border-white/5 rounded-2xl p-8 text-center shadow-2xl relative overflow-hidden animate-fade-in">
