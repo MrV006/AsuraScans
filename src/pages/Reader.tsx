@@ -400,9 +400,9 @@ export default function Reader() {
     }
     const targetId = seriesId || series?.id || series?.slug;
     if (targetId && targetId !== 'undefined') {
-      window.location.replace(`/series/${targetId}`);
+      navigate(`/series/${targetId}`);
     } else {
-      window.location.replace('/');
+      navigate('/');
     }
   };
 
@@ -411,26 +411,8 @@ export default function Reader() {
       e.preventDefault();
       e.stopPropagation();
     }
-    window.location.replace('/');
+    navigate('/');
   };
-
-  // Hardware Back button (popstate) trap for mobile devices
-  useEffect(() => {
-    // Intercept back button so pressing back on device smoothly lands on series page or home without reader history loop
-    const handlePopState = () => {
-      const targetId = seriesId || series?.id || series?.slug;
-      if (targetId && targetId !== 'undefined') {
-        window.location.replace(`/series/${targetId}`);
-      } else {
-        window.location.replace('/');
-      }
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-    };
-  }, [seriesId, series?.id, series?.slug]);
 
   // Reset scroll position and page index on chapter or series change
   useEffect(() => {
@@ -756,7 +738,7 @@ export default function Reader() {
                 )}
 
                 <Link
-                  to={`/series/${series.id}`}
+                  to={`/series/${series?.id || seriesId || ''}`}
                   className="w-full py-3 px-4 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white font-black text-xs rounded-xl transition-all border border-white/5 text-center"
                 >
                   بازگشت به صفحه مانهوا
@@ -1119,7 +1101,7 @@ export default function Reader() {
           
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full">
             {prevChapter ? (
-              <Link to={`/reader/${series.id}/${prevChapter.id}`} className="w-full sm:w-auto px-6 py-2.5 bg-white/5 hover:bg-white/10 border border-white/5 text-white rounded-lg font-bold text-sm uppercase flex items-center justify-center gap-2 transition-colors">
+              <Link to={`/reader/${series?.id || seriesId}/${prevChapter.id}`} className="w-full sm:w-auto px-6 py-2.5 bg-white/5 hover:bg-white/10 border border-white/5 text-white rounded-lg font-bold text-sm uppercase flex items-center justify-center gap-2 transition-colors">
                 <ChevronLeft size={16} />
                 Prev Ch.
               </Link>
@@ -1139,7 +1121,7 @@ export default function Reader() {
             </button>
 
             {nextChapter ? (
-              <Link to={`/reader/${series.id}/${nextChapter.id}`} className="w-full sm:w-auto px-6 py-2.5 bg-white text-black hover:bg-zinc-200 rounded-lg font-bold text-sm uppercase flex items-center justify-center gap-2 transition-colors shadow">
+              <Link to={`/reader/${series?.id || seriesId}/${nextChapter.id}`} className="w-full sm:w-auto px-6 py-2.5 bg-white text-black hover:bg-zinc-200 rounded-lg font-bold text-sm uppercase flex items-center justify-center gap-2 transition-colors shadow">
                 Next Ch.
                 <ChevronRight size={16} />
               </Link>

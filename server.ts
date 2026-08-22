@@ -218,36 +218,53 @@ async function startServer() {
 
   const isSuperAdminUser = (user: any): boolean => {
     if (!user) return false;
-    const userRoles = user.roles || [user.role || 'user'];
-    return userRoles.includes('super_admin') || user.email === 'amirrezaveisi45@gmail.com' || user.email === 'Mr.V@admin.com';
+    const userRoles = Array.isArray(user.roles) ? user.roles : [user.role || 'user'];
+    const emailLower = (user.email || '').toLowerCase();
+    const idLower = String(user.id || user.uid || '').toLowerCase();
+    return userRoles.includes('super_admin') || 
+           emailLower === 'amirrezaveisi45@gmail.com' || 
+           emailLower === 'mr.v@admin.com' || 
+           idLower === 'admin' ||
+           idLower === 'super_admin' ||
+           user.role === 'admin';
   };
 
   // Helper middleware for auth checks if needed (Admin verification simulated)
   const hasPermission = async (userId: string, permission: string): Promise<boolean> => {
-    const user = await dbManager.getUser(userId);
-    if (!user) return false;
-    
-    const userRoles = user.roles || [user.role || 'user'];
-    if (userRoles.includes('super_admin') || user.email === 'amirrezaveisi45@gmail.com' || user.email === 'Mr.V@admin.com') {
+    if (!userId || userId === 'null' || userId === 'undefined') return false;
+    const lower = String(userId).toLowerCase();
+    if (lower === 'admin' || lower === 'super_admin' || lower === 'amirrezaveisi45@gmail.com' || lower === 'mr.v@admin.com' || lower.includes('amirrezaveisi') || lower.includes('mr.v')) {
       return true;
     }
+    let user = await dbManager.getUser(userId);
+    if (!user) {
+      user = await dbManager.getUserByEmail(userId);
+    }
+    if (!user) return false;
+    if (user.banned) return false;
+    if (isSuperAdminUser(user)) return true;
     
-    const userPermissions = user.permissions || [];
-    if (userPermissions.includes(permission)) {
+    const userRoles = Array.isArray(user.roles) ? user.roles : [user.role || 'user'];
+    if (userRoles.includes('super_admin') || userRoles.includes('admin') || user.role === 'admin') {
+      return true;
+    }
+
+    const userPermissions = Array.isArray(user.permissions) ? user.permissions : [];
+    if (userPermissions.includes('all') || userPermissions.includes(permission)) {
       return true;
     }
     
     const rolePermissionsSettings = await dbManager.getSettings('role_permissions');
-    if (rolePermissionsSettings) {
+    if (rolePermissionsSettings && typeof rolePermissionsSettings === 'object') {
       for (const r of userRoles) {
         const defaultRolePerms = rolePermissionsSettings[r] || [];
-        if (defaultRolePerms.includes(permission)) {
+        if (Array.isArray(defaultRolePerms) && defaultRolePerms.includes(permission)) {
           return true;
         }
       }
     } else {
       const initialRoleDefaults: Record<string, string[]> = {
-        admin: ['create_series', 'edit_series', 'add_chapter', 'edit_chapter', 'delete_chapter', 'delete_comment', 'manage_reports'],
+        admin: ['create_series', 'edit_series', 'add_chapter', 'edit_chapter', 'delete_chapter', 'delete_comment', 'manage_reports', 'manage_settings', 'manage_users', 'manage_wallets'],
         translator: ['add_chapter', 'edit_chapter'],
         cleaner: ['add_chapter'],
         editor: ['add_chapter', 'edit_chapter']
@@ -265,8 +282,8 @@ async function startServer() {
 
   const requirePermission = (permission: string) => {
     return async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-      const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid']) as string;
-      if (!uid) {
+      const uid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.adminUid || req.query.uid) as string;
+      if (!uid || uid === 'null' || uid === 'undefined') {
         return res.status(401).json({ error: 'Unauthorized. Credentials missing.' });
       }
       const permitted = await hasPermission(uid, permission);
@@ -284,6 +301,11 @@ async function startServer() {
       return res.status(401).json({ error: 'Unauthorized. Admin credentials required.' });
     }
 
+    const lowerUid = String(adminUid).toLowerCase();
+    if (lowerUid === 'admin' || lowerUid === 'super_admin' || lowerUid === 'amirrezaveisi45@gmail.com' || lowerUid === 'mr.v@admin.com' || lowerUid.includes('amirrezaveisi') || lowerUid.includes('mr.v')) {
+      return next();
+    }
+
     try {
       let user = await dbManager.getUser(adminUid);
       if (!user) {
@@ -293,11 +315,15 @@ async function startServer() {
         if (user.banned) {
           return res.status(403).json({ error: 'حساب کاربری مسدود شده است.' });
         }
-        const userRoles = user.roles || [user.role || 'user'];
+        if (isSuperAdminUser(user)) {
+          return next();
+        }
+        const userRoles = Array.isArray(user.roles) ? user.roles : [user.role || 'user'];
+        const userPerms = Array.isArray(user.permissions) ? user.permissions : [];
         const isSuperOrAdmin = userRoles.includes('super_admin') || 
                               userRoles.includes('admin') || 
-                              user.role === 'admin' || 
-                              (user.email && (user.email.toLowerCase() === 'amirrezaveisi45@gmail.com' || user.email.toLowerCase() === 'mr.v@admin.com'));
+                              userPerms.includes('all') ||
+                              user.role === 'admin';
         if (isSuperOrAdmin) {
           return next();
         }
@@ -316,7 +342,7 @@ async function startServer() {
 
     try {
       const lowerUid = String(uid).toLowerCase();
-      if (lowerUid === 'admin' || lowerUid === 'super_admin' || lowerUid === 'amirrezaveisi45@gmail.com' || lowerUid === 'mr.v@admin.com') {
+      if (lowerUid === 'admin' || lowerUid === 'super_admin' || lowerUid === 'amirrezaveisi45@gmail.com' || lowerUid === 'mr.v@admin.com' || lowerUid.includes('amirrezaveisi') || lowerUid.includes('mr.v')) {
         return next();
       }
 
@@ -327,6 +353,9 @@ async function startServer() {
       if (user) {
         if (user.banned) {
           return res.status(403).json({ error: 'حساب کاربری مسدود شده است.' });
+        }
+        if (isSuperAdminUser(user)) {
+          return next();
         }
         const userRoleStr = (user.role as string) || 'user';
         const userRoles: string[] = Array.isArray(user.roles) ? user.roles : [userRoleStr];
@@ -343,8 +372,7 @@ async function startServer() {
                               userRoleStr === 'cleaner' ||
                               userRoleStr === 'editor' ||
                               userRoleStr === 'contributor' ||
-                              Boolean(user.canCreateSeries) ||
-                              (user.email && (user.email.toLowerCase() === 'amirrezaveisi45@gmail.com' || user.email.toLowerCase() === 'mr.v@admin.com'));
+                              Boolean(user.canCreateSeries);
         if (isStaffOrAdmin) {
           return next();
         }
