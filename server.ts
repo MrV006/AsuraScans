@@ -2092,6 +2092,52 @@ async function startServer() {
   // -----------------------------------------------------------------
   // 7. PUBLIC & GLOBAL SETTINGS API
   // -----------------------------------------------------------------
+  app.get("/api/settings/global-free-mode", async (req, res) => {
+    try {
+      const globalSettings = await dbManager.getSettings('global');
+      const enabled = !!(globalSettings && globalSettings.globalFreeMode);
+      const bannerText = globalSettings?.globalFreeBannerText || "🎉 دسترسی رایگان سراسری به تمام چپترها برای همه کاربران فعال است.";
+      res.json({ enabled, bannerText });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/settings/global-free-mode", requireAdmin, async (req, res) => {
+    try {
+      const isSuper = await checkSuperAdminPerm(req);
+      if (!isSuper) {
+        return res.status(403).json({ error: "تنها مدیریت کل مجاز به فعال یا غیرفعال‌سازی حالت رایگان سراسری می‌باشد." });
+      }
+
+      const { enabled, bannerText } = req.body;
+      const currentGlobal = (await dbManager.getSettings('global')) || {};
+      const updatedGlobal = {
+        ...currentGlobal,
+        globalFreeMode: !!enabled,
+        ...(bannerText !== undefined ? { globalFreeBannerText: bannerText } : {})
+      };
+
+      await dbManager.saveSettings('global', updatedGlobal);
+
+      // Broadcast in real-time to all connected users
+      io.emit("settings:updated", { settingsId: 'global' });
+      io.emit("settings:global_free_mode_updated", { enabled: !!enabled, bannerText: updatedGlobal.globalFreeBannerText });
+      io.emit("global_free_mode:updated", { enabled: !!enabled });
+
+      res.json({
+        success: true,
+        enabled: !!enabled,
+        bannerText: updatedGlobal.globalFreeBannerText,
+        message: enabled 
+          ? "حالت رایگان سراسری با موفقیت فعال شد. تمام کاربران اکنون می‌توانند چپترها را رایگان مطالعه کنند."
+          : "حالت رایگان سراسری غیرفعال شد و سیستم پرداخت به حالت عادی بازگشت."
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/settings/:id", async (req, res) => {
     try {
       const set = await dbManager.getSettings(req.params.id);
@@ -3743,8 +3789,16 @@ async function startServer() {
     try {
       const { userId, seriesId, chapterId } = req.params;
       const resolved = await resolveSeriesAndChapter(seriesId, chapterId);
+
+      const globalSettings = await dbManager.getSettings('global');
+      const isGlobalFree = !!(globalSettings && globalSettings.globalFreeMode);
+
       const purchased = await dbManager.hasPurchasedChapter(userId, resolved.seriesId, resolved.chapterId);
-      res.json({ purchased });
+      res.json({ 
+        purchased, 
+        isGlobalFree, 
+        freeAccess: isGlobalFree || purchased 
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

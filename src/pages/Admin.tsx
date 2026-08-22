@@ -32,7 +32,8 @@ import {
   Users,
   FileText,
   FileArchive,
-  ShieldCheck
+  ShieldCheck,
+  Gift
 } from "lucide-react";
 import { Series } from "../lib/types";
 import CooperationTab from "../components/CooperationTab";
@@ -43,6 +44,8 @@ import RevenueTab from "../components/RevenueTab";
 import DownloadHostTab from "../components/DownloadHostTab";
 import TicketsTab from "../components/TicketsTab";
 import StorageCleanupTab from "../components/StorageCleanupTab";
+import FreeModeTab from "../components/FreeModeTab";
+import { useSettings } from "../contexts/SettingsContext";
 
 import { ImageUploader } from "../components/ImageUploader";
 import { SortableImageList } from "../components/SortableImageList";
@@ -85,6 +88,7 @@ const ALL_ROLES = [
 
 export default function Admin() {
   const { user, profile, loading, isSimulatingUser, setIsSimulatingUser, login, register } = useAuth();
+  const { settings, reloadSettings } = useSettings();
   const [isAdmin, setIsAdmin] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [editingSeries, setEditingSeries] = useState<Series | null>(null);
@@ -1191,6 +1195,26 @@ export default function Admin() {
 
           {isSuperAdmin && (
             <button
+              id="admin-tab-free-mode"
+              onClick={() => setActiveTab("free_mode")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-all ${
+                activeTab === "free_mode"
+                  ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/30"
+                  : settings?.globalFreeMode
+                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 animate-pulse"
+                  : "bg-white/5 text-zinc-400 hover:text-white"
+              }`}
+            >
+              <Gift size={18} />
+              <span>دسترسی رایگان سراسری</span>
+              {settings?.globalFreeMode && (
+                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              )}
+            </button>
+          )}
+
+          {isSuperAdmin && (
+            <button
               onClick={() => setActiveTab("revenue")}
               className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "revenue" ? "bg-[var(--color-asura-accent)] text-white" : "bg-white/5 text-zinc-400 hover:text-white"}`}
             >
@@ -1414,6 +1438,78 @@ export default function Admin() {
                   </div>
                 )}
               </div>
+
+              {/* Quick Free Mode Controller Card on Dashboard */}
+              {isSuperAdmin && (
+                <div
+                  className={`p-5 rounded-2xl border transition-all flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-right ${
+                    settings?.globalFreeMode
+                      ? "bg-gradient-to-r from-emerald-950/60 via-emerald-900/30 to-emerald-950/60 border-emerald-500/40 shadow-lg shadow-emerald-950/40"
+                      : "bg-black/30 border-white/10"
+                  }`}
+                  dir="rtl"
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`p-3 rounded-xl border ${
+                        settings?.globalFreeMode
+                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                          : "bg-white/5 text-zinc-400 border-white/10"
+                      }`}
+                    >
+                      <Gift size={22} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-black text-white">
+                          وضعیت دسترسی رایگان سراسری چپترها
+                        </h3>
+                        <span
+                          className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                            settings?.globalFreeMode
+                              ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30 animate-pulse"
+                              : "bg-zinc-800 text-zinc-400 border-zinc-700"
+                          }`}
+                        >
+                          {settings?.globalFreeMode ? "فعال (مطالعه رایگان برای همه)" : "غیرفعال (حالت پولی عادی)"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-400 mt-0.5">
+                        {settings?.globalFreeMode
+                          ? "تمامی کاربران بدون پرداخت و بدون ثبت خرید چپترها را می‌خوانند و پولی بین دست‌اندرکاران توزیع نمی‌شود."
+                          : "خرید با کیف پول (۴۰۰ تومان) فعال است و سهم مترجم، ادیتور، کلینر و سایت طبق درصدها توزیع می‌شود."}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+                    <button
+                      onClick={() => setActiveTab("free_mode")}
+                      className="px-4 py-2 bg-white/10 hover:bg-white/15 text-white text-xs font-bold rounded-xl transition-colors shrink-0"
+                    >
+                      تنظیمات پیشرفته و پیام
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const nextState = !settings?.globalFreeMode;
+                        try {
+                          await apiClient.toggleGlobalFreeMode(nextState, undefined, user?.uid);
+                          if (reloadSettings) await reloadSettings();
+                        } catch (err: any) {
+                          alert(err.message || 'خطا در تغییر وضعیت');
+                        }
+                      }}
+                      className={`px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 shadow flex items-center gap-1.5 ${
+                        settings?.globalFreeMode
+                          ? "bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30"
+                          : "bg-emerald-500 hover:bg-emerald-600 text-black font-black"
+                      }`}
+                    >
+                      {settings?.globalFreeMode ? "خاموش کردن حالت رایگان" : "روشن کردن حالت رایگان"}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-black/40 border border-white/10 rounded-xl p-6 flex items-center gap-4">
@@ -4258,6 +4354,10 @@ export default function Admin() {
                 })}
               </div>
             </div>
+          )}
+
+          {activeTab === "free_mode" && isSuperAdmin && (
+            <FreeModeTab adminUid={user?.uid} />
           )}
 
           {activeTab === "revenue" && isSuperAdmin && (

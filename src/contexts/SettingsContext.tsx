@@ -43,10 +43,14 @@ export interface SiteSettings {
   backgroundColor?: string;
   cardColor?: string;
   siteFont?: string;
+  globalFreeMode?: boolean;
+  globalFreeBannerText?: string;
 }
 
 const defaultSettings: SiteSettings = {
   maintenanceMode: false,
+  globalFreeMode: false,
+  globalFreeBannerText: "🎉 دسترسی رایگان سراسری به تمام چپترها برای همه کاربران فعال است.",
   maintenanceTitleFa: "سایت در حال بروزرسانی و ارتقا می‌باشد",
   maintenanceDescFa: "ما در حال ارتقای سرورها و افزودن امکانات جدید هستیم. لطفاً شکیبا باشید و به‌زودی دوباره سر بزنید.",
   maintenanceTitleEn: "Website Under Maintenance",
@@ -272,9 +276,13 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
     const socket = getSocketInstance();
     socket.on("settings:updated", fetchSettingsAndTaxonomy);
+    socket.on("settings:global_free_mode_updated", fetchSettingsAndTaxonomy);
+    socket.on("global_free_mode:updated", fetchSettingsAndTaxonomy);
 
     return () => {
       socket.off("settings:updated", fetchSettingsAndTaxonomy);
+      socket.off("settings:global_free_mode_updated", fetchSettingsAndTaxonomy);
+      socket.off("global_free_mode:updated", fetchSettingsAndTaxonomy);
     };
   }, []);
 

@@ -448,6 +448,25 @@ export const apiClient = {
     return res.json();
   },
 
+  async getGlobalFreeMode() {
+    const res = await fetch(`${API_URL}/api/settings/global-free-mode`, { headers: this.getHeaders() });
+    if (!res.ok) return { enabled: false };
+    return res.json();
+  },
+
+  async toggleGlobalFreeMode(enabled: boolean, bannerText?: string, adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/admin/settings/global-free-mode`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify({ enabled, bannerText })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'خطا در تغییر وضعیت حالت رایگان سراسری');
+    }
+    return res.json();
+  },
+
   // ADMIN HELPER METHODS
   async getAdminStats(adminUid: string) {
     const res = await fetch(`${API_URL}/api/admin/stats`, {

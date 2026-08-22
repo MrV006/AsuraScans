@@ -5,7 +5,7 @@ import { useBookmarks, useHistory } from '../hooks/useUserActivity';
 import { useRatings } from '../hooks/useRatings';
 import { useAuth } from '../contexts/AuthContext';
 import { Layout } from '../components/Layout';
-import { Star, Clock, Heart, Play, Edit2, Trash2, Check, X, ShieldAlert, UserCheck, Plus, Settings, BookOpen, Users, MessageSquare, UserPlus } from 'lucide-react';
+import { Star, Clock, Heart, Play, Edit2, Trash2, Check, X, ShieldAlert, UserCheck, Plus, Settings, BookOpen, Users, MessageSquare, UserPlus, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Comments } from '../components/Comments';
 import WorkTeamTab from '../components/WorkTeamTab';
@@ -657,6 +657,18 @@ export default function Series() {
             {/* TAB CONTENT: Chapters List */}
             {seriesTab === 'chapters' && (
               <div>
+                {settings?.globalFreeMode && (
+                  <div className="mb-4 p-3.5 bg-gradient-to-r from-emerald-950/80 via-emerald-900/40 to-emerald-950/80 border border-emerald-500/30 rounded-xl flex items-center justify-between gap-3 text-emerald-300 text-xs font-bold shadow-lg shadow-emerald-950/30 animate-fade-in">
+                    <div className="flex items-center gap-2">
+                      <Sparkles size={16} className="text-emerald-400 shrink-0 animate-pulse" />
+                      <span>{settings.globalFreeBannerText || '🎉 جشنواره دسترسی رایگان سراسری فعال است! تمامی چپترها برای همه کاربران رایگان شده است.'}</span>
+                    </div>
+                    <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-black px-2.5 py-1 rounded-full shrink-0 border border-emerald-500/30">
+                      دسترسی رایگان
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-lg font-bold text-white uppercase tracking-tighter flex items-center gap-2">
                     <span className="w-1 h-5 bg-[var(--color-asura-accent)] rounded-full"></span>چپترهای منتشر شده
@@ -683,6 +695,12 @@ export default function Series() {
                             {ch.isPending && (
                               <span className="mr-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[9px] font-black px-2 py-0.5 rounded-full">
                                 در انتظار تایید
+                              </span>
+                            )}
+                            {settings?.globalFreeMode && (
+                              <span className="mr-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1">
+                                <Sparkles size={10} />
+                                رایگان
                               </span>
                             )}
                           </h4>

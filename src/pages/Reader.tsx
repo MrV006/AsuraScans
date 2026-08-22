@@ -2,7 +2,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useSeriesOverview } from '../hooks/useSeries';
 import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../hooks/useUserActivity';
-import { ChevronLeft, ChevronRight, Menu, Home, ArrowUp, Settings as SettingsIcon, Flag, AlertTriangle, X, Check, Send, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Menu, Home, ArrowUp, Settings as SettingsIcon, Flag, AlertTriangle, X, Check, Send, RefreshCw, Sparkles } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import { apiClient, getSocketInstance } from '../lib/apiClient';
 import { useAuth } from '../contexts/AuthContext';
@@ -519,7 +519,11 @@ export default function Reader() {
   useEffect(() => {
     if (!user) {
       setDbUser(null);
-      setIsPurchased(false);
+      if (settings?.globalFreeMode) {
+        setIsPurchased(true);
+      } else {
+        setIsPurchased(false);
+      }
       setCheckingPurchase(false);
       return;
     }
@@ -557,9 +561,10 @@ export default function Reader() {
           (series && Array.isArray(series.contributors) && series.contributors.some((c: any) => c.userId === uData.id || c.id === uData.id))
         );
 
+        const isGlobalFree = !!settings?.globalFreeMode || !!pResult?.isGlobalFree || !!pResult?.freeAccess;
         const bypass = !isSimulatingUser && (isSuperAdminOrStaff || hasBypassPermission || isContributor);
 
-        if (bypass || pResult?.purchased) {
+        if (bypass || isGlobalFree || pResult?.purchased) {
           setIsPurchased(true);
         } else {
           setIsPurchased(false);
@@ -572,7 +577,7 @@ export default function Reader() {
     };
 
     loadData();
-  }, [user, seriesId, chapterId, isSimulatingUser]);
+  }, [user, seriesId, chapterId, isSimulatingUser, settings?.globalFreeMode]);
 
   // Subscribe to live wallet balance updates
   useEffect(() => {
@@ -854,6 +859,13 @@ export default function Reader() {
           </div>
         )}
       </div>
+
+      {settings?.globalFreeMode && (
+        <div className="bg-gradient-to-r from-emerald-950/80 via-emerald-900/60 to-emerald-950/80 border-b border-emerald-500/30 py-2.5 px-4 text-center text-xs font-black text-emerald-300 mt-12 flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50" dir="rtl">
+          <Sparkles size={15} className="text-emerald-400 animate-pulse shrink-0" />
+          <span>{settings.globalFreeBannerText || '🎉 جشنواره دسترسی رایگان سراسری فعال است - تمام چپترها برای همه کاربران رایگان می‌باشد.'}</span>
+        </div>
+      )}
 
       {/* Quick Settings Bar */}
       <div className="bg-[#0b0b0e]/95 backdrop-blur border-y border-white/5 py-3 px-4 flex flex-col md:flex-row items-center justify-between gap-4 max-w-4xl mx-auto mt-12 sticky top-12 z-40" dir="rtl">
