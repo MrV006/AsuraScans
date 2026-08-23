@@ -934,6 +934,38 @@ export default function Admin() {
     }
   };
 
+  const isTranslator = profile?.role === 'translator' || userRoles.includes('translator');
+  const isCleaner = profile?.role === 'cleaner' || userRoles.includes('cleaner');
+  const thrivesAsEditor = profile?.role === 'editor' || userRoles.includes('editor');
+  const isContributorRole = isTranslator || isCleaner || thrivesAsEditor;
+  const isStaffOrAdmin = isSuperAdmin || profile?.role === 'admin' || userRoles.includes('admin') || userRoles.includes('staff');
+  const isOnlyContributor = isContributorRole && !isStaffOrAdmin;
+
+  useEffect(() => {
+    if (isOnlyContributor) {
+      if (activeTab === "dashboard" || activeTab === "manage" || activeTab === "series" || activeTab === "manage_chapters" || activeTab === "chapters") {
+        if (thrivesAsEditor) {
+          setActiveTab("editor_panel");
+        } else if (isTranslator) {
+          setActiveTab("translator_panel");
+        } else if (isCleaner) {
+          setActiveTab("cleaner_panel");
+        }
+      }
+    }
+  }, [isOnlyContributor, isTranslator, isCleaner, thrivesAsEditor, activeTab]);
+
+  const showGeneralDashboard = !isOnlyContributor;
+  const showSeriesTabs = !isOnlyContributor && (isSuperAdmin || hasFrontendPermission('create_series') || hasFrontendPermission('edit_series'));
+  const showChapterTabs = !isOnlyContributor && (isSuperAdmin || hasFrontendPermission('add_chapter') || hasFrontendPermission('edit_chapter'));
+  const showUsersTab = isSuperAdmin || hasFrontendPermission('manage_users');
+  const showCommentsTab = isSuperAdmin || hasFrontendPermission('delete_comment');
+  const showTaxonomyTab = isSuperAdmin || hasFrontendPermission('manage_settings');
+  const showReportsTab = isSuperAdmin || hasFrontendPermission('manage_reports');
+  const showSettingsTab = isSuperAdmin || hasFrontendPermission('manage_settings');
+  const showWalletTab = isSuperAdmin || hasFrontendPermission('manage_wallets');
+  const showTicketsTab = isSuperAdmin || hasFrontendPermission('manage_reports') || hasFrontendPermission('manage_users') || true;
+
   if (loading || checkingAdmin) {
     return (
       <Layout>
@@ -1018,38 +1050,6 @@ export default function Admin() {
       </Layout>
     );
   }
-
-  const isTranslator = profile?.role === 'translator' || userRoles.includes('translator');
-  const isCleaner = profile?.role === 'cleaner' || userRoles.includes('cleaner');
-  const thrivesAsEditor = profile?.role === 'editor' || userRoles.includes('editor');
-  const isContributorRole = isTranslator || isCleaner || thrivesAsEditor;
-  const isStaffOrAdmin = isSuperAdmin || profile?.role === 'admin' || userRoles.includes('admin') || userRoles.includes('staff');
-  const isOnlyContributor = isContributorRole && !isStaffOrAdmin;
-
-  useEffect(() => {
-    if (isOnlyContributor) {
-      if (activeTab === "dashboard" || activeTab === "manage" || activeTab === "series" || activeTab === "manage_chapters" || activeTab === "chapters") {
-        if (thrivesAsEditor) {
-          setActiveTab("editor_panel");
-        } else if (isTranslator) {
-          setActiveTab("translator_panel");
-        } else if (isCleaner) {
-          setActiveTab("cleaner_panel");
-        }
-      }
-    }
-  }, [isOnlyContributor, isTranslator, isCleaner, thrivesAsEditor, activeTab]);
-
-  const showGeneralDashboard = !isOnlyContributor;
-  const showSeriesTabs = !isOnlyContributor && (isSuperAdmin || hasFrontendPermission('create_series') || hasFrontendPermission('edit_series'));
-  const showChapterTabs = !isOnlyContributor && (isSuperAdmin || hasFrontendPermission('add_chapter') || hasFrontendPermission('edit_chapter'));
-  const showUsersTab = isSuperAdmin || hasFrontendPermission('manage_users');
-  const showCommentsTab = isSuperAdmin || hasFrontendPermission('delete_comment');
-  const showTaxonomyTab = isSuperAdmin || hasFrontendPermission('manage_settings');
-  const showReportsTab = isSuperAdmin || hasFrontendPermission('manage_reports');
-  const showSettingsTab = isSuperAdmin || hasFrontendPermission('manage_settings');
-  const showWalletTab = isSuperAdmin || hasFrontendPermission('manage_wallets');
-  const showTicketsTab = isSuperAdmin || hasFrontendPermission('manage_reports') || hasFrontendPermission('manage_users') || true;
 
   return (
     <Layout>

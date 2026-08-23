@@ -165,9 +165,14 @@ export default function Series() {
   });
 
   const getReadLink = (chIdentifier: string) => {
-    const sId = series.slug || series.id;
+    const rawId = series.slug || series.id;
+    let cleanId = rawId;
+    try {
+      cleanId = decodeURIComponent(rawId).trim();
+    } catch (e) {}
+    const sId = encodeURIComponent(cleanId);
     const token = Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
-    return `/reader/${sId}/${chIdentifier}?sec=${token}`;
+    return `/reader/${sId}/${encodeURIComponent(chIdentifier)}?sec=${token}`;
   };
 
   // Find the first chapter to read, or the last read chapter if history exists

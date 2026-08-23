@@ -398,9 +398,13 @@ export default function Reader() {
       e.preventDefault();
       e.stopPropagation();
     }
-    const targetId = seriesId || series?.id || series?.slug;
-    if (targetId && targetId !== 'undefined') {
-      navigate(`/series/${targetId}`);
+    const targetId = series?.id || seriesId || (chapter as any)?.seriesId || (directChapter as any)?.seriesId || series?.slug;
+    if (targetId && targetId !== 'undefined' && targetId !== 'null') {
+      let cleanTarget = targetId;
+      try {
+        cleanTarget = decodeURIComponent(targetId).trim();
+      } catch (err) {}
+      navigate(`/series/${encodeURIComponent(cleanTarget)}`);
     } else {
       navigate('/');
     }
@@ -721,12 +725,12 @@ export default function Reader() {
                 <span>ورود یا ثبت‌نام برای مطالعه رایگان</span>
               </Link>
 
-              <Link
-                to={`/series/${series?.id || seriesId || ''}`}
-                className="w-full py-3 px-4 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white font-black text-xs rounded-xl transition-all border border-white/5 text-center"
+              <button
+                onClick={handleBackToSeries}
+                className="w-full py-3 px-4 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white font-black text-xs rounded-xl transition-all border border-white/5 text-center cursor-pointer"
               >
                 بازگشت به صفحه مانهوا
-              </Link>
+              </button>
             </div>
           </div>
         </div>
@@ -804,12 +808,12 @@ export default function Reader() {
                   </div>
                 )}
 
-                <Link
-                  to={`/series/${series?.id || seriesId || ''}`}
-                  className="w-full py-3 px-4 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white font-black text-xs rounded-xl transition-all border border-white/5 text-center"
+                <button
+                  onClick={handleBackToSeries}
+                  className="w-full py-3 px-4 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white font-black text-xs rounded-xl transition-all border border-white/5 text-center cursor-pointer"
                 >
                   بازگشت به صفحه مانهوا
-                </Link>
+                </button>
               </div>
             </>
           )}

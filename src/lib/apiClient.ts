@@ -183,9 +183,19 @@ export const apiClient = {
   },
 
   async getSeriesById(id: string) {
+    if (!id || id === 'undefined' || id === 'null') return null;
     try {
-      const res = await fetch(`${API_URL}/api/series/${id}`, { headers: this.getHeaders() });
-      if (!res.ok) return null;
+      let cleanId = id;
+      try {
+        cleanId = decodeURIComponent(id).trim();
+      } catch (e) {}
+      const encoded = encodeURIComponent(cleanId);
+      let res = await fetch(`${API_URL}/api/series/${encoded}`, { headers: this.getHeaders() });
+      if (!res.ok) {
+        // Fallback: try raw id
+        res = await fetch(`${API_URL}/api/series/${id}`, { headers: this.getHeaders() });
+        if (!res.ok) return null;
+      }
       return res.json();
     } catch {
       return null;

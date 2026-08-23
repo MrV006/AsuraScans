@@ -16,7 +16,12 @@ export const SeriesCard = React.memo(function SeriesCard({ series, className = '
 
   const handleCardClick = (e: React.MouseEvent) => {
     // Navigate to series details page
-    navigate(`/series/${series.id || series.slug}`);
+    const target = series.slug || series.id;
+    let cleanTarget = target;
+    try {
+      cleanTarget = decodeURIComponent(target).trim();
+    } catch (err) {}
+    navigate(`/series/${encodeURIComponent(cleanTarget)}`);
   };
 
   const handleChapterClick = (e: React.MouseEvent, chapterId: string) => {

@@ -1375,13 +1375,23 @@ class DatabaseManager {
 
   async getSeriesById(id: string): Promise<Series | null> {
     if (!id) return null;
-    let cleanId = id;
+    let cleanId = String(id).trim();
     try {
-      cleanId = decodeURIComponent(id);
+      cleanId = decodeURIComponent(String(id)).trim();
     } catch (e) {}
+    const rawId = String(id).trim();
+    const lowerClean = cleanId.toLowerCase();
+    const lowerRaw = rawId.toLowerCase();
 
     if (this.isUsingMySQL && this.pool) {
-      const [rows] = await this.pool.execute('SELECT * FROM series WHERE id = ? OR slug = ? OR id = ? OR slug = ?', [cleanId, cleanId, id, id]);
+      const [rows] = await this.pool.execute(
+        `SELECT * FROM series 
+         WHERE id = ? OR slug = ? OR id = ? OR slug = ? 
+            OR LOWER(id) = ? OR LOWER(slug) = ? OR LOWER(id) = ? OR LOWER(slug) = ?
+            OR LOWER(title) = ? OR LOWER(title) = ?
+         LIMIT 1`,
+        [cleanId, cleanId, rawId, rawId, lowerClean, lowerClean, lowerRaw, lowerRaw, lowerClean, lowerRaw]
+      );
       const r = (rows as any[])[0];
       if (!r) return null;
       let parsedContributors: any[] = [];
@@ -1400,7 +1410,14 @@ class DatabaseManager {
         slug: r.slug || ''
       };
     }
-    const found = this.localData.series.find(s => s.id === cleanId || s.id === id || (s as any).slug === cleanId || (s as any).slug === id);
+    const found = this.localData.series.find(s => 
+      s.id === cleanId || 
+      s.id === rawId || 
+      (s.id && s.id.toLowerCase() === lowerClean) ||
+      (s.id && s.id.toLowerCase() === lowerRaw) ||
+      ((s as any).slug && ((s as any).slug === cleanId || (s as any).slug === rawId || (s as any).slug.toLowerCase() === lowerClean || (s as any).slug.toLowerCase() === lowerRaw)) ||
+      (s.title && (s.title.toLowerCase() === lowerClean || s.title.toLowerCase() === lowerRaw))
+    );
     if (!found) return null;
     return {
       ...found,
@@ -1430,7 +1447,7 @@ class DatabaseManager {
         );
       } else {
         await this.pool.execute(
-          `INSERT INTO series (id, title, alternativeTitles, cover, banner, author, artist, synopsis, genres, tags, status, rating, type, views, contributors, isHero, seoTitle, seoDescription, seoKeywords, slug, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO series (id, title, alternativeTitles, cover, banner, author, artist, synopsis, genres, tags, status, rating, type, views, contributors, isHero, seoTitle, seoDescription, seoKeywords, slug, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [s.id, s.title, altTitlesStr, s.cover, s.banner, s.author, s.artist, s.synopsis, genresStr, tagsStr, s.status || 'Ongoing', s.rating || 0, s.type || 'Manhwa', s.views || 0, contributorsStr, s.isHero ? 1 : 0, s.seoTitle || null, s.seoDescription || null, s.seoKeywords || null, s.slug || null, now, now]
         );
       }
