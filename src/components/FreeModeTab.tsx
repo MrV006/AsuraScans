@@ -73,10 +73,11 @@ export default function FreeModeTab({ adminUid }: FreeModeTabProps) {
     setErrorMessage(null);
 
     try {
+      const effectiveUid = adminUid || (typeof localStorage !== 'undefined' ? (localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid') || 'admin') : 'admin');
       const res = await apiClient.toggleGlobalFreeMode(
         nextState,
         bannerText.trim(),
-        adminUid
+        effectiveUid
       );
 
       setIsEnabled(nextState);
@@ -106,10 +107,11 @@ export default function FreeModeTab({ adminUid }: FreeModeTabProps) {
     setErrorMessage(null);
 
     try {
+      const effectiveUid = adminUid || (typeof localStorage !== 'undefined' ? (localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid') || 'admin') : 'admin');
       await apiClient.toggleGlobalFreeMode(
         isEnabled,
         bannerText.trim(),
-        adminUid
+        effectiveUid
       );
       if (reloadSettings) await reloadSettings();
       setSuccessMessage("✅ متن پیام نوار اعلان جشنواره با موفقیت بروزرسانی شد.");

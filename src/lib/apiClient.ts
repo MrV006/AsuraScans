@@ -427,6 +427,11 @@ export const apiClient = {
     return res.json();
   },
 
+  async getRatingsSummary(seriesId: string) {
+    const res = await fetch(`${API_URL}/api/series/${seriesId}/ratings-summary`, { headers: this.getHeaders() });
+    return res.json();
+  },
+
   async rateSeries(seriesId: string, userId: string, score: number) {
     const res = await fetch(`${API_URL}/api/series/${seriesId}/ratings`, {
       method: 'POST',
@@ -459,17 +464,30 @@ export const apiClient = {
   },
 
   async getGlobalFreeMode() {
-    const res = await fetch(`${API_URL}/api/settings/global-free-mode`, { headers: this.getHeaders() });
-    if (!res.ok) return { enabled: false };
-    return res.json();
+    try {
+      const res = await fetch(`${API_URL}/api/settings/global-free-mode`, { headers: this.getHeaders() });
+      if (!res.ok) return { enabled: false };
+      return await res.json();
+    } catch {
+      return { enabled: false };
+    }
   },
 
   async toggleGlobalFreeMode(enabled: boolean, bannerText?: string, adminUid?: string) {
-    const res = await fetch(`${API_URL}/api/admin/settings/global-free-mode`, {
+    const payload = { enabled, bannerText, adminUid };
+    let res = await fetch(`${API_URL}/api/admin/settings/global-free-mode`, {
       method: 'POST',
       headers: this.getHeaders(adminUid),
-      body: JSON.stringify({ enabled, bannerText })
+      body: JSON.stringify(payload)
     });
+    if (!res.ok) {
+      // Fallback try to /api/settings/global-free-mode
+      res = await fetch(`${API_URL}/api/settings/global-free-mode`, {
+        method: 'POST',
+        headers: this.getHeaders(adminUid),
+        body: JSON.stringify(payload)
+      });
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'خطا در تغییر وضعیت حالت رایگان سراسری');
@@ -625,10 +643,67 @@ export const apiClient = {
     return res.json();
   },
 
+  async markNotificationAsUnread(id: string) {
+    const res = await fetch(`${API_URL}/api/notifications/${id}/unread`, {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+    return res.json();
+  },
+
+  async deleteNotification(id: string, userId?: string) {
+    const res = await fetch(`${API_URL}/api/notifications/${id}${userId ? `?userId=${userId}` : ''}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(userId)
+    });
+    return res.json();
+  },
+
   async markAllNotificationsAsRead(userId: string) {
     const res = await fetch(`${API_URL}/api/users/${userId}/notifications/read-all`, {
       method: 'POST',
-      headers: this.getHeaders()
+      headers: this.getHeaders(userId)
+    });
+    return res.json();
+  },
+
+  async clearAllNotifications(userId: string) {
+    const res = await fetch(`${API_URL}/api/users/${userId}/notifications/clear`, {
+      method: 'DELETE',
+      headers: this.getHeaders(userId)
+    });
+    return res.json();
+  },
+
+  async broadcastNotification(payload: { type?: string; title: string; body: string; link?: string; targetRole?: string }, adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/admin/notifications/broadcast`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify(payload)
+    });
+    return res.json();
+  },
+
+  async sendDirectNotification(payload: { userId: string; type?: string; title: string; body: string; link?: string }, adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/admin/notifications/send`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify(payload)
+    });
+    return res.json();
+  },
+
+  async cleanupNotifications(adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/admin/notifications/cleanup`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid)
+    });
+    return res.json();
+  },
+
+  async getNotificationStats(adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/admin/notifications/stats`, {
+      headers: this.getHeaders(adminUid)
     });
     return res.json();
   },
@@ -677,11 +752,20 @@ export const apiClient = {
     return res.json();
   },
 
-  async adjustRatings(seriesId: string, score: number, action: 'increment' | 'decrement', adminUid: string) {
+  async adjustRatings(seriesId: string, score: number, action: 'increment' | 'decrement', adminUid: string, step: number = 1) {
     const res = await fetch(`${API_URL}/api/series/${seriesId}/adjust-ratings`, {
       method: 'POST',
       headers: this.getHeaders(adminUid),
-      body: JSON.stringify({ score, action })
+      body: JSON.stringify({ score, action, step })
+    });
+    return res.json();
+  },
+
+  async adjustRatingStats(seriesId: string, payload: { score?: number; action?: 'increment' | 'decrement'; counts?: { 1: number; 2: number; 3: number; 4: number; 5: number }; step?: number }, adminUid: string) {
+    const res = await fetch(`${API_URL}/api/series/${seriesId}/adjust-ratings`, {
+      method: 'POST',
+      headers: this.getHeaders(adminUid),
+      body: JSON.stringify(payload)
     });
     return res.json();
   },

@@ -9,27 +9,41 @@ export interface Rating {
   updatedAt: any;
 }
 
+export interface RatingSummary {
+  averageRating: number;
+  totalRatings: number;
+  starCounts: { 1: number; 2: number; 3: number; 4: number; 5: number };
+}
+
 export function useRatings(seriesId?: string) {
   const { user } = useAuth();
   const [ratings, setRatings] = useState<Rating[]>([]);
+  const [summary, setSummary] = useState<RatingSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [userRating, setUserRating] = useState<number | null>(null);
 
   const fetchRatings = async () => {
     if (!seriesId) {
       setRatings([]);
+      setSummary(null);
       setLoading(false);
       return;
     }
     try {
-      const data = await apiClient.getRatings(seriesId);
-      const list = data.map((r: any) => ({
+      const [data, summaryData] = await Promise.all([
+        apiClient.getRatings(seriesId).catch(() => []),
+        apiClient.getRatingsSummary(seriesId).catch(() => null)
+      ]);
+      const list = (Array.isArray(data) ? data : []).map((r: any) => ({
         seriesId: r.seriesId,
         userId: r.userId,
         rating: r.score, // score mapped to rating
         updatedAt: r.createdAt
       }));
       setRatings(list);
+      if (summaryData && typeof summaryData.averageRating === 'number') {
+        setSummary(summaryData);
+      }
       
       if (user) {
         const myRating = list.find((r: any) => r.userId === user.uid);
@@ -61,9 +75,17 @@ export function useRatings(seriesId?: string) {
     };
   }, [seriesId, user?.uid]);
 
-  const averageRating = ratings.length > 0 
-    ? ratings.reduce((acc, curr) => acc + curr.rating, 0) / ratings.length 
-    : 0;
+  const averageRating = summary?.averageRating !== undefined 
+    ? summary.averageRating 
+    : (ratings.length > 0 
+        ? ratings.reduce((acc, curr) => acc + curr.rating, 0) / ratings.length 
+        : 0);
+
+  const totalRatings = summary?.totalRatings !== undefined 
+    ? summary.totalRatings 
+    : ratings.length;
+
+  const starCounts = summary?.starCounts || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
 
   const submitRating = async (ratingValue: number) => {
     if (!user || !seriesId) return false;
@@ -98,9 +120,19 @@ export function useRatings(seriesId?: string) {
   };
 
   const removeRating = async () => {
-    // Unused or soft remove by setting rating as null/0
     return submitRating(0);
   };
 
-  return { ratings, averageRating, userRating, loading, submitRating, removeRating };
+  return { 
+    ratings, 
+    averageRating, 
+    userRating, 
+    summary,
+    totalRatings,
+    starCounts,
+    loading, 
+    submitRating, 
+    removeRating,
+    refetch: fetchRatings
+  };
 }

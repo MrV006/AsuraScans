@@ -48,6 +48,14 @@ export interface Series {
   tags: string[];
   status: string;
   rating: number;
+  ratingCount?: number;
+  ratingStats?: {
+    1: number;
+    2: number;
+    3: number;
+    4: number;
+    5: number;
+  };
   type: string;
   views: number;
   contributors?: Contributor[];
@@ -635,6 +643,8 @@ class DatabaseManager {
         `ALTER TABLE series ADD COLUMN IF NOT EXISTS seoDescription TEXT`,
         `ALTER TABLE series ADD COLUMN IF NOT EXISTS seoKeywords TEXT`,
         `ALTER TABLE series ADD COLUMN IF NOT EXISTS slug VARCHAR(255) DEFAULT NULL`,
+        `ALTER TABLE series ADD COLUMN IF NOT EXISTS ratingStats TEXT`,
+        `ALTER TABLE series ADD COLUMN IF NOT EXISTS ratingCount INT DEFAULT 0`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS isPending TINYINT(1) DEFAULT 0`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS submissions TEXT`,
         `ALTER TABLE chapters ADD COLUMN IF NOT EXISTS contributors TEXT`,
@@ -1400,12 +1410,21 @@ class DatabaseManager {
           parsedContributors = typeof r.contributors === 'string' ? JSON.parse(r.contributors) : r.contributors;
         } catch (e) {}
       }
+      let parsedRatingStats: any = undefined;
+      if (r.ratingStats) {
+        try {
+          parsedRatingStats = typeof r.ratingStats === 'string' ? JSON.parse(r.ratingStats) : r.ratingStats;
+        } catch (e) {}
+      }
       return {
         ...r,
         alternativeTitles: typeof r.alternativeTitles === 'string' ? r.alternativeTitles.split(',').filter(Boolean) : (Array.isArray(r.alternativeTitles) ? r.alternativeTitles : []),
         genres: typeof r.genres === 'string' ? r.genres.split(',').filter(Boolean) : (Array.isArray(r.genres) ? r.genres : []),
         tags: typeof r.tags === 'string' ? r.tags.split(',').filter(Boolean) : (Array.isArray(r.tags) ? r.tags : []),
         contributors: parsedContributors,
+        rating: typeof r.rating === 'number' ? r.rating : (Number(r.rating) || 0),
+        ratingCount: r.ratingCount !== undefined ? Number(r.ratingCount) : 0,
+        ratingStats: parsedRatingStats || undefined,
         isHero: !!r.isHero,
         slug: r.slug || ''
       };
@@ -1421,6 +1440,9 @@ class DatabaseManager {
     if (!found) return null;
     return {
       ...found,
+      rating: typeof found.rating === 'number' ? found.rating : (Number(found.rating) || 0),
+      ratingCount: found.ratingCount !== undefined ? Number(found.ratingCount) : 0,
+      ratingStats: found.ratingStats || undefined,
       contributors: found.contributors || [],
       slug: (found as any).slug || ''
     };
@@ -2240,96 +2262,219 @@ class DatabaseManager {
   // RATING METHODS
   // -----------------------------------------------------------------
   async getRatings(seriesId: string): Promise<Rating[]> {
+    const canonicalSeries = await this.getSeriesById(seriesId);
+    const targetId = canonicalSeries ? canonicalSeries.id : seriesId;
+
     if (this.isUsingMySQL && this.pool) {
-      const [rows] = await this.pool.execute('SELECT * FROM ratings WHERE seriesId = ?', [seriesId]);
+      const [rows] = await this.pool.execute(
+        'SELECT * FROM ratings WHERE (seriesId = ? OR seriesId = ?) AND userId NOT LIKE "sys_adj_%"',
+        [targetId, seriesId]
+      );
       return rows as Rating[];
     }
-    return this.localData.ratings.filter(r => r.seriesId === seriesId);
+    return this.localData.ratings.filter(r => 
+      (r.seriesId === targetId || r.seriesId === seriesId) && 
+      !r.userId.startsWith('sys_adj_')
+    );
   }
 
-  async saveRating(userId: string, seriesId: string, score: number): Promise<void> {
-    const ratings = await this.getRatings(seriesId);
+  async getRatingsSummary(seriesId: string): Promise<{
+    seriesId: string;
+    averageRating: number;
+    totalRatings: number;
+    starCounts: { 1: number; 2: number; 3: number; 4: number; 5: number };
+    ratings: Rating[];
+  }> {
+    const series = await this.getSeriesById(seriesId);
+    const targetId = series ? series.id : seriesId;
+    const userRatings = await this.getRatings(targetId);
+
+    let starCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+
+    if (series && series.ratingStats && typeof series.ratingStats === 'object') {
+      starCounts = {
+        1: Math.max(0, Number(series.ratingStats['1'] || (series.ratingStats as any)[1] || 0)),
+        2: Math.max(0, Number(series.ratingStats['2'] || (series.ratingStats as any)[2] || 0)),
+        3: Math.max(0, Number(series.ratingStats['3'] || (series.ratingStats as any)[3] || 0)),
+        4: Math.max(0, Number(series.ratingStats['4'] || (series.ratingStats as any)[4] || 0)),
+        5: Math.max(0, Number(series.ratingStats['5'] || (series.ratingStats as any)[5] || 0)),
+      };
+    } else {
+      userRatings.forEach(r => {
+        const s = Math.round(Number(r.score));
+        if (s >= 1 && s <= 5) {
+          starCounts[s as 1 | 2 | 3 | 4 | 5] = (starCounts[s as 1 | 2 | 3 | 4 | 5] || 0) + 1;
+        }
+      });
+    }
+
+    const totalRatings = starCounts[1] + starCounts[2] + starCounts[3] + starCounts[4] + starCounts[5];
+    const totalScore = (1 * starCounts[1]) + (2 * starCounts[2]) + (3 * starCounts[3]) + (4 * starCounts[4]) + (5 * starCounts[5]);
+    const averageRating = totalRatings > 0 
+      ? Math.round((totalScore / totalRatings) * 10) / 10 
+      : (series && typeof series.rating === 'number' ? series.rating : 0);
+
+    return {
+      seriesId: targetId,
+      averageRating,
+      totalRatings,
+      starCounts,
+      ratings: userRatings
+    };
+  }
+
+  async saveRating(userId: string, seriesId: string, score: number): Promise<{
+    averageRating: number;
+    totalRatings: number;
+    starCounts: { 1: number; 2: number; 3: number; 4: number; 5: number };
+  }> {
+    const series = await this.getSeriesById(seriesId);
+    const targetId = series ? series.id : seriesId;
+    const ratings = await this.getRatings(targetId);
     const existing = ratings.find(r => r.userId === userId);
+    const oldScore = existing ? Math.round(Number(existing.score)) : null;
+    const newScore = Math.min(5, Math.max(1, Math.round(Number(score))));
     const now = new Date().toISOString();
 
     if (this.isUsingMySQL && this.pool) {
       if (existing) {
         await this.pool.execute(
-          'UPDATE ratings SET score = ? WHERE userId = ? AND seriesId = ?',
-          [score, userId, seriesId]
+          'UPDATE ratings SET score = ?, createdAt = ? WHERE userId = ? AND seriesId = ?',
+          [newScore, now, userId, targetId]
         );
       } else {
         await this.pool.execute(
-          'INSERT INTO ratings (userId, seriesId, score, createdAt) VALUES (?, ?, ?, ?)',
-          [userId, seriesId, score, now]
+          'INSERT INTO ratings (userId, seriesId, score, createdAt) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE score = ?, createdAt = ?',
+          [userId, targetId, newScore, now, newScore, now]
         );
       }
     } else {
-      const item: Rating = { userId, seriesId, score, createdAt: now };
+      const item: Rating = { userId, seriesId: targetId, score: newScore, createdAt: now };
       if (existing) {
-        const idx = this.localData.ratings.findIndex(r => r.userId === userId && r.seriesId === seriesId);
-        this.localData.ratings[idx] = item;
+        const idx = this.localData.ratings.findIndex(r => r.userId === userId && r.seriesId === targetId);
+        if (idx >= 0) this.localData.ratings[idx] = item;
       } else {
         this.localData.ratings.push(item);
       }
       this.saveLocalData();
     }
 
-    // Refresh average rating inside Series
-    const allRatings = await this.getRatings(seriesId);
-    const sum = allRatings.reduce((acc, current) => acc + current.score, 0);
-    const average = allRatings.length > 0 ? sum / allRatings.length : 0;
+    // Update star counts on series
+    let starCounts = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    if (series && series.ratingStats && typeof series.ratingStats === 'object') {
+      starCounts = {
+        1: Math.max(0, Number(series.ratingStats['1'] || (series.ratingStats as any)[1] || 0)),
+        2: Math.max(0, Number(series.ratingStats['2'] || (series.ratingStats as any)[2] || 0)),
+        3: Math.max(0, Number(series.ratingStats['3'] || (series.ratingStats as any)[3] || 0)),
+        4: Math.max(0, Number(series.ratingStats['4'] || (series.ratingStats as any)[4] || 0)),
+        5: Math.max(0, Number(series.ratingStats['5'] || (series.ratingStats as any)[5] || 0)),
+      };
+      if (oldScore && oldScore >= 1 && oldScore <= 5 && oldScore !== newScore) {
+        starCounts[oldScore as 1|2|3|4|5] = Math.max(0, starCounts[oldScore as 1|2|3|4|5] - 1);
+      }
+      if (!oldScore || oldScore !== newScore) {
+        starCounts[newScore as 1|2|3|4|5] = (starCounts[newScore as 1|2|3|4|5] || 0) + 1;
+      }
+    } else {
+      const allRatings = await this.getRatings(targetId);
+      allRatings.forEach(r => {
+        const s = Math.round(Number(r.score));
+        if (s >= 1 && s <= 5) {
+          starCounts[s as 1|2|3|4|5] = (starCounts[s as 1|2|3|4|5] || 0) + 1;
+        }
+      });
+    }
 
-    await this.updateSeriesRating(seriesId, average);
+    const totalRatings = starCounts[1] + starCounts[2] + starCounts[3] + starCounts[4] + starCounts[5];
+    const totalScore = (1 * starCounts[1]) + (2 * starCounts[2]) + (3 * starCounts[3]) + (4 * starCounts[4]) + (5 * starCounts[5]);
+    const average = totalRatings > 0 ? Math.round((totalScore / totalRatings) * 10) / 10 : 0;
+
+    await this.updateSeriesRating(targetId, average, totalRatings, starCounts);
+
+    return {
+      averageRating: average,
+      totalRatings,
+      starCounts
+    };
   }
 
-  private async updateSeriesRating(seriesId: string, score: number) {
+  private async updateSeriesRating(
+    seriesId: string, 
+    score: number, 
+    count?: number, 
+    stats?: { 1: number; 2: number; 3: number; 4: number; 5: number }
+  ) {
+    const statsStr = stats ? JSON.stringify(stats) : null;
     if (this.isUsingMySQL && this.pool) {
-      await this.pool.execute('UPDATE series SET rating = ? WHERE id = ?', [score, seriesId]);
+      if (stats !== undefined && count !== undefined) {
+        await this.pool.execute('UPDATE series SET rating = ?, ratingCount = ?, ratingStats = ? WHERE id = ?', [score, count, statsStr, seriesId]);
+      } else {
+        await this.pool.execute('UPDATE series SET rating = ? WHERE id = ?', [score, seriesId]);
+      }
       return;
     }
     const idx = this.localData.series.findIndex(s => s.id === seriesId);
     if (idx >= 0) {
       this.localData.series[idx].rating = score;
+      if (count !== undefined) this.localData.series[idx].ratingCount = count;
+      if (stats !== undefined) this.localData.series[idx].ratingStats = stats;
       this.saveLocalData();
     }
   }
 
-  async adjustRating(seriesId: string, score: number, action: 'increment' | 'decrement'): Promise<void> {
-    const now = new Date().toISOString();
-    if (action === 'increment') {
-      const dummyUserId = `sys_adj_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-      if (this.isUsingMySQL && this.pool) {
-        await this.pool.execute(
-          'INSERT INTO ratings (userId, seriesId, score, createdAt) VALUES (?, ?, ?, ?)',
-          [dummyUserId, seriesId, score, now]
-        );
+  async adjustRatingStats(
+    seriesId: string, 
+    params: { 
+      score?: number; 
+      action?: 'increment' | 'decrement'; 
+      counts?: { 1: number; 2: number; 3: number; 4: number; 5: number };
+      step?: number;
+    }
+  ): Promise<{
+    seriesId: string;
+    averageRating: number;
+    totalRatings: number;
+    starCounts: { 1: number; 2: number; 3: number; 4: number; 5: number };
+    series: Series | null;
+  }> {
+    const series = await this.getSeriesById(seriesId);
+    const targetId = series ? series.id : seriesId;
+    const summary = await this.getRatingsSummary(targetId);
+
+    let starCounts = { ...summary.starCounts };
+
+    if (params.counts && typeof params.counts === 'object') {
+      starCounts = {
+        1: Math.max(0, Math.round(Number(params.counts['1'] || (params.counts as any)[1] || 0))),
+        2: Math.max(0, Math.round(Number(params.counts['2'] || (params.counts as any)[2] || 0))),
+        3: Math.max(0, Math.round(Number(params.counts['3'] || (params.counts as any)[3] || 0))),
+        4: Math.max(0, Math.round(Number(params.counts['4'] || (params.counts as any)[4] || 0))),
+        5: Math.max(0, Math.round(Number(params.counts['5'] || (params.counts as any)[5] || 0))),
+      };
+    } else if (params.score && params.action) {
+      const s = Math.min(5, Math.max(1, Math.round(Number(params.score)))) as 1|2|3|4|5;
+      const step = Math.max(1, Math.round(Number(params.step || 1)));
+      if (params.action === 'increment') {
+        starCounts[s] = (starCounts[s] || 0) + step;
       } else {
-        this.localData.ratings.push({ userId: dummyUserId, seriesId, score, createdAt: now });
-        this.saveLocalData();
-      }
-    } else {
-      // Find one rating with that score to delete
-      const ratings = await this.getRatings(seriesId);
-      const toDelete = ratings.find(r => r.score === score);
-      if (toDelete) {
-        if (this.isUsingMySQL && this.pool) {
-          await this.pool.execute(
-            'DELETE FROM ratings WHERE userId = ? AND seriesId = ?',
-            [toDelete.userId, seriesId]
-          );
-        } else {
-          this.localData.ratings = this.localData.ratings.filter(r => !(r.userId === toDelete.userId && r.seriesId === seriesId));
-          this.saveLocalData();
-        }
+        starCounts[s] = Math.max(0, (starCounts[s] || 0) - step);
       }
     }
 
-    // Refresh average rating inside Series
-    const allRatings = await this.getRatings(seriesId);
-    const sum = allRatings.reduce((acc, current) => acc + current.score, 0);
-    const average = allRatings.length > 0 ? sum / allRatings.length : 0;
-    await this.updateSeriesRating(seriesId, average);
+    const totalRatings = starCounts[1] + starCounts[2] + starCounts[3] + starCounts[4] + starCounts[5];
+    const totalScore = (1 * starCounts[1]) + (2 * starCounts[2]) + (3 * starCounts[3]) + (4 * starCounts[4]) + (5 * starCounts[5]);
+    const average = totalRatings > 0 ? Math.round((totalScore / totalRatings) * 10) / 10 : 0;
+
+    await this.updateSeriesRating(targetId, average, totalRatings, starCounts);
+    const updatedSeries = await this.getSeriesById(targetId);
+
+    return {
+      seriesId: targetId,
+      averageRating: average,
+      totalRatings,
+      starCounts,
+      series: updatedSeries
+    };
   }
 
   // -----------------------------------------------------------------
@@ -3055,25 +3200,58 @@ class DatabaseManager {
   }
 
   // -----------------------------------------------------------------
-  // NOTIFICATION METHODS
+  // NOTIFICATION METHODS (WITH DAILY READ & WEEKLY UNREAD AUTO-PURGE)
   // -----------------------------------------------------------------
-  async cleanupOldNotifications(): Promise<void> {
+  async cleanupOldNotifications(): Promise<{ readDeleted: number; unreadDeleted: number; totalDeleted: number }> {
+    let readDeleted = 0;
+    let unreadDeleted = 0;
     try {
-      const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
-      const sevenDaysAgo = new Date(cutoffMs).toISOString();
+      // 1) Read notifications purge at the end of each day (older than 24 hours)
+      const oneDayAgoMs = Date.now() - 24 * 60 * 60 * 1000;
+      const oneDayAgo = new Date(oneDayAgoMs).toISOString();
+
+      // 2) Unread notifications purge at the end of each week (older than 7 days)
+      const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const sevenDaysAgo = new Date(sevenDaysAgoMs).toISOString();
+
       if (this.isUsingMySQL && this.pool) {
-        await this.pool.execute('DELETE FROM notifications WHERE createdAt < ?', [sevenDaysAgo]);
+        const [readRes]: any = await this.pool.execute(
+          'DELETE FROM notifications WHERE isRead = 1 AND createdAt < ?',
+          [oneDayAgo]
+        );
+        readDeleted = readRes?.affectedRows || 0;
+
+        const [unreadRes]: any = await this.pool.execute(
+          'DELETE FROM notifications WHERE isRead = 0 AND createdAt < ?',
+          [sevenDaysAgo]
+        );
+        unreadDeleted = unreadRes?.affectedRows || 0;
       } else {
-        if (this.localData.notifications) {
-          this.localData.notifications = this.localData.notifications.filter(
-            n => new Date(n.createdAt).getTime() >= cutoffMs
-          );
+        if (!this.localData.notifications) this.localData.notifications = [];
+        const initialCount = this.localData.notifications.length;
+        
+        this.localData.notifications = this.localData.notifications.filter(n => {
+          const itemTime = new Date(n.createdAt).getTime();
+          const isRead = !!n.read;
+          if (isRead && itemTime < oneDayAgoMs) {
+            readDeleted++;
+            return false;
+          }
+          if (!isRead && itemTime < sevenDaysAgoMs) {
+            unreadDeleted++;
+            return false;
+          }
+          return true;
+        });
+
+        if (initialCount !== this.localData.notifications.length) {
           await this.saveLocalData();
         }
       }
     } catch (err) {
       console.error("Failed to cleanup old notifications:", err);
     }
+    return { readDeleted, unreadDeleted, totalDeleted: readDeleted + unreadDeleted };
   }
 
   async getNotifications(userId: string): Promise<Notification[]> {
@@ -3117,7 +3295,7 @@ class DatabaseManager {
     } else {
       if (!this.localData.notifications) this.localData.notifications = [];
       this.localData.notifications.push(notif);
-      this.saveLocalData();
+      await this.saveLocalData();
     }
 
     return notif;
@@ -3132,10 +3310,59 @@ class DatabaseManager {
     const idx = this.localData.notifications.findIndex(n => n.id === id);
     if (idx >= 0) {
       this.localData.notifications[idx].read = true;
-      this.saveLocalData();
+      await this.saveLocalData();
       return true;
     }
     return false;
+  }
+
+  async markNotificationAsUnread(id: string): Promise<boolean> {
+    if (this.isUsingMySQL && this.pool) {
+      await this.pool.execute('UPDATE notifications SET isRead = 0 WHERE id = ?', [id]);
+      return true;
+    }
+    if (!this.localData.notifications) this.localData.notifications = [];
+    const idx = this.localData.notifications.findIndex(n => n.id === id);
+    if (idx >= 0) {
+      this.localData.notifications[idx].read = false;
+      await this.saveLocalData();
+      return true;
+    }
+    return false;
+  }
+
+  async deleteNotification(id: string, userId?: string): Promise<boolean> {
+    if (this.isUsingMySQL && this.pool) {
+      if (userId) {
+        await this.pool.execute('DELETE FROM notifications WHERE id = ? AND userId = ?', [id, userId]);
+      } else {
+        await this.pool.execute('DELETE FROM notifications WHERE id = ?', [id]);
+      }
+      return true;
+    }
+    if (!this.localData.notifications) this.localData.notifications = [];
+    const initialLen = this.localData.notifications.length;
+    this.localData.notifications = this.localData.notifications.filter(n => {
+      if (n.id !== id) return true;
+      if (userId && n.userId !== userId) return true;
+      return false;
+    });
+    if (this.localData.notifications.length !== initialLen) {
+      await this.saveLocalData();
+      return true;
+    }
+    return false;
+  }
+
+  async clearAllNotifications(userId: string): Promise<boolean> {
+    if (this.isUsingMySQL && this.pool) {
+      await this.pool.execute('DELETE FROM notifications WHERE userId = ?', [userId]);
+      return true;
+    }
+    if (!this.localData.notifications) this.localData.notifications = [];
+    this.localData.notifications = this.localData.notifications.filter(n => n.userId !== userId);
+    await this.saveLocalData();
+    return true;
   }
 
   async markAllNotificationsAsRead(userId: string): Promise<boolean> {
@@ -3145,8 +3372,32 @@ class DatabaseManager {
     }
     if (!this.localData.notifications) this.localData.notifications = [];
     this.localData.notifications = this.localData.notifications.map(n => n.userId === userId ? { ...n, read: true } : n);
-    this.saveLocalData();
+    await this.saveLocalData();
     return true;
+  }
+
+  async getNotificationStats(): Promise<{ total: number; read: number; unread: number; oldestDate?: string }> {
+    if (this.isUsingMySQL && this.pool) {
+      const [rows]: any = await this.pool.execute(
+        'SELECT COUNT(*) as total, SUM(isRead = 1) as readCount, SUM(isRead = 0) as unreadCount, MIN(createdAt) as oldest FROM notifications'
+      );
+      const row = rows?.[0] || {};
+      return {
+        total: Number(row.total || 0),
+        read: Number(row.readCount || 0),
+        unread: Number(row.unreadCount || 0),
+        oldestDate: row.oldest || undefined
+      };
+    }
+    const list = this.localData.notifications || [];
+    const read = list.filter(n => !!n.read).length;
+    const unread = list.length - read;
+    let oldestDate: string | undefined = undefined;
+    if (list.length > 0) {
+      const sorted = [...list].sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      oldestDate = sorted[0]?.createdAt;
+    }
+    return { total: list.length, read, unread, oldestDate };
   }
 
   // -----------------------------------------------------------------

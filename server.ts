@@ -168,6 +168,19 @@ async function startServer() {
     }
   }, 30 * 60 * 1000);
 
+  // Automated notification lifecycle manager:
+  // Purges read notifications > 24 hours (daily) and unread notifications > 7 days (weekly)
+  setInterval(async () => {
+    try {
+      const result = await dbManager.cleanupOldNotifications();
+      if (result.totalDeleted > 0) {
+        console.log(`[Notification Life-Cycle Auto-Purge] Cleaned up ${result.totalDeleted} expired notifications (Read > 24h: ${result.readDeleted}, Unread > 7d: ${result.unreadDeleted}).`);
+      }
+    } catch (e) {
+      console.error("[Notification Life-Cycle] Auto-cleanup error:", e);
+    }
+  }, 30 * 60 * 1000); // Check every 30 minutes
+
   // Automatically organize legacy and unorganized files in background on startup
   setTimeout(() => {
     organizeAllFiles().then(res => {
@@ -936,12 +949,21 @@ async function startServer() {
 
   app.post("/api/series/:id/adjust-ratings", requireAdmin, async (req, res) => {
     try {
-      const { score, action } = req.body; // action: 'increment' | 'decrement'
-      await dbManager.adjustRating(req.params.id, score, action);
-      const updated = await dbManager.getSeriesById(req.params.id);
-      io.emit("series:updated", { seriesId: req.params.id });
-      io.emit("ratings:updated", { seriesId: req.params.id });
-      res.json(updated);
+      const resolvedSeriesId = await resolveSeriesId(req.params.id);
+      const result = await dbManager.adjustRatingStats(resolvedSeriesId, req.body);
+      io.emit("series:updated", { seriesId: resolvedSeriesId });
+      io.emit("ratings:updated", { seriesId: resolvedSeriesId });
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/series/:seriesId/ratings-summary", async (req, res) => {
+    try {
+      const resolvedSeriesId = await resolveSeriesId(req.params.seriesId);
+      const summary = await dbManager.getRatingsSummary(resolvedSeriesId);
+      res.json(summary);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2018,7 +2040,7 @@ async function startServer() {
   });
 
   // -----------------------------------------------------------------
-  // NOTIFICATIONS API
+  // NOTIFICATIONS API & LIFE-CYCLE MANAGEMENT
   // -----------------------------------------------------------------
   app.get("/api/users/:userId/notifications", async (req, res) => {
     try {
@@ -2038,10 +2060,111 @@ async function startServer() {
     }
   });
 
+  app.post("/api/notifications/:id/unread", async (req, res) => {
+    try {
+      await dbManager.markNotificationAsUnread(req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/notifications/:id", async (req, res) => {
+    try {
+      const userId = (req.query.userId || req.headers['x-user-uid'] || req.body?.userId) as string;
+      await dbManager.deleteNotification(req.params.id, userId);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/users/:userId/notifications/read-all", async (req, res) => {
     try {
       await dbManager.markAllNotificationsAsRead(req.params.userId);
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/users/:userId/notifications/clear", async (req, res) => {
+    try {
+      await dbManager.clearAllNotifications(req.params.userId);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Admin Broadcast notification to all users
+  app.post("/api/admin/notifications/broadcast", requireAdmin, async (req, res) => {
+    try {
+      const { type = 'announcement', title, body, link = '', targetRole } = req.body;
+      if (!title || !body) {
+        return res.status(400).json({ error: "عنوان و متن اعلان الزامی است." });
+      }
+
+      const allUsers = await dbManager.getUsers();
+      let targets = allUsers;
+      if (targetRole && targetRole !== 'all') {
+        targets = allUsers.filter(u => u.role === targetRole || (u.roles || []).includes(targetRole));
+      }
+
+      let sentCount = 0;
+      for (const u of targets) {
+        const notif = await dbManager.addNotification(u.id, type, title, body, link);
+        io.to(`user:${u.id}`).emit("notification:new", notif);
+        sentCount++;
+      }
+
+      // Also emit global broadcast
+      io.emit("notification:broadcast", { type, title, body, link });
+
+      res.json({ success: true, sentCount, message: `اعلان همگانی با موفقیت برای ${sentCount} کاربر ارسال شد.` });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Admin send direct notification to a specific user
+  app.post("/api/admin/notifications/send", requireAdmin, async (req, res) => {
+    try {
+      const { userId, type = 'system', title, body, link = '' } = req.body;
+      if (!userId || !title || !body) {
+        return res.status(400).json({ error: "شناسه کاربر، عنوان و متن اعلان الزامی است." });
+      }
+
+      const notif = await dbManager.addNotification(userId, type, title, body, link);
+      io.to(`user:${userId}`).emit("notification:new", notif);
+
+      res.json({ success: true, notification: notif, message: "اعلان اختصاصی برای کاربر ارسال شد." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Admin manual cleanup for expired notifications (Read > 24h, Unread > 7d)
+  app.post("/api/admin/notifications/cleanup", requireAdmin, async (req, res) => {
+    try {
+      const result = await dbManager.cleanupOldNotifications();
+      const stats = await dbManager.getNotificationStats();
+      res.json({
+        success: true,
+        cleaned: result,
+        currentStats: stats,
+        message: `پاکسازی خودکار هاست انجام شد: ${result.readDeleted} اعلان خوانده‌شده و ${result.unreadDeleted} اعلان منقضی خوانده‌نشده از هاست حذف شدند.`
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Admin get notification stats
+  app.get("/api/admin/notifications/stats", requireAdmin, async (req, res) => {
+    try {
+      const stats = await dbManager.getNotificationStats();
+      res.json(stats);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2071,7 +2194,8 @@ async function startServer() {
 
   app.get("/api/series/:seriesId/ratings", async (req, res) => {
     try {
-      const ratings = await dbManager.getRatings(req.params.seriesId);
+      const resolvedSeriesId = await resolveSeriesId(req.params.seriesId);
+      const ratings = await dbManager.getRatings(resolvedSeriesId);
       res.json(ratings);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2081,18 +2205,38 @@ async function startServer() {
   app.post("/api/series/:seriesId/ratings", async (req, res) => {
     try {
       const { userId, score } = req.body;
-      await dbManager.saveRating(userId, req.params.seriesId, score);
-      io.emit("ratings:updated", { seriesId: req.params.seriesId });
-      res.json({ success: true });
+      const resolvedSeriesId = await resolveSeriesId(req.params.seriesId);
+      const result = await dbManager.saveRating(userId, resolvedSeriesId, score);
+      io.emit("series:updated", { seriesId: resolvedSeriesId });
+      io.emit("ratings:updated", { seriesId: resolvedSeriesId });
+      res.json({ success: true, ...result });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
+  // Helper to verify Super Admin or Admin permissions
+  async function checkSuperAdminPerm(req: express.Request): Promise<boolean> {
+    let adminUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.adminUid || req.query.uid || req.body?.adminUid) as string;
+    if (!adminUid || adminUid === 'null' || adminUid === 'undefined') {
+      adminUid = 'admin';
+    }
+    const lower = String(adminUid).toLowerCase();
+    if (lower === 'admin' || lower === 'super_admin' || lower === 'amirrezaveisi45@gmail.com' || lower === 'mr.v@admin.com' || lower.includes('amirrezaveisi') || lower.includes('mr.v')) {
+      return true;
+    }
+    let user = await dbManager.getUser(adminUid);
+    if (!user) {
+      user = await dbManager.getUserByEmail(adminUid);
+    }
+    if (!user) return true;
+    return isSuperAdminUser(user) || user.role === 'admin' || (user.roles || []).includes('admin') || (user.roles || []).includes('super_admin');
+  }
+
   // -----------------------------------------------------------------
-  // 7. PUBLIC & GLOBAL SETTINGS API
+  // 7. PUBLIC & GLOBAL SETTINGS API (GLOBAL FREE MODE & FESTIVAL)
   // -----------------------------------------------------------------
-  app.get("/api/settings/global-free-mode", async (req, res) => {
+  const handleGetGlobalFreeMode = async (req: express.Request, res: express.Response) => {
     try {
       const globalSettings = await dbManager.getSettings('global');
       const enabled = !!(globalSettings && globalSettings.globalFreeMode);
@@ -2101,9 +2245,9 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
-  });
+  };
 
-  app.post("/api/admin/settings/global-free-mode", requireAdmin, async (req, res) => {
+  const handlePostGlobalFreeMode = async (req: express.Request, res: express.Response) => {
     try {
       const isSuper = await checkSuperAdminPerm(req);
       if (!isSuper) {
@@ -2136,7 +2280,18 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
-  });
+  };
+
+  // Support all hyphenated and underscored endpoint variations
+  app.get("/api/settings/global-free-mode", handleGetGlobalFreeMode);
+  app.get("/api/settings/global_free_mode", handleGetGlobalFreeMode);
+  app.get("/api/admin/settings/global-free-mode", handleGetGlobalFreeMode);
+  app.get("/api/admin/settings/global_free_mode", handleGetGlobalFreeMode);
+
+  app.post("/api/admin/settings/global-free-mode", requireAdmin, handlePostGlobalFreeMode);
+  app.post("/api/admin/settings/global_free_mode", requireAdmin, handlePostGlobalFreeMode);
+  app.post("/api/settings/global-free-mode", requireAdmin, handlePostGlobalFreeMode);
+  app.post("/api/settings/global_free_mode", requireAdmin, handlePostGlobalFreeMode);
 
   app.get("/api/settings/:id", async (req, res) => {
     try {
@@ -2168,23 +2323,6 @@ async function startServer() {
       res.status(500).json({ error: err.message });
     }
   });
-
-  const checkSuperAdminPerm = async (req: express.Request): Promise<boolean> => {
-    let adminUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.adminUid || req.query.uid) as string;
-    if (!adminUid || adminUid === 'null' || adminUid === 'undefined') {
-      adminUid = 'admin';
-    }
-    const lower = adminUid.toLowerCase();
-    if (lower === 'admin' || lower === 'super_admin' || lower === 'amirrezaveisi45@gmail.com' || lower === 'mr.v@admin.com' || lower.includes('amirrezaveisi') || lower.includes('mr.v')) {
-      return true;
-    }
-    let user = await dbManager.getUser(adminUid);
-    if (!user) {
-      user = await dbManager.getUserByEmail(adminUid);
-    }
-    if (!user) return true;
-    return isSuperAdminUser(user) || user.role === 'admin' || (user.roles || []).includes('admin') || (user.roles || []).includes('super_admin');
-  };
 
   // ZIP Archive In-Memory Buffer Cache for Ultra-Fast Chapter Streaming
   interface CachedZip {

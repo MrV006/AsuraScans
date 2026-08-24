@@ -1,0 +1,52 @@
+{
+  "series": [],
+  "chapters": [],
+  "comments": [],
+  "users": [],
+  "bookmarks": [],
+  "history": [],
+  "ratings": [],
+  "notifications": [],
+  "reports": [],
+  "wallet_transactions": [],
+  "purchased_chapters": [],
+  "settlement_requests": [],
+  "tickets": [],
+  "ticket_messages": [],
+  "chapter_views_log": [],
+  "settings": {
+    "global": {
+      "siteName": "AsuraClone",
+      "discordUrl": "https://discord.gg",
+      "telegramUrl": "https://t.me",
+      "featuredType": "Manhwa",
+      "activeAnnouncement": "به آسورا کلون خوش آمدید! اولین و بزرگترین مرجع مانهوا و مانگا.",
+      "globalFreeMode": false,
+      "globalFreeBannerText": "🎉 جشنواره دسترسی رایگان به تمام چپترها فعال است"
+    },
+    "taxonomy": {
+      "genres": [
+        "Action",
+        "Fantasy",
+        "Adventure",
+        "Comedy",
+        "Drama",
+        "Martial Arts",
+        "Rebirth",
+        "System",
+        "Magic",
+        "School Life"
+      ],
+      "types": [
+        "Manhwa",
+        "Manhua",
+        "Manga"
+      ],
+      "statuses": [
+        "Ongoing",
+        "Completed",
+        "Hiatus"
+      ]
+    }
+  }
+}

@@ -33,7 +33,8 @@ import {
   FileText,
   FileArchive,
   ShieldCheck,
-  Gift
+  Gift,
+  Bell
 } from "lucide-react";
 import { Series } from "../lib/types";
 import CooperationTab from "../components/CooperationTab";
@@ -45,6 +46,7 @@ import DownloadHostTab from "../components/DownloadHostTab";
 import TicketsTab from "../components/TicketsTab";
 import StorageCleanupTab from "../components/StorageCleanupTab";
 import FreeModeTab from "../components/FreeModeTab";
+import NotificationsTab from "../components/NotificationsTab";
 import { useSettings } from "../contexts/SettingsContext";
 
 import { ImageUploader } from "../components/ImageUploader";
@@ -107,12 +109,20 @@ export default function Admin() {
     editor: ['add_chapter', 'edit_chapter']
   });
 
-  const userRoles = currentUserData?.roles || [currentUserData?.role || 'user'];
+  const userRoles = currentUserData?.roles || (profile?.roles) || [currentUserData?.role || profile?.role || 'user'];
   const isSuperAdmin = userRoles.includes('super_admin') || 
+                       userRoles.includes('admin') ||
                        currentUserData?.email === "amirrezaveisi45@gmail.com" || 
                        currentUserData?.email === "Mr.V@admin.com" ||
+                       profile?.email === "amirrezaveisi45@gmail.com" ||
+                       profile?.email === "Mr.V@admin.com" ||
+                       user?.email === "amirrezaveisi45@gmail.com" ||
+                       user?.email === "Mr.V@admin.com" ||
                        currentUserData?.id === 'admin' ||
-                       currentUserData?.role === 'admin';
+                       currentUserData?.role === 'admin' ||
+                       profile?.role === 'admin' ||
+                       profile?.role === 'super_admin' ||
+                       isAdmin;
 
   const hasFrontendPermission = (permission: string) => {
     if (isSuperAdmin) return true;
@@ -240,6 +250,7 @@ export default function Admin() {
     | "download_host"
     | "tickets"
     | "storage_cleanup"
+    | "notifications"
   >("dashboard");
 
   // Auth Forms
@@ -1325,6 +1336,15 @@ export default function Admin() {
             </button>
           )}
 
+          {(isSuperAdmin || hasFrontendPermission('manage_settings')) && (
+            <button
+              onClick={() => setActiveTab("notifications")}
+              className={`px-6 py-3 rounded-xl font-bold uppercase text-sm tracking-wider flex items-center gap-2 transition-colors ${activeTab === "notifications" ? "bg-[var(--color-asura-accent)] text-white font-black shadow-lg shadow-[var(--color-asura-accent)]/30" : "bg-white/5 text-zinc-400 hover:text-white"}`}
+            >
+              <Bell size={18} /> مرکز اعلان‌ها و اطلاعیه‌ها
+            </button>
+          )}
+
           {isSuperAdmin && (
             <button
               onClick={() => setActiveTab("simulation")}
@@ -1493,7 +1513,8 @@ export default function Admin() {
                       onClick={async () => {
                         const nextState = !settings?.globalFreeMode;
                         try {
-                          await apiClient.toggleGlobalFreeMode(nextState, undefined, user?.uid);
+                          const effectiveUid = user?.uid || profile?.id || adminUid || 'admin';
+                          await apiClient.toggleGlobalFreeMode(nextState, undefined, effectiveUid);
                           if (reloadSettings) await reloadSettings();
                         } catch (err: any) {
                           alert(err.message || 'خطا در تغییر وضعیت');
@@ -4384,6 +4405,10 @@ export default function Admin() {
                 fetchUsersAndComments();
               }}
             />
+          )}
+
+          {activeTab === "notifications" && (
+            <NotificationsTab adminUid={adminUid} usersList={usersList} />
           )}
 
           {activeTab === "simulation" && isSuperAdmin && (

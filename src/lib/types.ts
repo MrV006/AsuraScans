@@ -50,6 +50,8 @@ export interface Series {
   slug?: string;
   status: string;
   rating: number;
+  ratingCount?: number;
+  ratingStats?: { 1: number; 2: number; 3: number; 4: number; 5: number };
   views?: number;
   type: string;
   totalChapters?: number;

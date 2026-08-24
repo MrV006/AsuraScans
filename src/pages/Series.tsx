@@ -23,7 +23,7 @@ export default function Series() {
   const { series, loading, mutate } = useSeriesOverview(id);
   const { isBookmarked, addBookmark, removeBookmark } = useBookmarks();
   const { getHistoryForSeries } = useHistory();
-  const { averageRating, userRating, submitRating, loading: ratingsLoading } = useRatings(id);
+  const { averageRating, userRating, submitRating, loading: ratingsLoading, totalRatings, starCounts, refetch: refetchRatings } = useRatings(series?.id || id);
 
   const [hoverRating, setHoverRating] = useState(0);
   const [showRatingModal, setShowRatingModal] = useState(false);
@@ -270,8 +270,8 @@ export default function Series() {
     if (!user) return;
     try {
       await apiClient.adjustRatings(series.id, score, action, user.uid);
-      alert(`امتیاز ${score} ستاره ${action === 'increment' ? 'افزایش' : 'کاهش'} یافت.`);
       mutate();
+      refetchRatings();
     } catch (err: any) {
       alert("خطا در ویرایش آمار امتیازدهی: " + err.message);
     }
@@ -553,8 +553,13 @@ export default function Series() {
                   <div className="flex items-center gap-1.5 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
                     <Star className="text-yellow-500" fill="currentColor" size={14} />
                     <span className="font-bold text-white text-sm">
-                      {ratingsLoading ? '...' : (averageRating > 0 ? averageRating.toFixed(1) : series.rating)}
+                      {ratingsLoading ? '...' : (averageRating > 0 ? averageRating.toFixed(1) : (series.rating ? Number(series.rating).toFixed(1) : '0.0'))}
                     </span>
+                    {(totalRatings > 0 || (series.ratingCount && series.ratingCount > 0)) && (
+                      <span className="text-[11px] text-zinc-400 font-medium mr-1">
+                        ({(totalRatings || series.ratingCount || 0).toLocaleString('fa-IR')} رای)
+                      </span>
+                    )}
                   </div>
                   {user && (
                     <div className="flex items-center gap-1 ml-2">
@@ -567,7 +572,8 @@ export default function Series() {
                           }}
                           onMouseEnter={() => setHoverRating(star)}
                           onMouseLeave={() => setHoverRating(0)}
-                          className="transition-transform hover:scale-110 focus:outline-none"
+                          className="transition-transform hover:scale-110 focus:outline-none cursor-pointer"
+                          title={`امتیاز ${star} ستاره`}
                         >
                           <Star 
                             size={18} 
@@ -603,31 +609,49 @@ export default function Series() {
 
             {/* Manual Rating Adjustment Count Panel (Admin only) */}
             {isGlobalAdmin && isAdminEditMode && (
-              <div className="mb-6 p-4 bg-yellow-500/5 border border-yellow-500/10 rounded-2xl">
-                <h4 className="text-xs font-black text-yellow-400 mb-3 flex items-center gap-1.5">
-                  <Settings size={13} />
-                  تنظیم دستی تعداد آمار آرا (ویژه مدیریت)
-                </h4>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                  {[1, 2, 3, 4, 5].map((score) => (
-                    <div key={score} className="bg-black/30 p-2 rounded-xl flex flex-col items-center border border-white/5">
-                      <span className="text-[11px] font-black text-zinc-400 mb-2">{score} ستاره</span>
-                      <div className="flex gap-1">
-                        <button 
-                          onClick={() => handleAdjustRatings(score, 'increment')}
-                          className="px-2 py-0.5 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-white rounded text-[10px] font-bold transition-all"
-                        >
-                          +۱
-                        </button>
-                        <button 
-                          onClick={() => handleAdjustRatings(score, 'decrement')}
-                          className="px-2 py-0.5 bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white rounded text-[10px] font-bold transition-all"
-                        >
-                          -۱
-                        </button>
+              <div className="mb-6 p-4 bg-yellow-500/5 border border-yellow-500/10 rounded-2xl" dir="rtl">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-xs font-black text-yellow-400 flex items-center gap-1.5">
+                    <Settings size={13} />
+                    تنظیم دستی تعداد آمار آرا (ویژه مدیریت)
+                  </h4>
+                  <span className="text-[11px] text-zinc-400 font-bold">
+                    مجموع آرا: <span className="text-white font-black">{totalRatings || series.ratingCount || 0}</span> | میانگین: <span className="text-yellow-400 font-black">{averageRating > 0 ? averageRating.toFixed(1) : (series.rating || 0)}</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                  {[1, 2, 3, 4, 5].map((score) => {
+                    const count = starCounts[score as 1|2|3|4|5] ?? (series.ratingStats?.[score as 1|2|3|4|5] ?? 0);
+                    return (
+                      <div key={score} className="bg-black/40 p-2.5 rounded-xl flex flex-col items-center border border-white/5">
+                        <div className="flex items-center gap-1 mb-1">
+                          <Star size={11} className="text-yellow-400 fill-yellow-400" />
+                          <span className="text-[11px] font-black text-white">{score} ستاره</span>
+                        </div>
+                        <span className="text-xs font-black text-[var(--color-asura-accent-light)] mb-2 font-mono">
+                          {count} رای
+                        </span>
+                        <div className="flex gap-1 w-full justify-center">
+                          <button 
+                            type="button"
+                            onClick={() => handleAdjustRatings(score, 'increment')}
+                            className="px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-white rounded-lg text-[10px] font-bold transition-all flex-1 text-center"
+                            title="افزایش ۱ رای"
+                          >
+                            +۱
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={() => handleAdjustRatings(score, 'decrement')}
+                            className="px-2 py-1 bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white rounded-lg text-[10px] font-bold transition-all flex-1 text-center"
+                            title="کاهش ۱ رای"
+                          >
+                            -۱
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
