@@ -103,11 +103,39 @@ export function useHistory() {
   const [loading, setLoading] = useState(true);
 
   const fetchHistory = async () => {
+    // 24 hour cutoff for client side as well
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+
     if (!user) {
-      setHistory([]);
+      // Local fallback for guest users with 24h expiration
+      try {
+        const raw = localStorage.getItem('asura_guest_history');
+        if (raw) {
+          const list: ReadingHistory[] = JSON.parse(raw);
+          const valid = list.filter(item => new Date(item.updatedAt).getTime() >= oneDayAgo);
+          if (valid.length !== list.length) {
+            localStorage.setItem('asura_guest_history', JSON.stringify(valid));
+          }
+          const fullList = await Promise.all(
+            valid.map(async (h: any) => {
+              const s = await apiClient.getSeriesById(h.seriesId);
+              return {
+                ...h,
+                seriesData: s || undefined
+              };
+            })
+          );
+          setHistory(fullList);
+        } else {
+          setHistory([]);
+        }
+      } catch (err) {
+        setHistory([]);
+      }
       setLoading(false);
       return;
     }
+
     try {
       const data = await apiClient.getHistory(user.uid);
       const fullList = await Promise.all(
@@ -135,7 +163,7 @@ export function useHistory() {
 
     const socket = getSocketInstance();
     const handleUpdate = (data: any) => {
-      if (data.userId === user?.uid) {
+      if (!data || !data.userId || data.userId === user?.uid) {
         fetchHistory();
       }
     };
@@ -148,7 +176,29 @@ export function useHistory() {
   }, [user?.uid]);
 
   const updateHistory = async (seriesId: string, chapterId: string, chapterNumber: number) => {
-    if (!user) return false;
+    const now = new Date().toISOString();
+    if (!user) {
+      try {
+        const raw = localStorage.getItem('asura_guest_history');
+        let list: ReadingHistory[] = raw ? JSON.parse(raw) : [];
+        const existingIdx = list.findIndex(h => h.seriesId === seriesId);
+        const newItem: ReadingHistory = { seriesId, chapterId, chapterNumber, updatedAt: now };
+        if (existingIdx >= 0) {
+          list[existingIdx] = newItem;
+        } else {
+          list.unshift(newItem);
+        }
+        // Purge items older than 24h
+        const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+        list = list.filter(h => new Date(h.updatedAt).getTime() >= oneDayAgo);
+        localStorage.setItem('asura_guest_history', JSON.stringify(list));
+        fetchHistory();
+        return true;
+      } catch (err) {
+        return false;
+      }
+    }
+
     try {
       await apiClient.updateHistory(user.uid, { seriesId, chapterId, chapterNumber });
       return true;
@@ -158,9 +208,52 @@ export function useHistory() {
     }
   };
 
+  const deleteHistoryItem = async (seriesId: string) => {
+    if (!user) {
+      try {
+        const raw = localStorage.getItem('asura_guest_history');
+        if (raw) {
+          const list: ReadingHistory[] = JSON.parse(raw);
+          const filtered = list.filter(h => h.seriesId !== seriesId);
+          localStorage.setItem('asura_guest_history', JSON.stringify(filtered));
+          fetchHistory();
+        }
+        return true;
+      } catch (err) {
+        return false;
+      }
+    }
+
+    try {
+      await apiClient.deleteHistoryItem(user.uid, seriesId);
+      await fetchHistory();
+      return true;
+    } catch (e) {
+      console.error("Error deleting history item:", e);
+      return false;
+    }
+  };
+
+  const clearHistory = async () => {
+    if (!user) {
+      localStorage.removeItem('asura_guest_history');
+      setHistory([]);
+      return true;
+    }
+
+    try {
+      await apiClient.clearHistory(user.uid);
+      setHistory([]);
+      return true;
+    } catch (e) {
+      console.error("Error clearing history:", e);
+      return false;
+    }
+  };
+
   const getHistoryForSeries = (seriesId: string) => {
     return history.find(h => h.seriesId === seriesId);
   };
 
-  return { history, loading, updateHistory, getHistoryForSeries };
+  return { history, loading, updateHistory, deleteHistoryItem, clearHistory, getHistoryForSeries, refreshHistory: fetchHistory };
 }

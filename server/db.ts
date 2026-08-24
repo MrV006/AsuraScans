@@ -2211,14 +2211,73 @@ class DatabaseManager {
   }
 
   // -----------------------------------------------------------------
-  // HISTORY METHODS
+  // HISTORY METHODS (WITH AUTOMATIC DAILY END-OF-DAY CLEANUP)
   // -----------------------------------------------------------------
+  async cleanupOldHistory(cutoffHours: number = 24): Promise<{ deletedCount: number }> {
+    let deletedCount = 0;
+    try {
+      const cutoffMs = Date.now() - cutoffHours * 60 * 60 * 1000;
+      const cutoffIso = new Date(cutoffMs).toISOString();
+
+      if (this.isUsingMySQL && this.pool) {
+        const [res]: any = await this.pool.execute(
+          'DELETE FROM history WHERE updatedAt < ?',
+          [cutoffIso]
+        );
+        deletedCount = res?.affectedRows || 0;
+      } else {
+        if (!this.localData.history) this.localData.history = [];
+        const initialCount = this.localData.history.length;
+        this.localData.history = this.localData.history.filter(h => {
+          const itemTime = new Date(h.updatedAt).getTime();
+          return itemTime >= cutoffMs;
+        });
+        deletedCount = initialCount - this.localData.history.length;
+        if (deletedCount > 0) {
+          await this.saveLocalData();
+        }
+      }
+    } catch (err) {
+      console.error("Failed to cleanup old history:", err);
+    }
+    return { deletedCount };
+  }
+
   async getHistory(userId: string): Promise<HistoryItem[]> {
+    await this.cleanupOldHistory(24);
     if (this.isUsingMySQL && this.pool) {
       const [rows] = await this.pool.execute('SELECT * FROM history WHERE userId = ? ORDER BY updatedAt DESC', [userId]);
       return rows as HistoryItem[];
     }
-    return this.localData.history.filter(h => h.userId === userId).sort((a,b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return (this.localData.history || []).filter(h => h.userId === userId).sort((a,b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }
+
+  async deleteHistoryItem(userId: string, seriesId: string): Promise<boolean> {
+    if (this.isUsingMySQL && this.pool) {
+      await this.pool.execute('DELETE FROM history WHERE userId = ? AND seriesId = ?', [userId, seriesId]);
+      return true;
+    }
+    if (!this.localData.history) this.localData.history = [];
+    const initialLen = this.localData.history.length;
+    this.localData.history = this.localData.history.filter(h => !(h.userId === userId && h.seriesId === seriesId));
+    if (initialLen !== this.localData.history.length) {
+      await this.saveLocalData();
+    }
+    return true;
+  }
+
+  async clearUserHistory(userId: string): Promise<boolean> {
+    if (this.isUsingMySQL && this.pool) {
+      await this.pool.execute('DELETE FROM history WHERE userId = ?', [userId]);
+      return true;
+    }
+    if (!this.localData.history) this.localData.history = [];
+    const initialLen = this.localData.history.length;
+    this.localData.history = this.localData.history.filter(h => h.userId !== userId);
+    if (initialLen !== this.localData.history.length) {
+      await this.saveLocalData();
+    }
+    return true;
   }
 
   async saveHistoryItem(h: any): Promise<void> {
@@ -2249,9 +2308,14 @@ class DatabaseManager {
       updatedAt: now
     };
 
+    if (!this.localData.history) this.localData.history = [];
     if (existing) {
       const idx = this.localData.history.findIndex(item => item.userId === h.userId && item.seriesId === h.seriesId);
-      this.localData.history[idx] = item;
+      if (idx >= 0) {
+        this.localData.history[idx] = item;
+      } else {
+        this.localData.history.push(item);
+      }
     } else {
       this.localData.history.push(item);
     }

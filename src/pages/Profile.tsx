@@ -3,7 +3,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { Layout } from '../components/Layout';
 import { Navigate, Link } from 'react-router-dom';
-import { Settings, Bookmark, MessageSquare, Heart, Clock, Wallet, Trash2, ExternalLink, ThumbsUp, ThumbsDown, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { 
+  Settings, Bookmark, MessageSquare, Heart, Clock, Wallet, 
+  Trash2, ExternalLink, ThumbsUp, ThumbsDown, AlertCircle, 
+  CheckCircle2, Play, BookOpen, Search, Sparkles, RefreshCw, Zap
+} from 'lucide-react';
 import { useBookmarks, useHistory } from '../hooks/useUserActivity';
 import { formatDistanceToNow } from 'date-fns';
 import { apiClient, getSocketInstance } from '../lib/apiClient';
@@ -12,7 +16,7 @@ export default function Profile() {
   const { user, profile, loading, setShowSetupModal } = useAuth();
   const { settings } = useSettings();
   const { bookmarks, loading: bookmarksLoading, removeBookmark } = useBookmarks();
-  const { history, loading: historyLoading } = useHistory();
+  const { history, loading: historyLoading, deleteHistoryItem, clearHistory, refreshHistory } = useHistory();
   const [activeTab, setActiveTab] = useState<'bookmarks' | 'history' | 'comments' | 'settings' | 'wallet'>('bookmarks');
   const [displayName, setDisplayName] = useState(profile?.displayName || '');
   const [avatarUrl, setAvatarUrl] = useState(profile?.avatarUrl || '');
@@ -20,6 +24,11 @@ export default function Profile() {
   const [lastName, setLastName] = useState(profile?.lastName || '');
   const [phoneNumber, setPhoneNumber] = useState(profile?.phoneNumber || '');
   const [savingProfile, setSavingProfile] = useState(false);
+
+  // History specific states
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
+  const [clearingHistory, setClearingHistory] = useState(false);
+  const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
 
   // Wallet specific states
   const [dbUser, setDbUser] = useState<any>(null);
@@ -181,12 +190,19 @@ export default function Profile() {
   const getGroupedHistory = () => {
     const filtered = history.filter(h => {
       if (!h.seriesData) return false;
-      if (historyTypeFilter === 'all') return true;
-      const type = h.seriesData.type?.toLowerCase();
-      if (historyTypeFilter === 'مانهوا' && (type === 'manhwa' || type === 'مانهوا')) return true;
-      if (historyTypeFilter === 'مانگا' && (type === 'manga' || type === 'مانگا')) return true;
-      if (historyTypeFilter === 'مانها' && (type === 'manhua' || type === 'مانها')) return true;
-      return false;
+      if (historyTypeFilter !== 'all') {
+        const type = h.seriesData.type?.toLowerCase();
+        if (historyTypeFilter === 'مانهوا' && !(type === 'manhwa' || type === 'مانهوا')) return false;
+        if (historyTypeFilter === 'مانگا' && !(type === 'manga' || type === 'مانگا')) return false;
+        if (historyTypeFilter === 'مانها' && !(type === 'manhua' || type === 'مانها')) return false;
+      }
+      if (historySearchQuery.trim()) {
+        const q = historySearchQuery.trim().toLowerCase();
+        const title = (h.seriesData.title || '').toLowerCase();
+        const alt = (h.seriesData.alternativeTitles || []).join(' ').toLowerCase();
+        if (!title.includes(q) && !alt.includes(q)) return false;
+      }
+      return true;
     });
 
     const today: typeof history = [];
@@ -215,7 +231,32 @@ export default function Profile() {
       }
     });
 
-    return { today, yesterday, older, totalCount: filtered.length };
+    return { today, yesterday, older, totalCount: filtered.length, rawTotal: history.length };
+  };
+
+  const handleDeleteHistoryItem = async (e: React.MouseEvent, seriesId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDeletingHistoryId(seriesId);
+    try {
+      await deleteHistoryItem(seriesId);
+    } catch (err) {
+      console.error("Failed to delete history item:", err);
+    } finally {
+      setDeletingHistoryId(null);
+    }
+  };
+
+  const handleClearAllHistory = async () => {
+    if (!window.confirm('آیا از پاکسازی کامل سوابق تاریخچه مطالعه خود اطمینان دارید؟')) return;
+    setClearingHistory(true);
+    try {
+      await clearHistory();
+    } catch (err) {
+      console.error("Failed to clear history:", err);
+    } finally {
+      setClearingHistory(false);
+    }
   };
 
   if (loading) {
@@ -380,52 +421,183 @@ export default function Profile() {
               {/* ========================================================= */}
               {activeTab === 'history' && (
                 historyLoading ? (
-                  <div className="flex justify-center items-center h-64">
+                  <div className="flex flex-col justify-center items-center h-64 gap-3">
                     <div className="w-8 h-8 border-4 border-slate-700 border-t-[var(--color-asura-accent)] rounded-full animate-spin"></div>
+                    <span className="text-xs text-zinc-500 font-bold">در حال بارگذاری تاریخچه مطالعه...</span>
                   </div>
                 ) : (
-                  <div>
-                    {/* Categories Filter Bar */}
-                    <div className="flex flex-wrap items-center gap-2 mb-6 bg-black/20 p-2 rounded-xl border border-white/5">
-                      <span className="text-[11px] font-black text-zinc-500 px-2">دسته بندی:</span>
-                      {(['all', 'مانهوا', 'مانگا', 'مانها'] as const).map(filter => (
+                  <div className="space-y-5" dir="rtl">
+                    {/* Host Auto-Cleanup Notice Banner */}
+                    <div className="flex items-start gap-3 p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-right">
+                      <Zap size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-xs font-black text-amber-300">بهینه‌سازی خودکار فضای هاست و دیتابیس</h4>
+                        <p className="text-[11px] text-amber-200/80 mt-0.5 leading-relaxed font-medium">
+                          برای جلوگیری از پر شدن حافظه هاست و حفظ سرعت بالای وب‌سایت، سوابق تاریخچه مطالعه در پایان هر روز به صورت خودکار از هاست پاکسازی می‌شوند.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Filter & Action Controls Bar */}
+                    <div className="bg-[#14151b] border border-white/5 p-3 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      {/* Category filters & Search */}
+                      <div className="flex flex-wrap items-center gap-2 flex-1">
+                        <div className="flex items-center gap-1 bg-black/30 p-1 rounded-xl border border-white/5">
+                          {(['all', 'مانهوا', 'مانگا', 'مانها'] as const).map(filter => (
+                            <button
+                              key={filter}
+                              onClick={() => setHistoryTypeFilter(filter)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${historyTypeFilter === filter ? 'bg-[var(--color-asura-accent)] text-white shadow-md shadow-[var(--color-asura-accent)]/30' : 'text-zinc-400 hover:text-white hover:bg-white/5'}`}
+                            >
+                              {filter === 'all' ? 'همه آثار' : filter}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Search Input */}
+                        <div className="relative flex-1 min-w-[160px] max-w-xs">
+                          <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                          <input
+                            type="text"
+                            value={historySearchQuery}
+                            onChange={(e) => setHistorySearchQuery(e.target.value)}
+                            placeholder="جستجو در تاریخچه..."
+                            className="w-full bg-black/30 border border-white/5 focus:border-[var(--color-asura-accent)]/50 rounded-xl pr-8 pl-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none transition-all"
+                          />
+                          {historySearchQuery && (
+                            <button 
+                              onClick={() => setHistorySearchQuery('')}
+                              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 hover:text-zinc-300"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right side: Clear All & Count badge */}
+                      <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
+                        <span className="text-[11px] text-zinc-400 font-bold bg-black/30 px-3 py-1.5 rounded-xl border border-white/5">
+                          {totalCount.toLocaleString('fa-IR')} اثر خوانده‌شده
+                        </span>
+
+                        {history.length > 0 && (
+                          <button
+                            onClick={handleClearAllHistory}
+                            disabled={clearingHistory}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                            title="پاکسازی کل سوابق تاریخچه مطالعه"
+                          >
+                            <Trash2 size={13} />
+                            <span>{clearingHistory ? 'در حال پاکسازی...' : 'پاکسازی تاریخچه'}</span>
+                          </button>
+                        )}
+
                         <button
-                          key={filter}
-                          onClick={() => setHistoryTypeFilter(filter)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all ${historyTypeFilter === filter ? 'bg-[var(--color-asura-accent)] text-white shadow-lg shadow-[var(--color-asura-accent)]/20' : 'text-zinc-400 hover:text-white bg-white/5'}`}
+                          onClick={() => refreshHistory()}
+                          className="p-1.5 bg-black/30 hover:bg-white/5 text-zinc-400 hover:text-white rounded-xl border border-white/5 transition-all"
+                          title="بروزرسانی"
                         >
-                          {filter === 'all' ? 'همه تاریخچه' : filter}
+                          <RefreshCw size={13} />
                         </button>
-                      ))}
+                      </div>
                     </div>
 
                     {totalCount === 0 ? (
-                      <div className="flex flex-col items-center justify-center h-64 text-zinc-500 bg-black/10 rounded-xl border border-dashed border-white/5 p-8">
-                        <Clock size={44} className="mb-4 text-zinc-700 opacity-60" />
-                        <p className="text-xs font-bold text-zinc-400">تاریخچه مطالعه‌ای در این دسته‌بندی وجود ندارد.</p>
+                      <div className="flex flex-col items-center justify-center py-16 text-center bg-[#14151b] rounded-2xl border border-dashed border-white/10 p-8">
+                        <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mb-4 text-zinc-600">
+                          <Clock size={32} />
+                        </div>
+                        <h4 className="text-sm font-black text-white mb-1">
+                          {historySearchQuery ? 'موردی با این عنوان یافت نشد' : 'تاریخچه مطالعه شما خالی است'}
+                        </h4>
+                        <p className="text-xs text-zinc-400 max-w-sm mb-6">
+                          {historySearchQuery 
+                            ? 'عبارت جستجو را تغییر دهید یا فیلترها را پاک کنید.' 
+                            : 'هر چتری که شروع به خواندن کنید در اینجا ثبت می‌شود تا بتوانید به راحتی مطالعه را ادامه دهید.'}
+                        </p>
+                        <Link
+                          to="/search"
+                          className="flex items-center gap-2 px-5 py-2.5 bg-[var(--color-asura-accent)] hover:brightness-110 text-white text-xs font-black rounded-xl transition-all shadow-lg shadow-[var(--color-asura-accent)]/20"
+                        >
+                          <BookOpen size={14} />
+                          <span>مشاهده و خواندن آثار</span>
+                        </Link>
                       </div>
                     ) : (
-                      <div className="space-y-8">
+                      <div className="space-y-6">
                         {/* TODAY GROUP */}
                         {today.length > 0 && (
-                          <div>
-                            <h3 className="text-xs font-black text-[var(--color-asura-accent-light)] mb-3 bg-[var(--color-asura-accent)]/5 px-3 py-1.5 rounded-lg inline-block">امروز</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-[var(--color-asura-accent)] animate-pulse"></span>
+                              <h3 className="text-xs font-black text-white">امروز</h3>
+                              <span className="text-[10px] font-bold text-zinc-500">({today.length} اثر)</span>
+                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                               {today.map(h => h.seriesData ? (
-                                <Link 
+                                <div 
                                   key={h.seriesId} 
-                                  to={`/reader/${h.seriesId}/${h.chapterId}`}
-                                  className="flex items-center gap-4 bg-black/20 hover:bg-white/5 border border-white/5 rounded-2xl p-3 transition-all duration-300 group"
+                                  className="flex items-center gap-3.5 bg-[#14151b] hover:bg-[#181a22] border border-white/5 hover:border-white/10 rounded-2xl p-3 transition-all duration-200 group relative"
                                 >
-                                   <img src={h.seriesData.cover} alt={h.seriesData.title} className="w-12 h-16 object-cover rounded-xl shadow-lg shrink-0" />
-                                   <div className="flex-1 min-w-0 text-right">
-                                     <h4 className="font-black text-white text-xs line-clamp-1 group-hover:text-[var(--color-asura-accent-light)] transition-colors">{h.seriesData.title}</h4>
-                                     <p className="text-zinc-400 text-[11px] mt-1 font-bold">آخرین مطالعه: چپتر {h.chapterNumber}</p>
-                                     <p className="text-[9px] text-zinc-600 mt-1 font-mono">
-                                       {new Date(h.updatedAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}
-                                     </p>
-                                   </div>
-                                </Link>
+                                  {/* Cover Thumbnail */}
+                                  <Link to={`/series/${encodeURIComponent(h.seriesId)}`} className="relative shrink-0 overflow-hidden rounded-xl">
+                                    <img 
+                                      src={h.seriesData.cover} 
+                                      alt={h.seriesData.title} 
+                                      className="w-16 h-22 object-cover rounded-xl shadow-md group-hover:scale-105 transition-transform duration-300" 
+                                    />
+                                    {h.seriesData.type && (
+                                      <span className="absolute bottom-1 right-1 text-[9px] font-black px-1.5 py-0.5 bg-black/80 backdrop-blur-sm text-amber-400 rounded-md">
+                                        {h.seriesData.type}
+                                      </span>
+                                    )}
+                                  </Link>
+
+                                  {/* Content info */}
+                                  <div className="flex-1 min-w-0 text-right flex flex-col justify-between h-full py-0.5">
+                                    <div>
+                                      <Link 
+                                        to={`/series/${encodeURIComponent(h.seriesId)}`}
+                                        className="font-black text-white text-xs line-clamp-1 group-hover:text-[var(--color-asura-accent-light)] transition-colors"
+                                      >
+                                        {h.seriesData.title}
+                                      </Link>
+                                      <div className="flex items-center gap-2 mt-1.5">
+                                        <span className="text-[11px] font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20">
+                                          آخرین مطالعه: چپتر {h.chapterNumber}
+                                        </span>
+                                        <span className="text-[10px] text-zinc-500 font-mono">
+                                          {new Date(h.updatedAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Action Buttons: Resume Reading & Delete */}
+                                    <div className="flex items-center gap-2 mt-3 pt-2 border-t border-white/5">
+                                      <Link
+                                        to={`/reader/${encodeURIComponent(h.seriesId)}/${encodeURIComponent(h.chapterId)}`}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 bg-[var(--color-asura-accent)] hover:brightness-110 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-[var(--color-asura-accent)]/20"
+                                      >
+                                        <Play size={12} fill="currentColor" />
+                                        <span>ادامه مطالعه (چپتر {h.chapterNumber})</span>
+                                      </Link>
+
+                                      <button
+                                        onClick={(e) => handleDeleteHistoryItem(e, h.seriesId)}
+                                        disabled={deletingHistoryId === h.seriesId}
+                                        className="p-1.5 bg-white/5 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 rounded-xl transition-all border border-white/5"
+                                        title="حذف این اثر از تاریخچه"
+                                      >
+                                        {deletingHistoryId === h.seriesId ? (
+                                          <div className="w-3.5 h-3.5 border-2 border-red-400 border-t-transparent rounded-full animate-spin"></div>
+                                        ) : (
+                                          <Trash2 size={13} />
+                                        )}
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
                               ) : null)}
                             </div>
                           </div>
@@ -433,24 +605,76 @@ export default function Profile() {
 
                         {/* YESTERDAY GROUP */}
                         {yesterday.length > 0 && (
-                          <div>
-                            <h3 className="text-xs font-black text-zinc-400 mb-3 bg-white/5 px-3 py-1.5 rounded-lg inline-block">دیروز</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-zinc-400"></span>
+                              <h3 className="text-xs font-black text-zinc-300">دیروز</h3>
+                              <span className="text-[10px] font-bold text-zinc-500">({yesterday.length} اثر)</span>
+                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                               {yesterday.map(h => h.seriesData ? (
-                                <Link 
+                                <div 
                                   key={h.seriesId} 
-                                  to={`/reader/${h.seriesId}/${h.chapterId}`}
-                                  className="flex items-center gap-4 bg-black/20 hover:bg-white/5 border border-white/5 rounded-2xl p-3 transition-all duration-300 group"
+                                  className="flex items-center gap-3.5 bg-[#14151b] hover:bg-[#181a22] border border-white/5 hover:border-white/10 rounded-2xl p-3 transition-all duration-200 group relative"
                                 >
-                                   <img src={h.seriesData.cover} alt={h.seriesData.title} className="w-12 h-16 object-cover rounded-xl shadow-lg shrink-0" />
-                                   <div className="flex-1 min-w-0 text-right">
-                                     <h4 className="font-black text-white text-xs line-clamp-1 group-hover:text-[var(--color-asura-accent-light)] transition-colors">{h.seriesData.title}</h4>
-                                     <p className="text-zinc-400 text-[11px] mt-1 font-bold">آخرین مطالعه: چپتر {h.chapterNumber}</p>
-                                     <p className="text-[9px] text-zinc-600 mt-1 font-mono">
-                                       {new Date(h.updatedAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}
-                                     </p>
-                                   </div>
-                                </Link>
+                                  {/* Cover Thumbnail */}
+                                  <Link to={`/series/${encodeURIComponent(h.seriesId)}`} className="relative shrink-0 overflow-hidden rounded-xl">
+                                    <img 
+                                      src={h.seriesData.cover} 
+                                      alt={h.seriesData.title} 
+                                      className="w-16 h-22 object-cover rounded-xl shadow-md group-hover:scale-105 transition-transform duration-300" 
+                                    />
+                                    {h.seriesData.type && (
+                                      <span className="absolute bottom-1 right-1 text-[9px] font-black px-1.5 py-0.5 bg-black/80 backdrop-blur-sm text-amber-400 rounded-md">
+                                        {h.seriesData.type}
+                                      </span>
+                                    )}
+                                  </Link>
+
+                                  {/* Content info */}
+                                  <div className="flex-1 min-w-0 text-right flex flex-col justify-between h-full py-0.5">
+                                    <div>
+                                      <Link 
+                                        to={`/series/${encodeURIComponent(h.seriesId)}`}
+                                        className="font-black text-white text-xs line-clamp-1 group-hover:text-[var(--color-asura-accent-light)] transition-colors"
+                                      >
+                                        {h.seriesData.title}
+                                      </Link>
+                                      <div className="flex items-center gap-2 mt-1.5">
+                                        <span className="text-[11px] font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20">
+                                          آخرین مطالعه: چپتر {h.chapterNumber}
+                                        </span>
+                                        <span className="text-[10px] text-zinc-500 font-mono">
+                                          {new Date(h.updatedAt).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div className="flex items-center gap-2 mt-3 pt-2 border-t border-white/5">
+                                      <Link
+                                        to={`/reader/${encodeURIComponent(h.seriesId)}/${encodeURIComponent(h.chapterId)}`}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 bg-[var(--color-asura-accent)] hover:brightness-110 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-[var(--color-asura-accent)]/20"
+                                      >
+                                        <Play size={12} fill="currentColor" />
+                                        <span>ادامه مطالعه (چپتر {h.chapterNumber})</span>
+                                      </Link>
+
+                                      <button
+                                        onClick={(e) => handleDeleteHistoryItem(e, h.seriesId)}
+                                        disabled={deletingHistoryId === h.seriesId}
+                                        className="p-1.5 bg-white/5 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 rounded-xl transition-all border border-white/5"
+                                        title="حذف این اثر از تاریخچه"
+                                      >
+                                        {deletingHistoryId === h.seriesId ? (
+                                          <div className="w-3.5 h-3.5 border-2 border-red-400 border-t-transparent rounded-full animate-spin"></div>
+                                        ) : (
+                                          <Trash2 size={13} />
+                                        )}
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
                               ) : null)}
                             </div>
                           </div>
@@ -458,24 +682,76 @@ export default function Profile() {
 
                         {/* OLDER GROUP */}
                         {older.length > 0 && (
-                          <div>
-                            <h3 className="text-xs font-black text-zinc-500 mb-3 bg-white/5 px-3 py-1.5 rounded-lg inline-block">پیش‌تر</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-zinc-600"></span>
+                              <h3 className="text-xs font-black text-zinc-400">پیش‌تر</h3>
+                              <span className="text-[10px] font-bold text-zinc-500">({older.length} اثر)</span>
+                            </div>
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                               {older.map(h => h.seriesData ? (
-                                <Link 
+                                <div 
                                   key={h.seriesId} 
-                                  to={`/reader/${h.seriesId}/${h.chapterId}`}
-                                  className="flex items-center gap-4 bg-black/20 hover:bg-white/5 border border-white/5 rounded-2xl p-3 transition-all duration-300 group"
+                                  className="flex items-center gap-3.5 bg-[#14151b] hover:bg-[#181a22] border border-white/5 hover:border-white/10 rounded-2xl p-3 transition-all duration-200 group relative"
                                 >
-                                   <img src={h.seriesData.cover} alt={h.seriesData.title} className="w-12 h-16 object-cover rounded-xl shadow-lg shrink-0" />
-                                   <div className="flex-1 min-w-0 text-right">
-                                     <h4 className="font-black text-white text-xs line-clamp-1 group-hover:text-[var(--color-asura-accent-light)] transition-colors">{h.seriesData.title}</h4>
-                                     <p className="text-zinc-400 text-[11px] mt-1 font-bold">آخرین مطالعه: چپتر {h.chapterNumber}</p>
-                                     <p className="text-[9px] text-zinc-600 mt-1 font-mono">
-                                       {new Date(h.updatedAt).toLocaleDateString('fa-IR', { month: 'long', day: 'numeric' })}
-                                     </p>
-                                   </div>
-                                </Link>
+                                  {/* Cover Thumbnail */}
+                                  <Link to={`/series/${encodeURIComponent(h.seriesId)}`} className="relative shrink-0 overflow-hidden rounded-xl">
+                                    <img 
+                                      src={h.seriesData.cover} 
+                                      alt={h.seriesData.title} 
+                                      className="w-16 h-22 object-cover rounded-xl shadow-md group-hover:scale-105 transition-transform duration-300" 
+                                    />
+                                    {h.seriesData.type && (
+                                      <span className="absolute bottom-1 right-1 text-[9px] font-black px-1.5 py-0.5 bg-black/80 backdrop-blur-sm text-amber-400 rounded-md">
+                                        {h.seriesData.type}
+                                      </span>
+                                    )}
+                                  </Link>
+
+                                  {/* Content info */}
+                                  <div className="flex-1 min-w-0 text-right flex flex-col justify-between h-full py-0.5">
+                                    <div>
+                                      <Link 
+                                        to={`/series/${encodeURIComponent(h.seriesId)}`}
+                                        className="font-black text-white text-xs line-clamp-1 group-hover:text-[var(--color-asura-accent-light)] transition-colors"
+                                      >
+                                        {h.seriesData.title}
+                                      </Link>
+                                      <div className="flex items-center gap-2 mt-1.5">
+                                        <span className="text-[11px] font-black text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20">
+                                          آخرین مطالعه: چپتر {h.chapterNumber}
+                                        </span>
+                                        <span className="text-[10px] text-zinc-500 font-mono">
+                                          {new Date(h.updatedAt).toLocaleDateString('fa-IR', { month: 'long', day: 'numeric' })}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div className="flex items-center gap-2 mt-3 pt-2 border-t border-white/5">
+                                      <Link
+                                        to={`/reader/${encodeURIComponent(h.seriesId)}/${encodeURIComponent(h.chapterId)}`}
+                                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-3 bg-[var(--color-asura-accent)] hover:brightness-110 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-[var(--color-asura-accent)]/20"
+                                      >
+                                        <Play size={12} fill="currentColor" />
+                                        <span>ادامه مطالعه (چپتر {h.chapterNumber})</span>
+                                      </Link>
+
+                                      <button
+                                        onClick={(e) => handleDeleteHistoryItem(e, h.seriesId)}
+                                        disabled={deletingHistoryId === h.seriesId}
+                                        className="p-1.5 bg-white/5 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 rounded-xl transition-all border border-white/5"
+                                        title="حذف این اثر از تاریخچه"
+                                      >
+                                        {deletingHistoryId === h.seriesId ? (
+                                          <div className="w-3.5 h-3.5 border-2 border-red-400 border-t-transparent rounded-full animate-spin"></div>
+                                        ) : (
+                                          <Trash2 size={13} />
+                                        )}
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
                               ) : null)}
                             </div>
                           </div>

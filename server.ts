@@ -168,16 +168,21 @@ async function startServer() {
     }
   }, 30 * 60 * 1000);
 
-  // Automated notification lifecycle manager:
-  // Purges read notifications > 24 hours (daily) and unread notifications > 7 days (weekly)
+  // Automated notification and reading history lifecycle manager:
+  // Purges read notifications > 24 hours (daily), unread notifications > 7 days (weekly),
+  // and purges reading history > 24 hours (daily end-of-day host cleanup)
   setInterval(async () => {
     try {
-      const result = await dbManager.cleanupOldNotifications();
-      if (result.totalDeleted > 0) {
-        console.log(`[Notification Life-Cycle Auto-Purge] Cleaned up ${result.totalDeleted} expired notifications (Read > 24h: ${result.readDeleted}, Unread > 7d: ${result.unreadDeleted}).`);
+      const notifResult = await dbManager.cleanupOldNotifications();
+      if (notifResult.totalDeleted > 0) {
+        console.log(`[Notification Life-Cycle Auto-Purge] Cleaned up ${notifResult.totalDeleted} expired notifications (Read > 24h: ${notifResult.readDeleted}, Unread > 7d: ${notifResult.unreadDeleted}).`);
+      }
+      const historyResult = await dbManager.cleanupOldHistory(24);
+      if (historyResult.deletedCount > 0) {
+        console.log(`[Reading History Auto-Purge] Purged ${historyResult.deletedCount} daily reading history records to free host memory.`);
       }
     } catch (e) {
-      console.error("[Notification Life-Cycle] Auto-cleanup error:", e);
+      console.error("[Life-Cycle] Auto-cleanup error:", e);
     }
   }, 30 * 60 * 1000); // Check every 30 minutes
 
@@ -2185,6 +2190,26 @@ async function startServer() {
         userId: req.params.userId,
         ...req.body
       });
+      io.emit("history:updated", { userId: req.params.userId });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/users/:userId/history/:seriesId", async (req, res) => {
+    try {
+      await dbManager.deleteHistoryItem(req.params.userId, req.params.seriesId);
+      io.emit("history:updated", { userId: req.params.userId });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/users/:userId/history", async (req, res) => {
+    try {
+      await dbManager.clearUserHistory(req.params.userId);
       io.emit("history:updated", { userId: req.params.userId });
       res.json({ success: true });
     } catch (err: any) {

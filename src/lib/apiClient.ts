@@ -421,6 +421,22 @@ export const apiClient = {
     return res.json();
   },
 
+  async deleteHistoryItem(userId: string, seriesId: string) {
+    const res = await fetch(`${API_URL}/api/users/${userId}/history/${encodeURIComponent(seriesId)}`, {
+      method: 'DELETE',
+      headers: this.getHeaders()
+    });
+    return res.json();
+  },
+
+  async clearHistory(userId: string) {
+    const res = await fetch(`${API_URL}/api/users/${userId}/history`, {
+      method: 'DELETE',
+      headers: this.getHeaders()
+    });
+    return res.json();
+  },
+
   // RATINGS API
   async getRatings(seriesId: string) {
     const res = await fetch(`${API_URL}/api/series/${seriesId}/ratings`, { headers: this.getHeaders() });
