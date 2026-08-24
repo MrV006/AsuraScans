@@ -150,7 +150,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         ...defaultSettings,
         ...(globalSet || {}),
         ...(seoSet || {}),
-        // Ensure synchronized properties
+        // Ensure synchronized properties & strictly preserve globalFreeMode from globalSet
+        globalFreeMode: globalSet?.globalFreeMode !== undefined ? !!globalSet.globalFreeMode : defaultSettings.globalFreeMode,
+        globalFreeBannerText: globalSet?.globalFreeBannerText || defaultSettings.globalFreeBannerText,
         siteName: seoSet?.siteName || globalSet?.siteName || defaultSettings.siteName,
         siteTitle: seoSet?.siteTitle || globalSet?.siteTitle || defaultSettings.siteTitle,
         seoDescription: seoSet?.metaDescription || seoSet?.seoDescription || globalSet?.seoDescription || defaultSettings.seoDescription,
@@ -275,14 +277,33 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     fetchSettingsAndTaxonomy();
 
     const socket = getSocketInstance();
+
+    const handleFreeModeRealtime = (data: any) => {
+      if (data && typeof data.enabled === 'boolean') {
+        setSettings(prev => {
+          const updated = {
+            ...prev,
+            globalFreeMode: data.enabled,
+            ...(data.bannerText !== undefined ? { globalFreeBannerText: data.bannerText } : {})
+          };
+          try {
+            localStorage.setItem('asura_site_settings', JSON.stringify(updated));
+          } catch (e) {}
+          return updated;
+        });
+      } else {
+        fetchSettingsAndTaxonomy();
+      }
+    };
+
     socket.on("settings:updated", fetchSettingsAndTaxonomy);
-    socket.on("settings:global_free_mode_updated", fetchSettingsAndTaxonomy);
-    socket.on("global_free_mode:updated", fetchSettingsAndTaxonomy);
+    socket.on("settings:global_free_mode_updated", handleFreeModeRealtime);
+    socket.on("global_free_mode:updated", handleFreeModeRealtime);
 
     return () => {
       socket.off("settings:updated", fetchSettingsAndTaxonomy);
-      socket.off("settings:global_free_mode_updated", fetchSettingsAndTaxonomy);
-      socket.off("global_free_mode:updated", fetchSettingsAndTaxonomy);
+      socket.off("settings:global_free_mode_updated", handleFreeModeRealtime);
+      socket.off("global_free_mode:updated", handleFreeModeRealtime);
     };
   }, []);
 

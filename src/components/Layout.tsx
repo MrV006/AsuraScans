@@ -1,4 +1,4 @@
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { Navbar } from './Navbar';
 import { Github, Twitter, MessageCircle, Instagram, Send, Wrench, ShieldAlert } from 'lucide-react';
 import { useSettings } from '../contexts/SettingsContext';
@@ -6,10 +6,13 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
 import { MaintenanceView, isUserStaffOrAdmin } from './MaintenanceView';
+import { FreeModeBanner } from './FreeModeBanner';
+import { AuthModal } from './AuthModal';
 
 export function Layout({ children }: { children: ReactNode }) {
   const { settings, genres, loading } = useSettings();
   const { user, profile, isSimulatingUser, setIsSimulatingUser } = useAuth();
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -82,6 +85,9 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       )}
       <Navbar />
+      {settings.globalFreeMode && (
+        <FreeModeBanner onOpenAuthModal={() => setShowAuthModal(true)} />
+      )}
       <AnimatePresence mode="wait">
         <motion.main 
           key={location.pathname}
@@ -89,11 +95,16 @@ export function Layout({ children }: { children: ReactNode }) {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -10 }}
           transition={{ duration: 0.2 }}
-          className="flex-grow pt-16 selection:bg-[var(--color-asura-accent)] selection:text-white"
+          className={`flex-grow ${settings.globalFreeMode ? 'pt-[106px]' : 'pt-16'} selection:bg-[var(--color-asura-accent)] selection:text-white`}
         >
           {children}
         </motion.main>
       </AnimatePresence>
+
+      <AuthModal 
+        isOpen={showAuthModal} 
+        onClose={() => setShowAuthModal(false)} 
+      />
       
       <footer className="bg-[#0f0f12] border-t border-white/5 mt-20 py-12">
         <div className="max-w-7xl mx-auto px-4 md:px-8 grid grid-cols-1 md:grid-cols-4 gap-8">

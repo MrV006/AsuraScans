@@ -110,19 +110,21 @@ export default function Admin() {
   });
 
   const userRoles = currentUserData?.roles || (profile?.roles) || [currentUserData?.role || profile?.role || 'user'];
-  const isSuperAdmin = userRoles.includes('super_admin') || 
-                       userRoles.includes('admin') ||
-                       currentUserData?.email === "amirrezaveisi45@gmail.com" || 
-                       currentUserData?.email === "Mr.V@admin.com" ||
-                       profile?.email === "amirrezaveisi45@gmail.com" ||
-                       profile?.email === "Mr.V@admin.com" ||
-                       user?.email === "amirrezaveisi45@gmail.com" ||
-                       user?.email === "Mr.V@admin.com" ||
-                       currentUserData?.id === 'admin' ||
-                       currentUserData?.role === 'admin' ||
-                       profile?.role === 'admin' ||
-                       profile?.role === 'super_admin' ||
-                       isAdmin;
+  const isOwnerEmail = [
+    currentUserData?.email?.toLowerCase(),
+    profile?.email?.toLowerCase(),
+    user?.email?.toLowerCase()
+  ].some(e => e === "amirrezaveisi45@gmail.com" || e === "mr.v@admin.com");
+
+  const isSuperAdmin = (
+    userRoles.includes('super_admin') ||
+    profile?.role === 'super_admin' ||
+    currentUserData?.role === 'super_admin' ||
+    currentUserData?.id === 'admin' ||
+    currentUserData?.uid === 'admin' ||
+    isOwnerEmail ||
+    (userRoles.includes('admin') && !userRoles.some((r: string) => ['translator', 'cleaner', 'editor', 'typesetter', 'proofreader', 'contributor'].includes(r)))
+  );
 
   const hasFrontendPermission = (permission: string) => {
     if (isSuperAdmin) return true;
@@ -945,37 +947,39 @@ export default function Admin() {
     }
   };
 
-  const isTranslator = profile?.role === 'translator' || userRoles.includes('translator');
-  const isCleaner = profile?.role === 'cleaner' || userRoles.includes('cleaner');
-  const thrivesAsEditor = profile?.role === 'editor' || userRoles.includes('editor');
-  const isContributorRole = isTranslator || isCleaner || thrivesAsEditor;
-  const isStaffOrAdmin = isSuperAdmin || profile?.role === 'admin' || userRoles.includes('admin') || userRoles.includes('staff');
-  const isOnlyContributor = isContributorRole && !isStaffOrAdmin;
+  const isTranslator = profile?.role === 'translator' || userRoles.includes('translator') || currentUserData?.role === 'translator';
+  const isCleaner = profile?.role === 'cleaner' || userRoles.includes('cleaner') || currentUserData?.role === 'cleaner';
+  const thrivesAsEditor = profile?.role === 'editor' || userRoles.includes('editor') || currentUserData?.role === 'editor';
+  const isContributorRole = isTranslator || isCleaner || thrivesAsEditor || profile?.role === 'contributor' || userRoles.includes('contributor');
+  const isStaffOrAdmin = isSuperAdmin || ((profile?.role === 'admin' || userRoles.includes('admin') || userRoles.includes('staff')) && !isContributorRole);
+  const isOnlyContributor = isContributorRole && !isSuperAdmin;
 
   useEffect(() => {
     if (isOnlyContributor) {
-      if (activeTab === "dashboard" || activeTab === "manage" || activeTab === "series" || activeTab === "manage_chapters" || activeTab === "chapters") {
-        if (thrivesAsEditor) {
-          setActiveTab("editor_panel");
-        } else if (isTranslator) {
+      if (activeTab === "dashboard" || activeTab === "manage" || activeTab === "series" || activeTab === "manage_chapters" || activeTab === "chapters" || activeTab === "users" || activeTab === "settings" || activeTab === "free_mode" || activeTab === "revenue") {
+        if (isTranslator) {
           setActiveTab("translator_panel");
         } else if (isCleaner) {
           setActiveTab("cleaner_panel");
+        } else if (thrivesAsEditor) {
+          setActiveTab("editor_panel");
+        } else {
+          setActiveTab("cooperation");
         }
       }
     }
   }, [isOnlyContributor, isTranslator, isCleaner, thrivesAsEditor, activeTab]);
 
-  const showGeneralDashboard = !isOnlyContributor;
-  const showSeriesTabs = !isOnlyContributor && (isSuperAdmin || hasFrontendPermission('create_series') || hasFrontendPermission('edit_series'));
-  const showChapterTabs = !isOnlyContributor && (isSuperAdmin || hasFrontendPermission('add_chapter') || hasFrontendPermission('edit_chapter'));
+  const showGeneralDashboard = isSuperAdmin || (!isOnlyContributor && userRoles.includes('admin'));
+  const showSeriesTabs = isSuperAdmin || hasFrontendPermission('create_series') || hasFrontendPermission('edit_series');
+  const showChapterTabs = isSuperAdmin || hasFrontendPermission('add_chapter') || hasFrontendPermission('edit_chapter');
   const showUsersTab = isSuperAdmin || hasFrontendPermission('manage_users');
-  const showCommentsTab = isSuperAdmin || hasFrontendPermission('delete_comment');
+  const showCommentsTab = isSuperAdmin || hasFrontendPermission('delete_comment') || hasFrontendPermission('approve_comment');
   const showTaxonomyTab = isSuperAdmin || hasFrontendPermission('manage_settings');
   const showReportsTab = isSuperAdmin || hasFrontendPermission('manage_reports');
   const showSettingsTab = isSuperAdmin || hasFrontendPermission('manage_settings');
   const showWalletTab = isSuperAdmin || hasFrontendPermission('manage_wallets');
-  const showTicketsTab = isSuperAdmin || hasFrontendPermission('manage_reports') || hasFrontendPermission('manage_users') || true;
+  const showTicketsTab = isSuperAdmin || hasFrontendPermission('manage_reports') || hasFrontendPermission('manage_users');
 
   if (loading || checkingAdmin) {
     return (

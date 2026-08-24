@@ -2284,7 +2284,7 @@ async function startServer() {
       const updatedGlobal = {
         ...currentGlobal,
         globalFreeMode: !!enabled,
-        ...(bannerText !== undefined ? { globalFreeBannerText: bannerText } : {})
+        ...(bannerText !== undefined && bannerText !== null ? { globalFreeBannerText: String(bannerText).trim() } : {})
       };
 
       await dbManager.saveSettings('global', updatedGlobal);
@@ -2292,7 +2292,7 @@ async function startServer() {
       // Broadcast in real-time to all connected users
       io.emit("settings:updated", { settingsId: 'global' });
       io.emit("settings:global_free_mode_updated", { enabled: !!enabled, bannerText: updatedGlobal.globalFreeBannerText });
-      io.emit("global_free_mode:updated", { enabled: !!enabled });
+      io.emit("global_free_mode:updated", { enabled: !!enabled, bannerText: updatedGlobal.globalFreeBannerText });
 
       res.json({
         success: true,
@@ -2329,9 +2329,24 @@ async function startServer() {
 
   app.post("/api/settings/:id", async (req, res) => {
     try {
-      await dbManager.saveSettings(req.params.id, req.body);
-      io.emit("settings:updated", { settingsId: req.params.id });
-      res.json({ success: true });
+      const settingId = req.params.id;
+      let payload = req.body;
+      if (settingId === 'global') {
+        const existingGlobal = (await dbManager.getSettings('global')) || {};
+        payload = {
+          ...existingGlobal,
+          ...payload,
+          // Preserve globalFreeMode and banner text if not explicitly provided
+          globalFreeMode: payload.globalFreeMode !== undefined ? !!payload.globalFreeMode : !!existingGlobal.globalFreeMode,
+          globalFreeBannerText: payload.globalFreeBannerText !== undefined ? payload.globalFreeBannerText : (existingGlobal.globalFreeBannerText || "🎉 دسترسی رایگان سراسری به تمام چپترها برای همه کاربران فعال است.")
+        };
+      }
+      await dbManager.saveSettings(settingId, payload);
+      io.emit("settings:updated", { settingsId: settingId });
+      if (settingId === 'global') {
+        io.emit("settings:global_free_mode_updated", { enabled: !!payload.globalFreeMode, bannerText: payload.globalFreeBannerText });
+      }
+      res.json({ success: true, settings: payload });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
