@@ -81,23 +81,50 @@ export function useSeriesList() {
   return { series, loading, error, mutate: fetchSeries };
 }
 
-export function useSeriesOverview(id?: string) {
-  const [series, setSeries] = useState<Series | null>(null);
-  const [loading, setLoading] = useState(true);
+export const seriesOverviewCache = new Map<string, { data: Series; timestamp: number }>();
 
-  const fetchOverview = async () => {
+export function clearSeriesCache(id?: string) {
+  if (id) {
+    seriesOverviewCache.delete(id);
+    try {
+      seriesOverviewCache.delete(decodeURIComponent(id).trim());
+    } catch (e) {}
+  } else {
+    seriesOverviewCache.clear();
+  }
+}
+
+export function useSeriesOverview(id?: string, initialData?: Series | null) {
+  const cleanId = id ? decodeURIComponent(id).trim() : '';
+  const cached = cleanId ? (seriesOverviewCache.get(cleanId) || seriesOverviewCache.get(id || '')) : null;
+  const initial = initialData || (cached ? cached.data : null);
+
+  const [series, setSeries] = useState<Series | null>(initial);
+  const [loading, setLoading] = useState(!initial);
+
+  const fetchOverview = async (isBackground = false) => {
     if (!id) {
       setLoading(false);
       return;
     }
+    if (!isBackground && !initial && !cached) {
+      setLoading(true);
+    }
     try {
-      const s = await apiClient.getSeriesById(id);
+      const [s, chapters] = await Promise.all([
+        apiClient.getSeriesById(id),
+        apiClient.getChapters(id).catch(() => [])
+      ]);
+
       if (s) {
-        const chapters = await apiClient.getChapters(s.id || id).catch(() => []);
         s.chapters = Array.isArray(chapters) ? chapters : [];
+        seriesOverviewCache.set(id, { data: s, timestamp: Date.now() });
+        if (cleanId) seriesOverviewCache.set(cleanId, { data: s, timestamp: Date.now() });
+        if (s.id) seriesOverviewCache.set(s.id, { data: s, timestamp: Date.now() });
+        if (s.slug) seriesOverviewCache.set(s.slug, { data: s, timestamp: Date.now() });
         setSeries(s);
       } else {
-        setSeries(null);
+        if (!initial) setSeries(null);
       }
       setLoading(false);
     } catch (err) {
@@ -107,13 +134,26 @@ export function useSeriesOverview(id?: string) {
   };
 
   useEffect(() => {
-    setLoading(true);
-    fetchOverview();
+    if (initialData) {
+      setSeries(initialData);
+      setLoading(false);
+      if (id) seriesOverviewCache.set(id, { data: initialData, timestamp: Date.now() });
+    } else {
+      const isCached = cleanId && (seriesOverviewCache.has(cleanId) || seriesOverviewCache.has(id || ''));
+      if (isCached) {
+        const existing = (seriesOverviewCache.get(cleanId) || seriesOverviewCache.get(id || ''))?.data;
+        if (existing) {
+          setSeries(existing);
+          setLoading(false);
+        }
+      }
+    }
+    fetchOverview(!!(initialData || cached));
 
     const socket = getSocketInstance();
     const handleUpdate = (data: any) => {
       if (!data || data.seriesId === id || data.id === id || (series && (data.seriesId === series.id || data.id === series.id))) {
-        fetchOverview();
+        fetchOverview(true);
       }
     };
 
@@ -124,7 +164,7 @@ export function useSeriesOverview(id?: string) {
       socket.off("series:updated", handleUpdate);
       socket.off("chapters:updated", handleUpdate);
     };
-  }, [id]);
+  }, [id, initialData]);
 
-  return { series, loading, mutate: fetchOverview };
+  return { series, loading, error: null, mutate: () => fetchOverview(false) };
 }

@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useSeriesOverview } from '../hooks/useSeries';
 import { useBookmarks, useHistory } from '../hooks/useUserActivity';
 import { useRatings } from '../hooks/useRatings';
 import { useAuth } from '../contexts/AuthContext';
 import { Layout } from '../components/Layout';
-import { Star, Clock, Heart, Play, Edit2, Trash2, Check, X, ShieldAlert, UserCheck, Plus, Settings, BookOpen, Users, MessageSquare, UserPlus, Sparkles } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Star, Clock, Heart, Play, Edit2, Trash2, Check, X, ShieldAlert, UserCheck, Plus, Settings, BookOpen, Users, MessageSquare, UserPlus, Sparkles, BarChart2, ChevronDown, ChevronUp, Save } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Comments } from '../components/Comments';
 import WorkTeamTab from '../components/WorkTeamTab';
 import { formatDistanceToNow } from 'date-fns';
@@ -19,8 +19,10 @@ import { SEOHead } from '../components/SEOHead';
 export default function Series() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const initialSeriesFromNav = (location.state as any)?.initialSeries;
   const { user, profile, isSimulatingUser } = useAuth();
-  const { series, loading, mutate } = useSeriesOverview(id);
+  const { series, loading, mutate } = useSeriesOverview(id, initialSeriesFromNav);
   const { isBookmarked, addBookmark, removeBookmark } = useBookmarks();
   const { getHistoryForSeries } = useHistory();
   const { averageRating, userRating, submitRating, loading: ratingsLoading, totalRatings, starCounts, refetch: refetchRatings } = useRatings(series?.id || id);
@@ -31,10 +33,18 @@ export default function Series() {
   const [ratingReviewText, setRatingReviewText] = useState("");
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [isAdminEditMode, setIsAdminEditMode] = useState(false);
+  const [showAdminRatingPanel, setShowAdminRatingPanel] = useState(false);
+  const [showRatingBreakdown, setShowRatingBreakdown] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [seriesTab, setSeriesTab] = useState<'chapters' | 'team' | 'comments'>('chapters');
   
+  // Admin star adjustment state
+  const [adminStarCounts, setAdminStarCounts] = useState<{ 1: number; 2: number; 3: number; 4: number; 5: number }>({
+    1: 0, 2: 0, 3: 0, 4: 0, 5: 0
+  });
+  const [isSavingRatingStats, setIsSavingRatingStats] = useState(false);
+
   // Contributor Request Fields
   const [joinRole, setJoinRole] = useState('translator');
   const [joinMelliCode, setJoinMelliCode] = useState(profile?.melliCode || '');
@@ -77,6 +87,18 @@ export default function Series() {
     }
   }, [profile]);
 
+  useEffect(() => {
+    if (starCounts) {
+      setAdminStarCounts({
+        1: starCounts[1] ?? (series?.ratingStats?.[1] || 0),
+        2: starCounts[2] ?? (series?.ratingStats?.[2] || 0),
+        3: starCounts[3] ?? (series?.ratingStats?.[3] || 0),
+        4: starCounts[4] ?? (series?.ratingStats?.[4] || 0),
+        5: starCounts[5] ?? (series?.ratingStats?.[5] || 0),
+      });
+    }
+  }, [starCounts, series?.ratingStats]);
+
   if (loading) {
     return (
       <Layout>
@@ -111,8 +133,21 @@ export default function Series() {
     }
   };
 
+  const handleDirectStarVote = async (star: number) => {
+    setSelectedRatingScore(star);
+    if (user) {
+      try {
+        await submitRating(star);
+      } catch (e) {}
+    }
+    setShowRatingModal(true);
+  };
+
   const handleSubmitReview = async () => {
-    if (!user) return;
+    if (!user) {
+      alert("لطفا برای ثبت نظر وارد شوید.");
+      return;
+    }
     setIsSubmittingReview(true);
     try {
       await submitRating(selectedRatingScore);
@@ -140,11 +175,19 @@ export default function Series() {
 
   // Filter out scheduled chapters
   // Admin and Contributor Authorization
-  const userRoles = profile?.roles || [profile?.role || 'user'];
-  const isSuperAdmin = userRoles.includes('super_admin') || 
-                       profile?.email === "amirrezaveisi45@gmail.com" || 
-                       profile?.email === "Mr.V@admin.com";
-  const isGlobalAdmin = (userRoles.includes('super_admin') || userRoles.includes('admin') || isSuperAdmin) && !isSimulatingUser;
+  const userRoles = profile?.roles || (user as any)?.roles || [profile?.role || 'user'];
+  const isOwnerEmail = [
+    profile?.email?.toLowerCase(),
+    user?.email?.toLowerCase()
+  ].some(e => e === "amirrezaveisi45@gmail.com" || e === "mr.v@admin.com");
+
+  const isSuperAdmin = (
+    userRoles.includes('super_admin') || 
+    profile?.role === 'super_admin' ||
+    user?.uid === 'admin' ||
+    isOwnerEmail
+  );
+  const isGlobalAdmin = (isSuperAdmin || userRoles.includes('admin') || profile?.role === 'admin') && !isSimulatingUser;
   const isApprovedContributor = series.contributors?.some((c: any) => c.userId === user?.uid && c.status === 'approved');
   const isStaffOrAdmin = isGlobalAdmin || isApprovedContributor;
   const isStaffMember = userRoles.some((r: string) => ['translator', 'cleaner', 'editor', 'typesetter', 'proofreader', 'admin', 'super_admin'].includes(r)) || isApprovedContributor || isGlobalAdmin;
@@ -266,14 +309,36 @@ export default function Series() {
     }
   };
 
-  const handleAdjustRatings = async (score: number, action: 'increment' | 'decrement') => {
-    if (!user) return;
+  const handleAdjustRatings = async (score: number, action: 'increment' | 'decrement', step: number = 1) => {
+    const adminUid = user?.uid || (user as any)?.id || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'amirrezaveisi45@gmail.com';
+    
+    // Optimistic update
+    setAdminStarCounts(prev => {
+      const cur = prev[score as 1|2|3|4|5] || 0;
+      const next = action === 'increment' ? cur + step : Math.max(0, cur - step);
+      return { ...prev, [score]: next };
+    });
+
     try {
-      await apiClient.adjustRatings(series.id, score, action, user.uid);
-      mutate();
-      refetchRatings();
+      await apiClient.adjustRatings(series.id, score, action, adminUid, step);
+      await Promise.all([refetchRatings(), mutate()]);
     } catch (err: any) {
       alert("خطا در ویرایش آمار امتیازدهی: " + err.message);
+      refetchRatings();
+    }
+  };
+
+  const handleSaveAdminRatingStats = async () => {
+    const adminUid = user?.uid || (user as any)?.id || localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || 'amirrezaveisi45@gmail.com';
+    setIsSavingRatingStats(true);
+    try {
+      await apiClient.adjustRatingStats(series.id, { counts: adminStarCounts }, adminUid);
+      alert("✅ آمار ستاره‌ها با موفقیت ذخیره و میانگین بروزرسانی شد!");
+      await Promise.all([refetchRatings(), mutate()]);
+    } catch (err: any) {
+      alert("خطا در ذخیره آمار: " + (err.message || 'خطای سرور'));
+    } finally {
+      setIsSavingRatingStats(false);
     }
   };
 
@@ -320,18 +385,15 @@ export default function Series() {
     if (!addContribName.trim() && !addContribUserId) return alert("لطفا نام همکار یا کاربر را مشخص کنید.");
 
     try {
-      await apiClient.addContributor(
-        series.id,
-        {
-          userId: addContribUserId || `contrib_${Date.now()}`,
-          displayName: addContribName || 'همکار',
-          email: addContribEmail,
-          role: addContribRole,
-          melliCode: addContribMelli
-        },
-        user.uid
-      );
-      alert("همکار جدید با موفقیت به تیم افزوده شد.");
+      await apiClient.addContributor(series.id, {
+        userId: addContribUserId || `custom_${Date.now()}`,
+        displayName: addContribName,
+        email: addContribEmail,
+        role: addContribRole,
+        melliCode: addContribMelli || 'DIRECT_ADDED'
+      }, user.uid);
+
+      alert("همکار جدید با موفقیت به تیم اضافه شد!");
       setShowAddContribModal(false);
       setAddContribName("");
       setAddContribEmail("");
@@ -342,6 +404,22 @@ export default function Series() {
       alert("خطا در افزودن همکار: " + err.message);
     }
   };
+
+  // Dynamic breakdown values
+  const activeStarCounts = {
+    1: starCounts[1] ?? (series.ratingStats?.[1] || 0),
+    2: starCounts[2] ?? (series.ratingStats?.[2] || 0),
+    3: starCounts[3] ?? (series.ratingStats?.[3] || 0),
+    4: starCounts[4] ?? (series.ratingStats?.[4] || 0),
+    5: starCounts[5] ?? (series.ratingStats?.[5] || 0),
+  };
+  const activeTotalRatings = totalRatings || (activeStarCounts[1] + activeStarCounts[2] + activeStarCounts[3] + activeStarCounts[4] + activeStarCounts[5]) || series.ratingCount || 0;
+  const currentAverageScore = averageRating > 0 ? averageRating : (series.rating ? Number(series.rating) : 0);
+
+  // Admin live preview calculation
+  const adminCalcTotal = adminStarCounts[1] + adminStarCounts[2] + adminStarCounts[3] + adminStarCounts[4] + adminStarCounts[5];
+  const adminCalcScore = (1 * adminStarCounts[1]) + (2 * adminStarCounts[2]) + (3 * adminStarCounts[3]) + (4 * adminStarCounts[4]) + (5 * adminStarCounts[5]);
+  const adminCalcAvg = adminCalcTotal > 0 ? Math.round((adminCalcScore / adminCalcTotal) * 10) / 10 : 0;
 
   const handleApproveContributor = async (contributorUserId: string, action: 'approve' | 'reject' | 'remove' | 'update_role', newRole?: string) => {
     if (!user) return;
@@ -547,114 +625,290 @@ export default function Series() {
               <h2 className="text-sm text-zinc-500 mb-6 font-medium tracking-wide">{series.alternativeTitles.join(', ')}</h2>
             )}
 
-            <div className="flex flex-wrap items-center gap-6 mb-8 text-sm">
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
-                    <Star className="text-yellow-500" fill="currentColor" size={14} />
-                    <span className="font-bold text-white text-sm">
-                      {ratingsLoading ? '...' : (averageRating > 0 ? averageRating.toFixed(1) : (series.rating ? Number(series.rating).toFixed(1) : '0.0'))}
+            <div className="flex flex-wrap items-center gap-6 mb-6 text-sm">
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-1.5 bg-white/5 px-3.5 py-2 rounded-xl border border-white/10 shadow-sm">
+                    <Star className="text-amber-400 fill-amber-400" size={16} />
+                    <span className="font-black text-white text-base">
+                      {ratingsLoading ? '...' : (currentAverageScore > 0 ? currentAverageScore.toFixed(1) : '0.0')}
                     </span>
-                    {(totalRatings > 0 || (series.ratingCount && series.ratingCount > 0)) && (
-                      <span className="text-[11px] text-zinc-400 font-medium mr-1">
-                        ({(totalRatings || series.ratingCount || 0).toLocaleString('fa-IR')} رای)
-                      </span>
+                    <span className="text-zinc-500 font-bold text-xs">/ ۵</span>
+                    <span className="text-[11px] text-zinc-400 font-medium mr-1.5 border-r border-white/10 pr-2">
+                      ({activeTotalRatings.toLocaleString('fa-IR')} رای)
+                    </span>
+                  </div>
+
+                  {/* Star Rating Interactive Selector */}
+                  <div className="flex items-center gap-1 bg-white/5 px-3 py-1.5 rounded-xl border border-white/5">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => {
+                          setSelectedRatingScore(star);
+                          setShowRatingModal(true);
+                        }}
+                        onMouseEnter={() => setHoverRating(star)}
+                        onMouseLeave={() => setHoverRating(0)}
+                        className="p-1 transition-transform hover:scale-125 focus:outline-none cursor-pointer"
+                        title={`امتیاز ${star} ستاره`}
+                      >
+                        <Star 
+                          size={18} 
+                          fill={star <= (hoverRating || userRating || Math.round(currentAverageScore)) ? "currentColor" : "none"} 
+                          className={star <= (hoverRating || userRating || Math.round(currentAverageScore)) ? "text-amber-400" : "text-zinc-600"} 
+                        />
+                      </button>
+                    ))}
+                    {userRating ? (
+                      <span className="text-[10px] text-amber-400 font-bold mr-1">رای شما: {userRating}★</span>
+                    ) : (
+                      <span className="text-[10px] text-zinc-400 font-medium mr-1">امتیاز دهید</span>
                     )}
                   </div>
-                  {user && (
-                    <div className="flex items-center gap-1 ml-2">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <button
-                          key={star}
-                          onClick={() => {
-                            setSelectedRatingScore(star);
-                            setShowRatingModal(true);
-                          }}
-                          onMouseEnter={() => setHoverRating(star)}
-                          onMouseLeave={() => setHoverRating(0)}
-                          className="transition-transform hover:scale-110 focus:outline-none cursor-pointer"
-                          title={`امتیاز ${star} ستاره`}
-                        >
-                          <Star 
-                            size={18} 
-                            fill={star <= (hoverRating || userRating || Math.round(averageRating || series.rating || 0)) ? "currentColor" : "none"} 
-                            className={star <= (hoverRating || userRating || Math.round(averageRating || series.rating || 0)) ? "text-[var(--color-asura-accent-light)]" : "text-zinc-600"} 
-                          />
-                        </button>
-                      ))}
-                    </div>
+
+                  {/* Toggle Rating Breakdown button */}
+                  <button
+                    type="button"
+                    onClick={() => setShowRatingBreakdown(!showRatingBreakdown)}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white rounded-xl text-xs font-bold transition-all border border-white/5"
+                  >
+                    <BarChart2 size={14} className="text-indigo-400" />
+                    <span>تفکیک آرا</span>
+                    {showRatingBreakdown ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+
+                  {/* Admin Star Adjustment Toggle Button (Global Admin only) */}
+                  {isGlobalAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAdminRatingPanel(!showAdminRatingPanel)}
+                      className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border ${
+                        showAdminRatingPanel
+                          ? 'bg-amber-500 text-black border-amber-400 shadow-lg shadow-amber-500/20'
+                          : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/30'
+                      }`}
+                    >
+                      <Settings size={14} />
+                      <span>تغییر ستاره‌ها (مدیریت)</span>
+                      {showAdminRatingPanel ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </button>
                   )}
                 </div>
-                {!user && <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-wider">برای ثبت رای وارد شوید</span>}
+
+                {!user && (
+                  <span className="text-[11px] text-zinc-500 font-medium">
+                    برای ثبت رای و نظر خود وارد حساب کاربری شوید.
+                  </span>
+                )}
               </div>
-              <div className="flex items-center gap-4 text-zinc-400">
+
+              <div className="flex items-center gap-4 text-zinc-400 mr-auto">
                 <div className="flex flex-col">
-                  <span className="text-zinc-600 text-[10px] uppercase font-black tracking-widest">وضعیت انتشار</span>
+                  <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest">وضعیت انتشار</span>
                   <span className="font-bold text-[var(--color-asura-accent-light)] text-xs uppercase">
                     {series.status === 'Ongoing' ? 'درحال انتشار' : series.status === 'Completed' ? 'پایان یافته' : series.status}
                   </span>
                 </div>
                 <div className="w-px h-6 bg-white/10"></div>
                 <div className="flex flex-col">
-                  <span className="text-zinc-600 text-[10px] uppercase font-black tracking-widest">نویسنده</span>
-                  <span className="font-bold text-white text-xs">{series.author}</span>
+                  <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest">نویسنده</span>
+                  <span className="font-bold text-white text-xs">{series.author || 'نامشخص'}</span>
                 </div>
                 <div className="w-px h-6 bg-white/10"></div>
                 <div className="flex flex-col">
-                  <span className="text-zinc-600 text-[10px] uppercase font-black tracking-widest">طراح</span>
-                  <span className="font-bold text-white text-xs">{series.artist}</span>
+                  <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest">طراح</span>
+                  <span className="font-bold text-white text-xs">{series.artist || 'نامشخص'}</span>
                 </div>
               </div>
             </div>
 
-            {/* Manual Rating Adjustment Count Panel (Admin only) */}
-            {isGlobalAdmin && isAdminEditMode && (
-              <div className="mb-6 p-4 bg-yellow-500/5 border border-yellow-500/10 rounded-2xl" dir="rtl">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-xs font-black text-yellow-400 flex items-center gap-1.5">
-                    <Settings size={13} />
-                    تنظیم دستی تعداد آمار آرا (ویژه مدیریت)
-                  </h4>
-                  <span className="text-[11px] text-zinc-400 font-bold">
-                    مجموع آرا: <span className="text-white font-black">{totalRatings || series.ratingCount || 0}</span> | میانگین: <span className="text-yellow-400 font-black">{averageRating > 0 ? averageRating.toFixed(1) : (series.rating || 0)}</span>
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
-                  {[1, 2, 3, 4, 5].map((score) => {
-                    const count = starCounts[score as 1|2|3|4|5] ?? (series.ratingStats?.[score as 1|2|3|4|5] ?? 0);
-                    return (
-                      <div key={score} className="bg-black/40 p-2.5 rounded-xl flex flex-col items-center border border-white/5">
-                        <div className="flex items-center gap-1 mb-1">
-                          <Star size={11} className="text-yellow-400 fill-yellow-400" />
-                          <span className="text-[11px] font-black text-white">{score} ستاره</span>
+            {/* Rating Breakdown Section */}
+            <AnimatePresence>
+              {showRatingBreakdown && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="mb-6 p-4 bg-zinc-900/90 border border-white/10 rounded-2xl overflow-hidden shadow-xl"
+                  dir="rtl"
+                >
+                  <div className="flex items-center justify-between mb-3 border-b border-white/5 pb-2">
+                    <h4 className="text-xs font-black text-white flex items-center gap-2">
+                      <BarChart2 size={15} className="text-indigo-400" />
+                      تفکیک و جزئیات آرای کاربران
+                    </h4>
+                    <span className="text-[11px] text-zinc-400 font-bold">
+                      مجموع: <span className="text-amber-400 font-black">{activeTotalRatings.toLocaleString('fa-IR')}</span> رای
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5 max-w-lg">
+                    {[5, 4, 3, 2, 1].map((starNum) => {
+                      const count = activeStarCounts[starNum as 1|2|3|4|5] || 0;
+                      const percentage = activeTotalRatings > 0 ? Math.round((count / activeTotalRatings) * 100) : 0;
+                      return (
+                        <div key={starNum} className="flex items-center gap-3 text-xs">
+                          <div className="flex items-center gap-1 w-14 shrink-0 font-bold text-zinc-300">
+                            <span>{starNum}</span>
+                            <Star size={12} className="text-amber-400 fill-amber-400" />
+                          </div>
+                          
+                          <div className="flex-1 h-3 bg-zinc-800 rounded-full overflow-hidden border border-white/5">
+                            <div
+                              className="h-full bg-gradient-to-r from-amber-500 to-yellow-400 rounded-full transition-all duration-500"
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between w-24 shrink-0 text-[11px]">
+                            <span className="font-bold text-white">{count.toLocaleString('fa-IR')} رای</span>
+                            <span className="text-zinc-500 font-mono">({percentage}%)</span>
+                          </div>
                         </div>
-                        <span className="text-xs font-black text-[var(--color-asura-accent-light)] mb-2 font-mono">
-                          {count} رای
-                        </span>
-                        <div className="flex gap-1 w-full justify-center">
-                          <button 
-                            type="button"
-                            onClick={() => handleAdjustRatings(score, 'increment')}
-                            className="px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-white rounded-lg text-[10px] font-bold transition-all flex-1 text-center"
-                            title="افزایش ۱ رای"
-                          >
-                            +۱
-                          </button>
-                          <button 
-                            type="button"
-                            onClick={() => handleAdjustRatings(score, 'decrement')}
-                            className="px-2 py-1 bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white rounded-lg text-[10px] font-bold transition-all flex-1 text-center"
-                            title="کاهش ۱ رای"
-                          >
-                            -۱
-                          </button>
-                        </div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Working Admin Star Adjustment Studio (Global Admin only) */}
+            <AnimatePresence>
+              {isGlobalAdmin && showAdminRatingPanel && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="mb-6 p-4 sm:p-5 bg-gradient-to-br from-amber-950/40 via-zinc-900/90 to-zinc-900 border-2 border-amber-500/40 rounded-2xl overflow-hidden shadow-2xl"
+                  dir="rtl"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-amber-500/20">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 bg-amber-500/20 rounded-xl text-amber-400">
+                        <Settings size={18} />
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+                      <div>
+                        <h4 className="text-sm font-black text-amber-400">
+                          پنل مدیریت تغییر و تنظیم ستاره‌ها
+                        </h4>
+                        <p className="text-[11px] text-zinc-400">
+                          می‌توانید تعداد آرای هر ستاره را مستقیماً وارد کرده یا با دکمه‌ها کم و زیاد کنید.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 bg-black/40 px-3.5 py-1.5 rounded-xl border border-white/10 text-xs">
+                      <span className="text-zinc-400 font-bold">
+                        مجموع جدید: <span className="text-white font-black">{adminCalcTotal.toLocaleString('fa-IR')}</span>
+                      </span>
+                      <span className="text-zinc-600">|</span>
+                      <span className="text-zinc-400 font-bold">
+                        میانگین جدید: <span className="text-amber-400 font-black">{adminCalcAvg.toFixed(1)} ★</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 mb-4">
+                    {[5, 4, 3, 2, 1].map((score) => {
+                      const count = adminStarCounts[score as 1|2|3|4|5] ?? 0;
+                      return (
+                        <div key={score} className="bg-black/50 p-3 rounded-xl flex flex-col items-center border border-white/10 relative group">
+                          <div className="flex items-center gap-1.5 mb-2">
+                            <span className="text-xs font-black text-white">{score}</span>
+                            <Star size={13} className="text-amber-400 fill-amber-400" />
+                          </div>
+
+                          {/* Direct Numeric Input for precise editing */}
+                          <div className="w-full mb-2.5">
+                            <label className="text-[10px] text-zinc-400 block text-center mb-1">تعداد آرا:</label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={count}
+                              onChange={(e) => {
+                                const val = Math.max(0, parseInt(e.target.value) || 0);
+                                setAdminStarCounts(prev => ({ ...prev, [score]: val }));
+                              }}
+                              className="w-full bg-zinc-800 text-center text-white font-black text-sm py-1.5 px-2 rounded-lg border border-white/10 focus:border-amber-500 focus:outline-none"
+                            />
+                          </div>
+
+                          {/* Quick Step Buttons */}
+                          <div className="grid grid-cols-2 gap-1 w-full">
+                            <button
+                              type="button"
+                              onClick={() => handleAdjustRatings(score, 'increment', 1)}
+                              className="px-2 py-1.5 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-white rounded-lg text-xs font-black transition-all text-center flex items-center justify-center cursor-pointer active:scale-95"
+                              title="افزایش ۱ رای"
+                            >
+                              +۱
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleAdjustRatings(score, 'decrement', 1)}
+                              className="px-2 py-1.5 bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white rounded-lg text-xs font-black transition-all text-center flex items-center justify-center cursor-pointer active:scale-95"
+                              title="کاهش ۱ رای"
+                            >
+                              -۱
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAdminStarCounts(prev => ({ ...prev, [score]: (prev[score as 1|2|3|4|5] || 0) + 10 }));
+                              }}
+                              className="px-1 py-1 bg-white/5 hover:bg-white/10 text-zinc-300 rounded text-[10px] font-bold text-center cursor-pointer"
+                              title="افزودن ۱۰ به پیش‌نویس"
+                            >
+                              +۱۰
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAdminStarCounts(prev => ({ ...prev, [score]: Math.max(0, (prev[score as 1|2|3|4|5] || 0) - 10) }));
+                              }}
+                              className="px-1 py-1 bg-white/5 hover:bg-white/10 text-zinc-300 rounded text-[10px] font-bold text-center cursor-pointer"
+                              title="کاهش ۱۰ از پیش‌نویس"
+                            >
+                              -۱۰
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-white/10">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdminStarCounts({
+                          1: starCounts[1] ?? (series.ratingStats?.[1] || 0),
+                          2: starCounts[2] ?? (series.ratingStats?.[2] || 0),
+                          3: starCounts[3] ?? (series.ratingStats?.[3] || 0),
+                          4: starCounts[4] ?? (series.ratingStats?.[4] || 0),
+                          5: starCounts[5] ?? (series.ratingStats?.[5] || 0),
+                        });
+                      }}
+                      className="px-4 py-2 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+                    >
+                      بازنشانی به مقادیر فعلی
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isSavingRatingStats}
+                      onClick={handleSaveAdminRatingStats}
+                      className="flex items-center gap-2 px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-black text-xs rounded-xl shadow-lg shadow-amber-500/25 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                    >
+                      <Save size={15} />
+                      <span>{isSavingRatingStats ? 'در حال ذخیره‌سازی...' : 'ذخیره کل تغییرات ستاره‌ها'}</span>
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             <div className="bg-white/5 border border-white/5 rounded-2xl p-6 mb-8 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-[var(--color-asura-accent)]/5 rounded-full blur-3xl"></div>

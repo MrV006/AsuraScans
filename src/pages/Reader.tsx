@@ -404,7 +404,7 @@ export default function Reader() {
       try {
         cleanTarget = decodeURIComponent(targetId).trim();
       } catch (err) {}
-      navigate(`/series/${encodeURIComponent(cleanTarget)}`);
+      navigate(`/series/${encodeURIComponent(cleanTarget)}`, { state: { initialSeries: series } });
     } else {
       navigate('/');
     }

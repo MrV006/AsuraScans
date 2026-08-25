@@ -768,21 +768,29 @@ export const apiClient = {
     return res.json();
   },
 
-  async adjustRatings(seriesId: string, score: number, action: 'increment' | 'decrement', adminUid: string, step: number = 1) {
-    const res = await fetch(`${API_URL}/api/series/${seriesId}/adjust-ratings`, {
+  async adjustRatings(seriesId: string, score: number, action: 'increment' | 'decrement', adminUid?: string, step: number = 1) {
+    const res = await fetch(`${API_URL}/api/series/${encodeURIComponent(seriesId)}/adjust-ratings`, {
       method: 'POST',
       headers: this.getHeaders(adminUid),
       body: JSON.stringify({ score, action, step })
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'خطا در ثبت آمار' }));
+      throw new Error(err.error || 'خطا در ثبت آمار');
+    }
     return res.json();
   },
 
-  async adjustRatingStats(seriesId: string, payload: { score?: number; action?: 'increment' | 'decrement'; counts?: { 1: number; 2: number; 3: number; 4: number; 5: number }; step?: number }, adminUid: string) {
-    const res = await fetch(`${API_URL}/api/series/${seriesId}/adjust-ratings`, {
+  async adjustRatingStats(seriesId: string, payload: { score?: number; action?: 'increment' | 'decrement'; counts?: { 1: number; 2: number; 3: number; 4: number; 5: number }; step?: number }, adminUid?: string) {
+    const res = await fetch(`${API_URL}/api/series/${encodeURIComponent(seriesId)}/adjust-ratings`, {
       method: 'POST',
       headers: this.getHeaders(adminUid),
       body: JSON.stringify(payload)
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'خطا در ثبت آمار' }));
+      throw new Error(err.error || 'خطا در ثبت آمار');
+    }
     return res.json();
   },
 

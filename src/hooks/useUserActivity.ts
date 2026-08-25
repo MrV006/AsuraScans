@@ -30,17 +30,12 @@ export function useBookmarks() {
     }
     try {
       const data = await apiClient.getBookmarks(user.uid);
-      const fullList = await Promise.all(
-        data.map(async (b: any) => {
-          const s = await apiClient.getSeriesById(b.seriesId);
-          return {
-            seriesId: b.seriesId,
-            createdAt: b.createdAt,
-            seriesData: s || undefined
-          };
-        })
-      );
-      setBookmarks(fullList);
+      const list = (Array.isArray(data) ? data : []).map((b: any) => ({
+        seriesId: b.seriesId,
+        createdAt: b.createdAt,
+        seriesData: b.seriesData || undefined
+      }));
+      setBookmarks(list);
       setLoading(false);
     } catch (e) {
       console.error("Error loading bookmarks via API", e);
@@ -116,16 +111,7 @@ export function useHistory() {
           if (valid.length !== list.length) {
             localStorage.setItem('asura_guest_history', JSON.stringify(valid));
           }
-          const fullList = await Promise.all(
-            valid.map(async (h: any) => {
-              const s = await apiClient.getSeriesById(h.seriesId);
-              return {
-                ...h,
-                seriesData: s || undefined
-              };
-            })
-          );
-          setHistory(fullList);
+          setHistory(valid);
         } else {
           setHistory([]);
         }
@@ -138,19 +124,14 @@ export function useHistory() {
 
     try {
       const data = await apiClient.getHistory(user.uid);
-      const fullList = await Promise.all(
-        data.map(async (h: any) => {
-          const s = await apiClient.getSeriesById(h.seriesId);
-          return {
-            seriesId: h.seriesId,
-            chapterId: h.chapterId,
-            chapterNumber: h.chapterNumber,
-            updatedAt: h.updatedAt,
-            seriesData: s || undefined
-          };
-        })
-      );
-      setHistory(fullList);
+      const list = (Array.isArray(data) ? data : []).map((h: any) => ({
+        seriesId: h.seriesId,
+        chapterId: h.chapterId,
+        chapterNumber: h.chapterNumber,
+        updatedAt: h.updatedAt,
+        seriesData: h.seriesData || undefined
+      }));
+      setHistory(list);
       setLoading(false);
     } catch (e) {
       console.error("Error loading history via API", e);

@@ -15,19 +15,33 @@ export interface RatingSummary {
   starCounts: { 1: number; 2: number; 3: number; 4: number; 5: number };
 }
 
+const ratingsCache = new Map<string, { ratings: Rating[]; summary: RatingSummary | null; timestamp: number }>();
+
 export function useRatings(seriesId?: string) {
   const { user } = useAuth();
-  const [ratings, setRatings] = useState<Rating[]>([]);
-  const [summary, setSummary] = useState<RatingSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [userRating, setUserRating] = useState<number | null>(null);
+  const cleanId = seriesId ? decodeURIComponent(seriesId).trim() : '';
+  const cached = cleanId ? (ratingsCache.get(cleanId) || ratingsCache.get(seriesId || '')) : null;
 
-  const fetchRatings = async () => {
+  const [ratings, setRatings] = useState<Rating[]>(cached ? cached.ratings : []);
+  const [summary, setSummary] = useState<RatingSummary | null>(cached ? cached.summary : null);
+  const [loading, setLoading] = useState(!cached);
+  const [userRating, setUserRating] = useState<number | null>(() => {
+    if (user && cached?.ratings) {
+      const my = cached.ratings.find(r => r.userId === user.uid);
+      return my ? my.rating : null;
+    }
+    return null;
+  });
+
+  const fetchRatings = async (isBackground = false) => {
     if (!seriesId) {
       setRatings([]);
       setSummary(null);
       setLoading(false);
       return;
+    }
+    if (!isBackground && !cached) {
+      setLoading(true);
     }
     try {
       const [data, summaryData] = await Promise.all([
@@ -44,6 +58,9 @@ export function useRatings(seriesId?: string) {
       if (summaryData && typeof summaryData.averageRating === 'number') {
         setSummary(summaryData);
       }
+
+      ratingsCache.set(seriesId, { ratings: list, summary: summaryData, timestamp: Date.now() });
+      if (cleanId) ratingsCache.set(cleanId, { ratings: list, summary: summaryData, timestamp: Date.now() });
       
       if (user) {
         const myRating = list.find((r: any) => r.userId === user.uid);
@@ -59,12 +76,25 @@ export function useRatings(seriesId?: string) {
   };
 
   useEffect(() => {
-    fetchRatings();
+    const isCached = cleanId && (ratingsCache.has(cleanId) || ratingsCache.has(seriesId || ''));
+    if (isCached) {
+      const existing = (ratingsCache.get(cleanId) || ratingsCache.get(seriesId || ''));
+      if (existing) {
+        setRatings(existing.ratings);
+        setSummary(existing.summary);
+        if (user) {
+          const my = existing.ratings.find(r => r.userId === user.uid);
+          setUserRating(my ? my.rating : null);
+        }
+        setLoading(false);
+      }
+    }
+    fetchRatings(!!isCached);
 
     const socket = getSocketInstance();
     const handleUpdate = (data: any) => {
-      if (data.seriesId === seriesId) {
-        fetchRatings();
+      if (data && (data.seriesId === seriesId || data.seriesId === cleanId)) {
+        fetchRatings(true);
       }
     };
 
@@ -109,7 +139,7 @@ export function useRatings(seriesId?: string) {
 
     try {
       await apiClient.rateSeries(seriesId, user.uid, ratingValue);
-      fetchRatings();
+      fetchRatings(true);
       return true;
     } catch (e) {
       console.error("Error submitting rating:", e);
@@ -133,6 +163,6 @@ export function useRatings(seriesId?: string) {
     loading, 
     submitRating, 
     removeRating,
-    refetch: fetchRatings
+    refetch: () => fetchRatings(false)
   };
 }
