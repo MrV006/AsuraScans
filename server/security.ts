@@ -13,17 +13,14 @@ export function securityHeadersMiddleware(req: Request, res: Response, next: Nex
   // Prevent MIME type sniffing
   res.setHeader("X-Content-Type-Options", "nosniff");
 
-  // Prevent clickjacking on iframe outside origin (allow iframe in same origin or development embed)
-  res.setHeader("X-Frame-Options", "SAMEORIGIN");
-
   // Enable XSS filtering in browsers
   res.setHeader("X-XSS-Protection", "1; mode=block");
 
   // Referrer policy
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
 
-  // Prevent browser caching of sensitive API data
-  if (req.path.startsWith("/api/")) {
+  // Prevent browser caching of sensitive API data (except static media / zip streaming)
+  if (req.path.startsWith("/api/") && !req.path.includes("zip-image") && !req.path.includes("zip-entry") && !req.path.includes("uploads")) {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");

@@ -1,6 +1,6 @@
 {
-  "name": "AsuraClone",
-  "description": "A high-quality manga and manhwa reading website similar to Asura Scans.",
+  "name": "Mangata (مانگاتا)",
+  "description": "پلتفرم خواندن آنلاین مانگا و مانهوا - Mangata Manga & Manhwa Reader",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

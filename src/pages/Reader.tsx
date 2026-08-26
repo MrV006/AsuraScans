@@ -444,7 +444,6 @@ export default function Reader() {
         ))
       ) {
         e.preventDefault();
-        alert("حق کپی‌رایت ترجمه و ادیت این اثر محفوظ است. امکان ذخیره‌سازی، چاپ یا کپی کردن تصاویر مجاز نمی‌باشد.");
       }
     };
     window.addEventListener('keydown', preventActions);
@@ -969,8 +968,6 @@ export default function Reader() {
           <button
             onClick={() => {
               setGlobalReloadKey(prev => prev + 1);
-              fetchDirectChapter();
-              mutateSeries();
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 rounded-xl text-xs font-black transition-all shrink-0 hover:scale-105 active:scale-95 mr-auto md:mr-0 cursor-pointer"
             title="بازخوانی فوری تمام تصاویر چپتر (مناسب کندی اینترنت)"

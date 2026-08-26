@@ -227,11 +227,15 @@ async function startServer() {
 
   app.use("/uploads", express.static(uploadsDir));
 
-  // Global API Rate Limiting & Explicit UTF-8 encoding
-  app.use("/api", generalApiRateLimiter);
+  // Global API Rate Limiting & Explicit UTF-8 encoding (excluding media streaming)
   app.use("/api", (req, res, next) => {
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    next();
+    if (req.path.startsWith("/chapter-zip-image") || req.path.startsWith("/uploads/zip-entry")) {
+      return next();
+    }
+    generalApiRateLimiter(req, res, () => {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      next();
+    });
   });
 
   const isSuperAdminUser = (user: any): boolean => {

@@ -21,6 +21,8 @@ export const SEOHead: React.FC<SEOHeadProps> = ({
   jsonLd,
   siteName = 'مانگاتا'
 }) => {
+  const jsonLdString = jsonLd ? JSON.stringify(jsonLd) : '';
+
   useEffect(() => {
     // 1. Update document title
     if (title) {
@@ -47,43 +49,45 @@ export const SEOHead: React.FC<SEOHeadProps> = ({
     }
 
     // 3. OpenGraph Meta Tags
-    const currentUrl = url || window.location.href;
-    setMetaTag('meta[property="og:title"]', 'property', 'og:title', title || document.title);
-    if (description) setMetaTag('meta[property="og:description"]', 'property', 'og:description', description);
-    if (image) setMetaTag('meta[property="og:image"]', 'property', 'og:image', image);
-    setMetaTag('meta[property="og:url"]', 'property', 'og:url', currentUrl);
-    setMetaTag('meta[property="og:type"]', 'property', 'og:type', type);
-    setMetaTag('meta[property="og:site_name"]', 'property', 'og:site_name', siteName);
+    const currentUrl = url || (typeof window !== 'undefined' ? window.location.href : '');
+    if (currentUrl) {
+      setMetaTag('meta[property="og:title"]', 'property', 'og:title', title || (typeof document !== 'undefined' ? document.title : ''));
+      if (description) setMetaTag('meta[property="og:description"]', 'property', 'og:description', description);
+      if (image) setMetaTag('meta[property="og:image"]', 'property', 'og:image', image);
+      setMetaTag('meta[property="og:url"]', 'property', 'og:url', currentUrl);
+      setMetaTag('meta[property="og:type"]', 'property', 'og:type', type);
+      setMetaTag('meta[property="og:site_name"]', 'property', 'og:site_name', siteName);
 
-    // 4. Twitter Card Meta Tags
-    setMetaTag('meta[name="twitter:card"]', 'name', 'twitter:card', 'summary_large_image');
-    setMetaTag('meta[name="twitter:title"]', 'name', 'twitter:title', title || document.title);
-    if (description) setMetaTag('meta[name="twitter:description"]', 'name', 'twitter:description', description);
-    if (image) setMetaTag('meta[name="twitter:image"]', 'name', 'twitter:image', image);
+      // 4. Twitter Card Meta Tags
+      setMetaTag('meta[name="twitter:card"]', 'name', 'twitter:card', 'summary_large_image');
+      setMetaTag('meta[name="twitter:title"]', 'name', 'twitter:title', title || (typeof document !== 'undefined' ? document.title : ''));
+      if (description) setMetaTag('meta[name="twitter:description"]', 'name', 'twitter:description', description);
+      if (image) setMetaTag('meta[name="twitter:image"]', 'name', 'twitter:image', image);
 
-    // 5. Canonical Link
-    let canonicalEl = document.querySelector('link[rel="canonical"]');
-    if (!canonicalEl) {
-      canonicalEl = document.createElement('link');
-      canonicalEl.setAttribute('rel', 'canonical');
-      document.head.appendChild(canonicalEl);
+      // 5. Canonical Link
+      let canonicalEl = document.querySelector('link[rel="canonical"]');
+      if (!canonicalEl) {
+        canonicalEl = document.createElement('link');
+        canonicalEl.setAttribute('rel', 'canonical');
+        document.head.appendChild(canonicalEl);
+      }
+      canonicalEl.setAttribute('href', currentUrl.split('?')[0]);
     }
-    canonicalEl.setAttribute('href', currentUrl.split('?')[0]);
 
     // 6. Schema.org JSON-LD
     let scriptEl = document.getElementById('jsonld-schema');
-    if (jsonLd) {
+    if (jsonLdString) {
       if (!scriptEl) {
         scriptEl = document.createElement('script');
         scriptEl.id = 'jsonld-schema';
         scriptEl.setAttribute('type', 'application/ld+json');
         document.head.appendChild(scriptEl);
       }
-      scriptEl.textContent = JSON.stringify(jsonLd);
+      scriptEl.textContent = jsonLdString;
     } else if (scriptEl) {
       scriptEl.remove();
     }
-  }, [title, description, keywords, image, url, type, jsonLd, siteName]);
+  }, [title, description, keywords, image, url, type, jsonLdString, siteName]);
 
   return null;
 };
