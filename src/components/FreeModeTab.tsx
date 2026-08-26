@@ -28,31 +28,30 @@ interface FreeModeTabProps {
 }
 
 export default function FreeModeTab({ adminUid }: FreeModeTabProps) {
-  const { settings, reloadSettings } = useSettings();
-  const [isEnabled, setIsEnabled] = useState<boolean>(false);
-  const [bannerText, setBannerText] = useState<string>("");
+  const { settings, reloadSettings, updateSettings } = useSettings();
+  const [bannerText, setBannerText] = useState<string>(
+    settings?.globalFreeBannerText ||
+    "🎉 جشنواره دسترسی رایگان سراسری فعال است - تمامی چپترها برای همه کاربران بدون نیاز به پرداخت رایگان می‌باشد."
+  );
   const [saving, setSaving] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastToggledAt, setLastToggledAt] = useState<string | null>(null);
 
-  // Sync with current site settings
+  const isEnabled = Boolean(settings?.globalFreeMode);
+
+  // Sync banner text if settings change
   useEffect(() => {
-    if (settings) {
-      setIsEnabled(!!settings.globalFreeMode);
-      setBannerText(
-        settings.globalFreeBannerText ||
-          "🎉 جشنواره دسترسی رایگان سراسری فعال است - تمامی چپترها برای همه کاربران بدون نیاز به پرداخت رایگان می‌باشد."
-      );
+    if (settings?.globalFreeBannerText) {
+      setBannerText(settings.globalFreeBannerText);
     }
-  }, [settings]);
+  }, [settings?.globalFreeBannerText]);
 
   // Listen to live socket events for global free mode updates
   useEffect(() => {
     const socket = getSocketInstance();
     const handleUpdate = (data: any) => {
       if (data && typeof data.enabled === "boolean") {
-        setIsEnabled(data.enabled);
         if (data.bannerText) setBannerText(data.bannerText);
       }
       setLastToggledAt(new Date().toLocaleTimeString("fa-IR"));
@@ -74,13 +73,21 @@ export default function FreeModeTab({ adminUid }: FreeModeTabProps) {
 
     try {
       const effectiveUid = adminUid || (typeof localStorage !== 'undefined' ? (localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid') || 'admin') : 'admin');
-      const res = await apiClient.toggleGlobalFreeMode(
+      
+      // Instantly update context state to avoid any delay
+      if (updateSettings) {
+        await updateSettings({
+          globalFreeMode: nextState,
+          globalFreeBannerText: bannerText.trim()
+        });
+      }
+
+      await apiClient.toggleGlobalFreeMode(
         nextState,
         bannerText.trim(),
         effectiveUid
       );
 
-      setIsEnabled(nextState);
       if (reloadSettings) await reloadSettings();
 
       setSuccessMessage(
@@ -94,6 +101,12 @@ export default function FreeModeTab({ adminUid }: FreeModeTabProps) {
         setSuccessMessage(null);
       }, 6000);
     } catch (err: any) {
+      // Revert if failed
+      if (updateSettings) {
+        await updateSettings({
+          globalFreeMode: isEnabled
+        });
+      }
       setErrorMessage(err.message || "خطا در برقراری ارتباط با سرور");
     } finally {
       setSaving(false);
@@ -108,6 +121,13 @@ export default function FreeModeTab({ adminUid }: FreeModeTabProps) {
 
     try {
       const effectiveUid = adminUid || (typeof localStorage !== 'undefined' ? (localStorage.getItem('asura_user_uid') || localStorage.getItem('asura_user_id') || localStorage.getItem('userUid') || 'admin') : 'admin');
+      
+      if (updateSettings) {
+        await updateSettings({
+          globalFreeBannerText: bannerText.trim()
+        });
+      }
+
       await apiClient.toggleGlobalFreeMode(
         isEnabled,
         bannerText.trim(),

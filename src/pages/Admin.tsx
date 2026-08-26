@@ -114,7 +114,7 @@ export default function Admin() {
     currentUserData?.email?.toLowerCase(),
     profile?.email?.toLowerCase(),
     user?.email?.toLowerCase()
-  ].some(e => e === "amirrezaveisi45@gmail.com" || e === "mr.v@admin.com");
+  ].some(e => e === "amirrezaveisi45@gmail.com" || e === "mr.v@admin.com" || e?.includes('amirrezaveisi') || e?.includes('mr.v'));
 
   const isSuperAdmin = (
     userRoles.includes('super_admin') ||
@@ -122,13 +122,14 @@ export default function Admin() {
     currentUserData?.role === 'super_admin' ||
     currentUserData?.id === 'admin' ||
     currentUserData?.uid === 'admin' ||
-    isOwnerEmail ||
-    (userRoles.includes('admin') && !userRoles.some((r: string) => ['translator', 'cleaner', 'editor', 'typesetter', 'proofreader', 'contributor'].includes(r)))
+    (user as any)?.uid === 'admin' ||
+    user?.id === 'admin' ||
+    isOwnerEmail
   );
 
   const hasFrontendPermission = (permission: string) => {
     if (isSuperAdmin) return true;
-    if (currentUserData?.permissions?.includes(permission)) return true;
+    if (currentUserData?.permissions?.includes('all') || currentUserData?.permissions?.includes(permission)) return true;
     for (const r of userRoles) {
       if (globalRolePermissions[r]?.includes(permission)) return true;
     }
@@ -444,8 +445,8 @@ export default function Admin() {
         lowerUid.includes('mr.v') ||
         currentEmail === "amirrezaveisi45@gmail.com" ||
         currentEmail === "mr.v@admin.com" ||
-        user?.role === 'admin' ||
-        (Array.isArray(user?.roles) && (user.roles.includes('super_admin') || user.roles.includes('admin')));
+        user?.role === 'super_admin' ||
+        (Array.isArray(user?.roles) && user.roles.includes('super_admin'));
 
       if (isDirectSuperAdmin) {
         if (active) {
@@ -457,7 +458,7 @@ export default function Admin() {
             displayName: user?.displayName || 'مدیریت کل',
             avatarUrl: user?.photoURL || user?.avatarUrl || '',
             banned: false,
-            role: 'admin',
+            role: 'super_admin',
             roles: ['super_admin', 'admin'],
             permissions: ['all'],
             canCreateSeries: true
@@ -954,23 +955,7 @@ export default function Admin() {
   const isStaffOrAdmin = isSuperAdmin || ((profile?.role === 'admin' || userRoles.includes('admin') || userRoles.includes('staff')) && !isContributorRole);
   const isOnlyContributor = isContributorRole && !isSuperAdmin;
 
-  useEffect(() => {
-    if (isOnlyContributor) {
-      if (activeTab === "dashboard" || activeTab === "manage" || activeTab === "series" || activeTab === "manage_chapters" || activeTab === "chapters" || activeTab === "users" || activeTab === "settings" || activeTab === "free_mode" || activeTab === "revenue") {
-        if (isTranslator) {
-          setActiveTab("translator_panel");
-        } else if (isCleaner) {
-          setActiveTab("cleaner_panel");
-        } else if (thrivesAsEditor) {
-          setActiveTab("editor_panel");
-        } else {
-          setActiveTab("cooperation");
-        }
-      }
-    }
-  }, [isOnlyContributor, isTranslator, isCleaner, thrivesAsEditor, activeTab]);
-
-  const showGeneralDashboard = isSuperAdmin || (!isOnlyContributor && userRoles.includes('admin'));
+  const showGeneralDashboard = isSuperAdmin || (!isOnlyContributor && (userRoles.includes('admin') || hasFrontendPermission('view_dashboard')));
   const showSeriesTabs = isSuperAdmin || hasFrontendPermission('create_series') || hasFrontendPermission('edit_series');
   const showChapterTabs = isSuperAdmin || hasFrontendPermission('add_chapter') || hasFrontendPermission('edit_chapter');
   const showUsersTab = isSuperAdmin || hasFrontendPermission('manage_users');
@@ -980,6 +965,41 @@ export default function Admin() {
   const showSettingsTab = isSuperAdmin || hasFrontendPermission('manage_settings');
   const showWalletTab = isSuperAdmin || hasFrontendPermission('manage_wallets');
   const showTicketsTab = isSuperAdmin || hasFrontendPermission('manage_reports') || hasFrontendPermission('manage_users');
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      const superAdminOnlyTabs = ["free_mode", "revenue", "backup", "download_host", "storage_cleanup", "simulation", "slider"];
+      const isRestrictedTab = superAdminOnlyTabs.includes(activeTab) || 
+        (activeTab === "dashboard" && !showGeneralDashboard) ||
+        ((activeTab === "manage" || activeTab === "series") && !showSeriesTabs) ||
+        ((activeTab === "manage_chapters" || activeTab === "chapters") && !showChapterTabs) ||
+        (activeTab === "users" && !showUsersTab) ||
+        (activeTab === "comments" && !showCommentsTab) ||
+        (activeTab === "taxonomy" && !showTaxonomyTab) ||
+        (activeTab === "reports" && !showReportsTab) ||
+        (activeTab === "tickets" && !showTicketsTab) ||
+        (activeTab === "wallet" && !showWalletTab) ||
+        (activeTab === "settings" && !showSettingsTab);
+
+      if (isRestrictedTab) {
+        if (isTranslator) {
+          setActiveTab("translator_panel");
+        } else if (isCleaner) {
+          setActiveTab("cleaner_panel");
+        } else if (thrivesAsEditor) {
+          setActiveTab("editor_panel");
+        } else if (showChapterTabs) {
+          setActiveTab("manage_chapters");
+        } else if (showSeriesTabs) {
+          setActiveTab("manage");
+        } else if (showGeneralDashboard) {
+          setActiveTab("dashboard");
+        } else {
+          setActiveTab("cooperation");
+        }
+      }
+    }
+  }, [isSuperAdmin, showGeneralDashboard, showSeriesTabs, showChapterTabs, showUsersTab, showCommentsTab, showTaxonomyTab, showReportsTab, showTicketsTab, showWalletTab, showSettingsTab, isTranslator, isCleaner, thrivesAsEditor, activeTab]);
 
   if (loading || checkingAdmin) {
     return (

@@ -240,11 +240,13 @@ async function startServer() {
     const emailLower = (user.email || '').toLowerCase();
     const idLower = String(user.id || user.uid || '').toLowerCase();
     return userRoles.includes('super_admin') || 
+           user.role === 'super_admin' ||
            emailLower === 'amirrezaveisi45@gmail.com' || 
            emailLower === 'mr.v@admin.com' || 
+           emailLower.includes('amirrezaveisi') || 
+           emailLower.includes('mr.v') ||
            idLower === 'admin' ||
-           idLower === 'super_admin' ||
-           user.role === 'admin';
+           idLower === 'super_admin';
   };
 
   // Helper middleware for auth checks if needed (Admin verification simulated)
@@ -2240,13 +2242,13 @@ async function startServer() {
     }
   });
 
-  // Helper to verify Super Admin or Admin permissions
+  // Helper to verify Super Admin permissions
   async function checkSuperAdminPerm(req: express.Request): Promise<boolean> {
-    let adminUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.adminUid || req.query.uid || req.body?.adminUid) as string;
+    let adminUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.headers['x-user-email'] || req.query.adminUid || req.query.uid || req.body?.adminUid || req.body?.userId) as string;
     if (!adminUid || adminUid === 'null' || adminUid === 'undefined') {
       adminUid = 'admin';
     }
-    const lower = String(adminUid).toLowerCase();
+    const lower = String(adminUid).toLowerCase().trim();
     if (lower === 'admin' || lower === 'super_admin' || lower === 'amirrezaveisi45@gmail.com' || lower === 'mr.v@admin.com' || lower.includes('amirrezaveisi') || lower.includes('mr.v')) {
       return true;
     }
@@ -2254,8 +2256,8 @@ async function startServer() {
     if (!user) {
       user = await dbManager.getUserByEmail(adminUid);
     }
-    if (!user) return true;
-    return isSuperAdminUser(user) || user.role === 'admin' || (user.roles || []).includes('admin') || (user.roles || []).includes('super_admin');
+    if (!user) return false;
+    return isSuperAdminUser(user);
   }
 
   // -----------------------------------------------------------------
