@@ -4,8 +4,11 @@ import { apiClient } from '../lib/apiClient';
 import { Series } from '../lib/types';
 import { Trophy, Star, Eye, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { SEOHead } from '../components/SEOHead';
+import { useSettings } from '../contexts/SettingsContext';
 
 export default function Leaderboard() {
+  const { settings } = useSettings();
   const [topSeries, setTopSeries] = useState<Series[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeframe, setTimeframe] = useState<'all' | 'month' | 'week'>('all');
@@ -48,6 +51,12 @@ export default function Leaderboard() {
 
   return (
     <Layout>
+      <SEOHead 
+        title={`برترین مانهواها و مانگاهای برگزیده (رتبه‌بندی) | ${settings?.siteName || 'مانگاتا'}`}
+        description={`جدول رتبه‌بندی محبوب‌ترین و پربازدیدترین مانهواها، مانگاها و کمیک‌های ترجمه‌شده در ${settings?.siteName || 'مانگاتا'}.`}
+        keywords={`برترین مانهواها, مانهواهای محبوب, رتبه‌بندی مانگا, پربازدیدترین مانهوا, ${settings?.siteName || 'مانگاتا'}`}
+        siteName={settings?.siteName || 'مانگاتا'}
+      />
       <div className="max-w-5xl mx-auto py-12 px-4 md:px-8">
         
         {/* Header */}

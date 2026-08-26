@@ -22,24 +22,50 @@ export async function generateSeoHtml(
   // Default SEO Settings
   let globalSeo = {
     siteName: "مانگاتا",
-    siteTitle: "مانگاتا | پلتفرم هوشمند ترجمه، مدیریت و خوانش مانهوا و مانگا",
+    siteTitle: "مانگاتا | Mangata - مرجع خواندن آنلاین مانگا و مانهوا",
     metaDescription: "مانگاتا (MANGATA) مرجع اصلی و زنده خواندن آنلاین و دانلود مانهوا، مانگا، مانها و کمیک با ترجمه اختصاصی، کیفیت HD و به روزرسانی روزانه.",
     metaKeywords: "مانهوا, مانگا, مانها, کمیک, کمیک بوک, انیمه, مانگاتا, خواندن مانهوا, ترجمه مانهوا, mangata",
     seoImage: "/logo.png",
     googleVerification: ""
   };
 
-  // Attempt to load settings from DB
+  // Attempt to load settings from DB (check both 'seo' and 'global')
   try {
-    const dbSeo = await dbManager.getSettings("seo");
+    const [dbSeo, dbGlobal] = await Promise.all([
+      dbManager.getSettings("seo").catch(() => null),
+      dbManager.getSettings("global").catch(() => null)
+    ]);
+
+    if (dbGlobal) {
+      if (dbGlobal.siteName) globalSeo.siteName = dbGlobal.siteName;
+      if (dbGlobal.siteTitle) globalSeo.siteTitle = dbGlobal.siteTitle;
+      if (dbGlobal.seoDescription || dbGlobal.metaDescription) {
+        globalSeo.metaDescription = dbGlobal.seoDescription || dbGlobal.metaDescription;
+      }
+      if (dbGlobal.seoKeywords || dbGlobal.metaKeywords) {
+        globalSeo.metaKeywords = dbGlobal.seoKeywords || dbGlobal.metaKeywords;
+      }
+      if (dbGlobal.seoImage) globalSeo.seoImage = dbGlobal.seoImage;
+      if (dbGlobal.googleVerification) globalSeo.googleVerification = dbGlobal.googleVerification;
+    }
+
     if (dbSeo) {
-      globalSeo = { ...globalSeo, ...dbSeo };
+      if (dbSeo.siteName) globalSeo.siteName = dbSeo.siteName;
+      if (dbSeo.siteTitle) globalSeo.siteTitle = dbSeo.siteTitle;
+      if (dbSeo.metaDescription || dbSeo.seoDescription) {
+        globalSeo.metaDescription = dbSeo.metaDescription || dbSeo.seoDescription;
+      }
+      if (dbSeo.metaKeywords || dbSeo.seoKeywords) {
+        globalSeo.metaKeywords = dbSeo.metaKeywords || dbSeo.seoKeywords;
+      }
+      if (dbSeo.seoImage) globalSeo.seoImage = dbSeo.seoImage;
+      if (dbSeo.googleVerification) globalSeo.googleVerification = dbSeo.googleVerification;
     }
   } catch (e) {
     console.error("Error loading global SEO settings:", e);
   }
 
-  let title = globalSeo.siteTitle;
+  let title = globalSeo.siteTitle || `${globalSeo.siteName} | مرجع خواندن آنلاین مانگا و مانهوا`;
   let description = globalSeo.metaDescription;
   let keywords = globalSeo.metaKeywords;
   let image = globalSeo.seoImage;
@@ -51,9 +77,8 @@ export async function generateSeoHtml(
     image = `${siteUrl}${image.startsWith("/") ? "" : "/"}${image}`;
   }
 
-  // Route: Series Page (/series/:id)
+  // Route matches
   const seriesMatch = urlPath.match(/^\/series\/([^/]+)$/);
-  // Route: Chapter Page (/reader/:id/:chapterId OR /series/:id/chapter/:chapterId OR /series/:id/chapters/:chapterId)
   const chapterMatch = urlPath.match(/^\/reader\/([^/]+)\/([^/]+)$/) || 
                        urlPath.match(/^\/series\/([^/]+)\/chapter\/([^/]+)$/) || 
                        urlPath.match(/^\/series\/([^/]+)\/chapters\/([^/]+)$/);
@@ -74,7 +99,6 @@ export async function generateSeoHtml(
         const chapTitle = chapter?.title ? ` - ${chapter.title}` : "";
         const typeLabel = series.type === "Manga" ? "مانگا" : series.type === "Manhua" ? "مانها" : "مانهوا";
 
-        // Check chapter custom overrides
         if (chapter?.seoTitle) {
           title = chapter.seoTitle;
         } else {
@@ -111,7 +135,6 @@ export async function generateSeoHtml(
           image = series.cover.startsWith("http") ? series.cover : `${siteUrl}${series.cover.startsWith("/") ? "" : "/"}${series.cover}`;
         }
 
-        // Schema.org Chapter / ComicIssue JSON-LD
         jsonLdData = {
           "@context": "https://schema.org",
           "@type": "ComicIssue",
@@ -151,7 +174,6 @@ export async function generateSeoHtml(
       const series = await dbManager.getSeriesById(seriesId);
       if (series) {
         const comments = await dbManager.getCommentsForSeries(seriesId);
-        const chapters = await dbManager.getChapters(seriesId);
 
         const seriesTitle = series.title;
         const altTitles = Array.isArray(series.alternativeTitles) && series.alternativeTitles.length > 0
@@ -200,7 +222,6 @@ export async function generateSeoHtml(
           image = series.cover.startsWith("http") ? series.cover : `${siteUrl}${series.cover.startsWith("/") ? "" : "/"}${series.cover}`;
         }
 
-        // Schema.org ComicSeries JSON-LD
         jsonLdData = {
           "@context": "https://schema.org",
           "@type": "ComicSeries",
@@ -237,8 +258,25 @@ export async function generateSeoHtml(
     } catch (e) {
       console.error("Error generating SEO for series page:", e);
     }
+  } else if (urlPath.startsWith("/search")) {
+    title = `جستجو و فیلتر پیشرفته مانهوا و مانگا | ${globalSeo.siteName}`;
+    description = `جستجو در آرشیو هزاران مانهوا، مانگا و کمیک با فیلترهای ژانر، وضعیت انتشار و نوع در رسانه ${globalSeo.siteName}.`;
+    keywords = `جستجوی مانهوا, فیلتر مانگا, آرشیو مانگا, دانلود مانهوا, ${globalSeo.siteName}`;
+  } else if (urlPath.startsWith("/leaderboard")) {
+    title = `برترین مانهواها و مانگاهای برگزیده (رتبه‌بندی) | ${globalSeo.siteName}`;
+    description = `جدول رتبه‌بندی محبوب‌ترین و پربازدیدترین مانهواها، مانگاها و کمیک‌های ترجمه‌شده در ${globalSeo.siteName}.`;
+    keywords = `برترین مانهواها, مانهواهای محبوب, رتبه‌بندی مانگا, پربازدیدترین مانهوا, ${globalSeo.siteName}`;
+  } else if (urlPath.startsWith("/support")) {
+    title = `مرکز پشتیبانی آنلاین و تیکت‌ها | ${globalSeo.siteName}`;
+    description = `پشتیبانی آنلاین، پیگیری درخواست‌ها و ارسال تیکت در ${globalSeo.siteName}.`;
+  } else if (urlPath.startsWith("/terms")) {
+    title = `قوانین و مقررات استفاده از سایت | ${globalSeo.siteName}`;
+    description = `قوانین، شرایط استفاده و ضوابط فعالیت در پلتفرم ${globalSeo.siteName}.`;
+  } else if (urlPath.startsWith("/privacy")) {
+    title = `حریم خصوصی کاربران | ${globalSeo.siteName}`;
+    description = `سیاست‌ها و قوانین حفظ حریم خصوصی و امنیت اطلاعات کاربران در رسانه ${globalSeo.siteName}.`;
   } else {
-    // General website Schema.org JSON-LD
+    // Default Home / General Schema.org
     jsonLdData = {
       "@context": "https://schema.org",
       "@type": "WebSite",
@@ -252,7 +290,6 @@ export async function generateSeoHtml(
     };
   }
 
-  // Construct Google verification tag if present
   const googleVerificationHtml = globalSeo.googleVerification
     ? `<meta name="google-site-verification" content="${escapeHtml(globalSeo.googleVerification)}" />`
     : "";
@@ -271,6 +308,7 @@ export async function generateSeoHtml(
     <meta property="og:image" content="${escapeHtml(image)}" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="${escapeHtml(canonicalUrl)}" />
+    <meta property="og:site_name" content="${escapeHtml(globalSeo.siteName)}" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${escapeHtml(title)}" />
     <meta name="twitter:description" content="${escapeHtml(description)}" />
@@ -280,7 +318,7 @@ export async function generateSeoHtml(
     ${breadcrumbHtml}
   `;
 
-  // Hidden crawler markup
+  // Hidden crawler markup for indexation
   const injectedSeoBody = `
     <div id="seo-crawler-markup" style="display:none !important; visibility:hidden !important; opacity:0 !important; width:0 !important; height:0 !important; overflow:hidden !important; position:absolute !important; top:-9999px !important; left:-9999px !important; z-index:-99999 !important;" aria-hidden="true">
       <h1>${escapeHtml(title)}</h1>

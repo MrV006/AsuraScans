@@ -3,6 +3,7 @@ import { Layout } from '../components/Layout';
 import { useSettings } from '../contexts/SettingsContext';
 import { FileText, ArrowLeft, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { SEOHead } from '../components/SEOHead';
 
 export default function Terms() {
   const { settings } = useSettings();
@@ -45,6 +46,12 @@ export default function Terms() {
 
   return (
     <Layout>
+      <SEOHead 
+        title={`قوانین و مقررات استفاده از سایت | ${settings?.siteName || 'مانگاتا'}`}
+        description={`قوانین، شرایط استفاده و ضوابط فعالیت در پلتفرم ${settings?.siteName || 'مانگاتا'}.`}
+        keywords={`قوانین سایت, مقررات استفاده, شرایط عضویت, ${settings?.siteName || 'مانگاتا'}`}
+        siteName={settings?.siteName || 'مانگاتا'}
+      />
       <div className="min-h-[80vh] bg-[#0b0b0e] py-12 px-4 md:px-8" dir="rtl">
         <div className="max-w-4xl mx-auto">
           {/* Breadcrumbs */}

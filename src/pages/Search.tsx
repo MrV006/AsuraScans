@@ -7,8 +7,11 @@ import { SeriesCardSkeleton } from '../components/Skeletons';
 import { SeriesCard } from '../components/SeriesCard';
 import { apiClient } from '../lib/apiClient';
 import { Series } from '../lib/types';
+import { SEOHead } from '../components/SEOHead';
+import { useSettings } from '../contexts/SettingsContext';
 
 export default function Search() {
+  const { settings } = useSettings();
   const [searchParams, setSearchParams] = useSearchParams();
   const q = searchParams.get('q') || '';
   
@@ -136,6 +139,12 @@ export default function Search() {
 
   return (
     <Layout>
+      <SEOHead 
+        title={`جستجو و فیلتر پیشرفته مانهوا و مانگا | ${settings?.siteName || 'مانگاتا'}`}
+        description={`جستجو در آرشیو هزاران مانهوا، مانگا و کمیک با فیلترهای ژانر، وضعیت انتشار، نوع و برچسب در رسانه ${settings?.siteName || 'مانگاتا'}.`}
+        keywords={`جستجوی مانهوا, فیلتر مانگا, آرشیو مانگا, دانلود مانهوا, ${settings?.siteName || 'مانگاتا'}`}
+        siteName={settings?.siteName || 'مانگاتا'}
+      />
       <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 md:py-12" dir="rtl">
         
         {/* Header Title */}

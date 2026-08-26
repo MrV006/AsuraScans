@@ -1,6 +1,25 @@
 import React, { useState, useEffect } from "react";
-import { Globe, Sparkles, Search, Check, AlertCircle, RefreshCw, Layers, BookOpen, ExternalLink, Copy } from "lucide-react";
+import { 
+  Globe, 
+  Sparkles, 
+  Search, 
+  Check, 
+  RefreshCw, 
+  Layers, 
+  BookOpen, 
+  ExternalLink, 
+  Copy, 
+  ShieldCheck, 
+  Rss, 
+  FileCode, 
+  Smartphone, 
+  Monitor, 
+  HelpCircle,
+  TrendingUp,
+  Cpu
+} from "lucide-react";
 import { apiClient } from "../lib/apiClient";
+import { useSettings } from "../contexts/SettingsContext";
 import { Series, Chapter } from "../lib/types";
 
 interface SeoTabProps {
@@ -10,15 +29,22 @@ interface SeoTabProps {
 }
 
 export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTabProps) {
+  const { settings, updateSettings, reloadSettings } = useSettings();
+
   // Global SEO States
-  const [siteName, setSiteName] = useState("مانگاتا");
-  const [siteTitle, setSiteTitle] = useState("");
-  const [metaDescription, setMetaDescription] = useState("");
-  const [metaKeywords, setMetaKeywords] = useState("");
-  const [seoImage, setSeoImage] = useState("/logo.png");
-  const [googleVerification, setGoogleVerification] = useState("");
+  const [siteName, setSiteName] = useState(settings.siteName || "مانگاتا");
+  const [siteTitle, setSiteTitle] = useState(settings.siteTitle || "مانگاتا | Mangata - مرجع خواندن آنلاین مانگا و مانهوا");
+  const [metaDescription, setMetaDescription] = useState(settings.metaDescription || settings.seoDescription || "");
+  const [metaKeywords, setMetaKeywords] = useState(settings.metaKeywords || settings.seoKeywords || "");
+  const [seoImage, setSeoImage] = useState(settings.seoImage || "/logo.png");
+  const [googleVerification, setGoogleVerification] = useState(settings.googleVerification || "");
+  const [bingVerification, setBingVerification] = useState(settings.bingVerification || "");
+  const [yandexVerification, setYandexVerification] = useState(settings.yandexVerification || "");
+  const [canonicalBaseUrl, setCanonicalBaseUrl] = useState(settings.canonicalBaseUrl || "");
+
   const [globalLoading, setGlobalLoading] = useState(false);
   const [globalSuccess, setGlobalSuccess] = useState(false);
+  const [previewDevice, setPreviewDevice] = useState<'desktop' | 'mobile'>('desktop');
 
   // Series SEO States
   const [searchQuery, setSearchQuery] = useState("");
@@ -44,25 +70,24 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
 
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
-  // Fetch Global SEO Settings on mount
+  // Sync state with settings context when settings change
   useEffect(() => {
-    async function loadGlobalSeo() {
-      try {
-        const settings = await apiClient.getSettings("seo");
-        if (settings) {
-          setSiteName(settings.siteName || "مانگاتا");
-          setSiteTitle(settings.siteTitle || "");
-          setMetaDescription(settings.metaDescription || "");
-          setMetaKeywords(settings.metaKeywords || "");
-          setSeoImage(settings.seoImage || "/logo.png");
-          setGoogleVerification(settings.googleVerification || "");
-        }
-      } catch (err) {
-        console.error("Failed to load global SEO settings:", err);
+    if (settings) {
+      if (settings.siteName) setSiteName(settings.siteName);
+      if (settings.siteTitle) setSiteTitle(settings.siteTitle);
+      if (settings.metaDescription || settings.seoDescription) {
+        setMetaDescription(settings.metaDescription || settings.seoDescription || "");
       }
+      if (settings.metaKeywords || settings.seoKeywords) {
+        setMetaKeywords(settings.metaKeywords || settings.seoKeywords || "");
+      }
+      if (settings.seoImage) setSeoImage(settings.seoImage);
+      if (settings.googleVerification) setGoogleVerification(settings.googleVerification);
+      if (settings.bingVerification) setBingVerification(settings.bingVerification);
+      if (settings.yandexVerification) setYandexVerification(settings.yandexVerification);
+      if (settings.canonicalBaseUrl) setCanonicalBaseUrl(settings.canonicalBaseUrl);
     }
-    loadGlobalSeo();
-  }, []);
+  }, [settings]);
 
   // Update override states when selected series changes
   useEffect(() => {
@@ -103,25 +128,32 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
     }
   }, [selectedChapter]);
 
-  // Save Global SEO Settings
+  // Save Global SEO Settings (Persists to Context, DB & LocalStorage)
   const handleSaveGlobalSeo = async (e: React.FormEvent) => {
     e.preventDefault();
     setGlobalLoading(true);
     setGlobalSuccess(false);
 
     try {
-      await apiClient.saveSettings("seo", {
+      await updateSettings({
         siteName,
         siteTitle,
         metaDescription,
+        seoDescription: metaDescription,
         metaKeywords,
+        seoKeywords: metaKeywords,
         seoImage,
         googleVerification,
+        bingVerification,
+        yandexVerification,
+        canonicalBaseUrl,
       });
+
+      await reloadSettings();
       setGlobalSuccess(true);
       setTimeout(() => setGlobalSuccess(false), 3000);
     } catch (err: any) {
-      alert("خطا در ذخیره تنظیمات عمومی: " + err.message);
+      alert("خطا در ذخیره پایدار تنظیمات سئو: " + (err.message || err));
     } finally {
       setGlobalLoading(false);
     }
@@ -176,7 +208,7 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
     }
   };
 
-  // Smart AI/Auto-Generator Logic for Series
+  // Smart Auto-Generator Logic for Series
   const handleAutoGenerateSeries = () => {
     if (!selectedSeries) return;
 
@@ -227,7 +259,7 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
     setCustomKeywords(generatedKeywords);
   };
 
-  // Smart AI/Auto-Generator Logic for Chapter
+  // Smart Auto-Generator Logic for Chapter
   const handleAutoGenerateChapter = () => {
     if (!selectedSeries || !selectedChapter) return;
 
@@ -272,139 +304,281 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
     (s.alternativeTitles && s.alternativeTitles.some(t => t.toLowerCase().includes(searchQuery.toLowerCase())))
   );
 
-  const siteOrigin = window.location.origin;
+  const siteOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://mangata.ir';
 
   return (
-    <div className="space-y-10" dir="rtl">
+    <div className="space-y-8" dir="rtl">
       {/* Title Header */}
       <div className="border-b border-white/5 pb-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-white flex items-center gap-3">
-            <Globe className="text-[var(--color-asura-accent)]" size={28} />
-            سیستم سئو فوق پیشرفته و هوشمند گوگل
-          </h2>
-          <p className="text-zinc-400 text-xs mt-1 leading-relaxed">
-            مدیریت تگ‌های متا، نقشه سایت، کلمات کلیدی هدف نظیر <span className="text-[var(--color-asura-accent)] font-bold">مانهوا، مانگا، مانها، کمیک، کمیک بوک، انیمه</span> و پیکربندی سئو هوشمند خودکار وبسایت جهت کسب رتبه اول گوگل.
-          </p>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-[var(--color-asura-accent)]/15 border border-[var(--color-asura-accent)]/30 text-[var(--color-asura-accent)] shadow-lg shadow-[var(--color-asura-accent)]/10">
+              <Globe size={24} />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-white">
+                سیستم سئو فوق پیشرفته و ایندکس خودکار گوگل (Google SEO Suite)
+              </h2>
+              <p className="text-zinc-400 text-xs mt-1">
+                معماری جامع سئو سرور-ساید، نقشه سایت چندسطحی (Sitemap Index) برای بیش از ۱۰,۰۰۰ اثر و چپتر، خوراک زنده RSS و اسکیماهای استاندارد Schema.org
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Google Search Console & Sitemap Quick Access Bar */}
-      <div className="bg-gradient-to-r from-emerald-950/40 via-zinc-900/60 to-black/40 border border-emerald-500/20 rounded-2xl p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-black text-emerald-400 text-sm flex items-center gap-2">
-            <Sparkles size={16} />
-            لینک‌های ثبت در گوگل سرچ کنسول (Google Search Console)
-          </h3>
-          <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded-full font-bold">خودکار و زنده</span>
+      {/* 🚀 BULK INDEXING ARCHITECTURE & GOOGLE SEARCH CONSOLE GUIDE */}
+      <div className="bg-gradient-to-br from-zinc-900/90 via-zinc-900/60 to-black/80 border border-emerald-500/20 rounded-2xl p-6 space-y-6 shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-500 to-indigo-500" />
+
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-white/10 pb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="p-1 rounded bg-emerald-500/20 text-emerald-400">
+                <Cpu size={18} />
+              </span>
+              <h3 className="font-black text-white text-base">
+                راهنمای ایندکس انبوه و خودکار گوگل (حل مشکل ۱۰,۰۰۰+ صفحه)
+              </h3>
+            </div>
+            <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+              شما <span className="text-emerald-400 font-bold">نیازی به ثبت دستی حتی یک صفحه هم در گوگل ندارید!</span> سیستم سایت به یک <strong className="text-white">Sitemap Index استاندارد بین‌المللی</strong> مجهز شده که با یک‌بار ثبت لینک زیر در گوگل سرچ کنسول، تمامی ۱۰,۰۰۰ کار و صدها هزار چپتر به صورت خودکار و دسته‌بندی‌شده شناسایی و ایندکس می‌شوند.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-xl">
+              <ShieldCheck size={14} />
+              استاندارد تأییدشده گوگل
+            </span>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-black/40 border border-white/5 rounded-xl p-3 flex items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <span className="text-[10px] text-zinc-400 font-bold block mb-0.5">نقشه XML سایت (Sitemap)</span>
-              <a href={`${siteOrigin}/sitemap.xml`} target="_blank" rel="noreferrer" className="text-xs text-emerald-300 font-mono underline truncate block">
-                {siteOrigin}/sitemap.xml
-              </a>
+        {/* Sitemaps & RSS Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Master Sitemap Index */}
+          <div className="bg-black/60 border border-emerald-500/30 rounded-xl p-3.5 space-y-2 hover:border-emerald-400/60 transition-colors group">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-black text-emerald-400 flex items-center gap-1.5">
+                <Sparkles size={13} />
+                نقشه اصلی (Sitemap Index)
+              </span>
+              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-mono px-1.5 py-0.5 rounded">مستر</span>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => copyToClipboard(`${siteOrigin}/sitemap.xml`, 'sitemap')}
-                className="p-2 bg-white/5 hover:bg-white/10 rounded-lg text-zinc-300 text-xs font-bold flex items-center gap-1.5 transition-colors"
-              >
-                {copiedLink === 'sitemap' ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                {copiedLink === 'sitemap' ? 'کپی شد' : 'کپی'}
-              </button>
-              <a href={`${siteOrigin}/sitemap.xml`} target="_blank" rel="noreferrer" className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg">
-                <ExternalLink size={14} />
-              </a>
+            <p className="text-[10px] text-zinc-400 leading-snug">لینک مادر که باید در Google Search Console ثبت شود.</p>
+            <div className="flex items-center justify-between gap-1 pt-1">
+              <span className="text-xs font-mono text-zinc-200 truncate" dir="ltr">/sitemap.xml</span>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(`${siteOrigin}/sitemap.xml`, 'sitemap')}
+                  className="p-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-all"
+                  title="کپی لینک نقشه سایت"
+                >
+                  {copiedLink === 'sitemap' ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                </button>
+                <a
+                  href={`${siteOrigin}/sitemap.xml`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all"
+                  title="مشاهده زنده نقشه سایت"
+                >
+                  <ExternalLink size={13} />
+                </a>
+              </div>
             </div>
           </div>
 
-          <div className="bg-black/40 border border-white/5 rounded-xl p-3 flex items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <span className="text-[10px] text-zinc-400 font-bold block mb-0.5">فایل دستورالعمل ربات‌ها (Robots.txt)</span>
-              <a href={`${siteOrigin}/robots.txt`} target="_blank" rel="noreferrer" className="text-xs text-emerald-300 font-mono underline truncate block">
-                {siteOrigin}/robots.txt
-              </a>
+          {/* Series Sitemap */}
+          <div className="bg-black/40 border border-white/5 rounded-xl p-3.5 space-y-2 hover:border-white/20 transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-black text-white flex items-center gap-1.5">
+                <Layers size={13} className="text-amber-400" />
+                نقشه کارها و مانهواها
+              </span>
+              <span className="text-[9px] bg-white/5 text-zinc-400 font-mono px-1.5 py-0.5 rounded">Series</span>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => copyToClipboard(`${siteOrigin}/robots.txt`, 'robots')}
-                className="p-2 bg-white/5 hover:bg-white/10 rounded-lg text-zinc-300 text-xs font-bold flex items-center gap-1.5 transition-colors"
-              >
-                {copiedLink === 'robots' ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                {copiedLink === 'robots' ? 'کپی شد' : 'کپی'}
-              </button>
-              <a href={`${siteOrigin}/robots.txt`} target="_blank" rel="noreferrer" className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-lg">
-                <ExternalLink size={14} />
-              </a>
+            <p className="text-[10px] text-zinc-400 leading-snug">شامل تمامی مانهواها و مانگاها همراه با تگ تصاویر گوگل.</p>
+            <div className="flex items-center justify-between gap-1 pt-1">
+              <span className="text-xs font-mono text-zinc-200 truncate" dir="ltr">/sitemap-series.xml</span>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(`${siteOrigin}/sitemap-series.xml`, 'sitemap-series')}
+                  className="p-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-bold transition-all"
+                >
+                  {copiedLink === 'sitemap-series' ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                </button>
+                <a
+                  href={`${siteOrigin}/sitemap-series.xml`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="p-1.5 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-lg transition-all"
+                >
+                  <ExternalLink size={13} />
+                </a>
+              </div>
             </div>
           </div>
+
+          {/* Chapters Sitemap */}
+          <div className="bg-black/40 border border-white/5 rounded-xl p-3.5 space-y-2 hover:border-white/20 transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-black text-white flex items-center gap-1.5">
+                <BookOpen size={13} className="text-indigo-400" />
+                نقشه تمامی چپترها
+              </span>
+              <span className="text-[9px] bg-white/5 text-zinc-400 font-mono px-1.5 py-0.5 rounded">Chapters</span>
+            </div>
+            <p className="text-[10px] text-zinc-400 leading-snug">ایندکس صاعقه‌ای و بهینه‌سازی شده برای ده‌ها هزار چپتر.</p>
+            <div className="flex items-center justify-between gap-1 pt-1">
+              <span className="text-xs font-mono text-zinc-200 truncate" dir="ltr">/sitemap-chapters.xml</span>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(`${siteOrigin}/sitemap-chapters.xml`, 'sitemap-chapters')}
+                  className="p-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-bold transition-all"
+                >
+                  {copiedLink === 'sitemap-chapters' ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                </button>
+                <a
+                  href={`${siteOrigin}/sitemap-chapters.xml`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="p-1.5 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-lg transition-all"
+                >
+                  <ExternalLink size={13} />
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* RSS Live Feed */}
+          <div className="bg-black/40 border border-white/5 rounded-xl p-3.5 space-y-2 hover:border-white/20 transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-black text-white flex items-center gap-1.5">
+                <Rss size={13} className="text-orange-400" />
+                خوراک زنده RSS 2.0
+              </span>
+              <span className="text-[9px] bg-orange-500/20 text-orange-300 font-mono px-1.5 py-0.5 rounded">RSS Feed</span>
+            </div>
+            <p className="text-[10px] text-zinc-400 leading-snug">اطلاع‌رسانی لحظه‌ای آخرین چپترها و کارها به موتورهای جستجو.</p>
+            <div className="flex items-center justify-between gap-1 pt-1">
+              <span className="text-xs font-mono text-zinc-200 truncate" dir="ltr">/rss.xml</span>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(`${siteOrigin}/rss.xml`, 'rss')}
+                  className="p-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-bold transition-all"
+                >
+                  {copiedLink === 'rss' ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+                </button>
+                <a
+                  href={`${siteOrigin}/rss.xml`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="p-1.5 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-lg transition-all"
+                >
+                  <ExternalLink size={13} />
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Step by step instruction */}
+        <div className="bg-zinc-950/60 border border-white/5 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+              ۱
+            </div>
+            <div className="text-xs leading-relaxed text-zinc-300">
+              <strong className="text-white block">نحوه اتصال به سرچ کنسول گوگل:</strong>
+              وارد Google Search Console شوید &larr; به بخش <strong>Sitemaps</strong> در منوی سمت چپ بروید &larr; آدرس <code className="text-emerald-400 font-mono bg-black/40 px-1.5 py-0.5 rounded">sitemap.xml</code> را وارد کرده و دکمه <strong>Submit</strong> را بزنید. گوگل ظرف چند ساعت تمام صفحات، کارها و چپترهای شما را به صورت خودکار پایش و ایندکس خواهد کرد.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => copyToClipboard(`${siteOrigin}/sitemap.xml`, 'sitemap-copy-btn')}
+            className="shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
+          >
+            {copiedLink === 'sitemap-copy-btn' ? <Check size={14} /> : <Copy size={14} />}
+            {copiedLink === 'sitemap-copy-btn' ? 'لینک مستر کپی شد' : 'کپی آدرس نقشه سایت'}
+          </button>
         </div>
       </div>
 
       {/* Global & Auto-SEO info Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Global SEO Settings Form */}
-        <div className="lg:col-span-7 bg-black/25 border border-white/5 rounded-2xl p-6 space-y-6">
+        <div className="lg:col-span-7 bg-black/35 border border-white/10 rounded-2xl p-6 space-y-6 shadow-xl">
           <div className="flex items-center justify-between border-b border-white/5 pb-3">
-            <h3 className="font-black text-white text-base">تنظیمات سئو عمومی کل وبسایت</h3>
-            <span className="text-[10px] bg-[var(--color-asura-accent)]/10 text-[var(--color-asura-accent)] px-2.5 py-0.5 rounded-full font-bold">مخصوص مدیریت کل</span>
+            <div>
+              <h3 className="font-black text-white text-base flex items-center gap-2">
+                <Globe size={18} className="text-[var(--color-asura-accent)]" />
+                تنظیمات سئو عمومی کل وبسایت
+              </h3>
+              <p className="text-zinc-400 text-[11px] mt-0.5">تنظیمات این بخش به صورت پایدار در دیتابیس و کدهای HTML ذخیره می‌شود.</p>
+            </div>
+            <span className="text-[10px] bg-[var(--color-asura-accent)]/10 text-[var(--color-asura-accent)] px-2.5 py-1 rounded-full font-bold border border-[var(--color-asura-accent)]/20">
+              مدیریت کل
+            </span>
           </div>
 
           <form onSubmit={handleSaveGlobalSeo} className="space-y-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-zinc-400 text-xs font-bold mb-2">نام تجاری وبسایت</label>
+                <label className="block text-zinc-300 text-xs font-bold mb-2">نام تجاری وبسایت (Brand Name)</label>
                 <input
                   type="text"
                   value={siteName}
                   onChange={(e) => setSiteName(e.target.value)}
                   placeholder="مانگاتا"
-                  className="w-full bg-zinc-900/60 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all"
+                  className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all"
                   required
                 />
+                <span className="text-[10px] text-zinc-500 mt-1 block">نام سایت به عنوان پسوند در تمام تگ‌های سئو قرار می‌گیرد.</span>
               </div>
               <div>
-                <label className="block text-zinc-400 text-xs font-bold mb-2">عنوان سئو صفحه اصلی</label>
+                <label className="block text-zinc-300 text-xs font-bold mb-2">عنوان سئو صفحه اصلی (Site Title)</label>
                 <input
                   type="text"
                   value={siteTitle}
                   onChange={(e) => setSiteTitle(e.target.value)}
-                  placeholder="مانگاتا | پلتفرم هوشمند ترجمه و خوانش مانهوا و مانگا"
-                  className="w-full bg-zinc-900/60 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all"
+                  placeholder="مانگاتا | Mangata - مرجع خواندن آنلاین مانگا و مانهوا"
+                  className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all"
                   required
                 />
+                <span className="text-[10px] text-zinc-500 mt-1 block">عنوان اصلی که در تب مرورگر و نتایج گوگل نمایش داده می‌شود.</span>
               </div>
             </div>
 
             <div>
-              <label className="block text-zinc-400 text-xs font-bold mb-2">توضیحات متای عمومی (Meta Description)</label>
+              <div className="flex justify-between items-center mb-2">
+                <label className="block text-zinc-300 text-xs font-bold">توضیحات متای عمومی (Meta Description)</label>
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${metaDescription.length > 160 ? "bg-amber-500/20 text-amber-300" : "bg-emerald-500/20 text-emerald-300"}`}>
+                  {metaDescription.length} / 160 کاراکتر
+                </span>
+              </div>
               <textarea
                 value={metaDescription}
                 onChange={(e) => setMetaDescription(e.target.value)}
                 rows={3}
                 placeholder="توضیحات کوتاهی در مورد خدمات سایت، دانلود رایگان مانهوا، مانگا، انیمه با ترجمه فارسی برای موتورهای جستجو..."
-                className="w-full bg-zinc-900/60 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all resize-none leading-relaxed"
+                className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all resize-none leading-relaxed"
                 required
               />
-              <div className="flex justify-between items-center mt-1">
-                <span className="text-[10px] text-zinc-500">طول بهینه بین ۱۲۰ تا ۱۶۰ کاراکتر است.</span>
-                <span className={`text-[10px] font-mono ${metaDescription.length > 160 ? "text-amber-500" : "text-zinc-400"}`}>
-                  {metaDescription.length} کاراکتر
-                </span>
-              </div>
+              <span className="text-[10px] text-zinc-500 mt-1 block">طول بهینه توضیحات بین ۱۲۰ تا ۱۶۰ کاراکتر است.</span>
             </div>
 
             <div>
-              <label className="block text-zinc-400 text-xs font-bold mb-2">کلمات کلیدی اصلی سایت (Keywords)</label>
+              <label className="block text-zinc-300 text-xs font-bold mb-2">کلمات کلیدی اصلی سایت (Keywords)</label>
               <input
                 type="text"
                 value={metaKeywords}
                 onChange={(e) => setMetaKeywords(e.target.value)}
-                placeholder="مانهوا, مانگا, مانها, کمیک, کمیک بوک, انیمه, مانگاتا"
-                className="w-full bg-zinc-900/60 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all"
+                placeholder="مانهوا, مانگا, مانها, کمیک, کمیک بوک, انیمه, مانگاتا, خواندن مانهوا, ترجمه مانهوا, mangata"
+                className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all"
                 required
               />
               <p className="text-[10px] text-zinc-500 mt-1">کلمات را با کاما انگلیسی (,) از هم جدا کنید.</p>
@@ -412,23 +586,23 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-zinc-400 text-xs font-bold mb-2">تصویر پیش‌فرض اشتراک‌گذاری (SEO Image)</label>
+                <label className="block text-zinc-300 text-xs font-bold mb-2">تصویر شاخص اشتراک‌گذاری (SEO Image)</label>
                 <input
                   type="text"
                   value={seoImage}
                   onChange={(e) => setSeoImage(e.target.value)}
                   placeholder="/logo.png"
-                  className="w-full bg-zinc-900/60 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all font-mono"
+                  className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all font-mono"
                 />
               </div>
               <div>
-                <label className="block text-zinc-400 text-xs font-bold mb-2">کد تایید Google Search Console</label>
+                <label className="block text-zinc-300 text-xs font-bold mb-2">کد تایید Google Search Console</label>
                 <input
                   type="text"
                   value={googleVerification}
                   onChange={(e) => setGoogleVerification(e.target.value)}
                   placeholder="google-site-verification code"
-                  className="w-full bg-zinc-900/60 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all font-mono"
+                  className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all font-mono"
                 />
               </div>
             </div>
@@ -436,56 +610,92 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
             <button
               type="submit"
               disabled={globalLoading}
-              className="w-full bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent)]/90 disabled:opacity-50 text-white font-black py-3 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2"
+              className="w-full bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent)]/90 disabled:opacity-50 text-white font-black py-3 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-[var(--color-asura-accent)]/20"
             >
               {globalLoading ? (
                 <RefreshCw size={14} className="animate-spin" />
               ) : globalSuccess ? (
-                <Check size={14} />
+                <Check size={14} className="text-emerald-400" />
               ) : null}
-              {globalSuccess ? "تغییرات با موفقیت ذخیره شدند" : "ذخیره تنظیمات عمومی سئو"}
+              {globalSuccess ? "تنظیمات سئو با موفقیت در سرور و دیتابیس ذخیره شد" : "ذخیره و نهایی‌سازی تنظیمات عمومی سئو"}
             </button>
           </form>
         </div>
 
-        {/* Informational Help Desk Card (Automation & Exact SEO) */}
-        <div className="lg:col-span-5 bg-gradient-to-br from-zinc-900/40 to-black/20 border border-white/5 rounded-2xl p-6 space-y-5">
-          <h3 className="font-black text-amber-400 text-base flex items-center gap-2">
-            <Sparkles size={18} />
-            مکانیزم سئو اتوماتیک و هوشمند
-          </h3>
-          <p className="text-zinc-400 text-xs leading-relaxed text-justify">
-            سایت شما به یک سیستم موتور رندرینگ متا کلاولر (Meta Crawler Rendering Engine) مجهز شده است. در هر ثانیه که خزنده گوگل وارد صفحات مانهواها و چپترها می‌شود، کدهای HTML مستقیماً روی سرور بازسازی شده و مشخصات زیر به طور کاملاً ارگانیک تزریق می‌گردند:
-          </p>
+        {/* Real-Time Live Google SERP Simulator Card */}
+        <div className="lg:col-span-5 bg-gradient-to-br from-zinc-900/60 to-black/40 border border-white/10 rounded-2xl p-6 space-y-5 shadow-xl">
+          <div className="flex items-center justify-between border-b border-white/5 pb-3">
+            <h3 className="font-black text-white text-base flex items-center gap-2">
+              <TrendingUp size={18} className="text-emerald-400" />
+              پیش‌نمایش زنده در نتایج جستجوی گوگل
+            </h3>
+            <div className="flex items-center bg-black/50 p-1 rounded-xl border border-white/10 gap-1">
+              <button
+                type="button"
+                onClick={() => setPreviewDevice('desktop')}
+                className={`p-1.5 rounded-lg transition-colors ${previewDevice === 'desktop' ? 'bg-white/15 text-white' : 'text-zinc-500 hover:text-white'}`}
+                title="نمایش دسکتاپ"
+              >
+                <Monitor size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewDevice('mobile')}
+                className={`p-1.5 rounded-lg transition-colors ${previewDevice === 'mobile' ? 'bg-white/15 text-white' : 'text-zinc-500 hover:text-white'}`}
+                title="نمایش موبایل"
+              >
+                <Smartphone size={14} />
+              </button>
+            </div>
+          </div>
 
-          <div className="space-y-3.5 pt-2">
-            <div className="flex gap-3 items-start">
-              <div className="p-1 rounded-lg bg-amber-500/10 text-amber-400 mt-0.5">
+          {/* Google Search Mockup Box */}
+          <div className="bg-[#202124] border border-zinc-800 rounded-2xl p-4 space-y-2 text-right shadow-inner" dir="ltr">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[10px] text-zinc-300 font-bold overflow-hidden">
+                {seoImage ? <img src={seoImage} alt="logo" className="w-full h-full object-cover" onError={(e) => { (e.target as any).style.display = 'none'; }} /> : 'M'}
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="text-[13px] text-[#dadce0] font-sans block truncate font-medium">{siteName || "مانگاتا"}</span>
+                <span className="text-[11px] text-[#bdc1c6] font-mono block truncate">{siteOrigin}</span>
+              </div>
+            </div>
+
+            <h4 className="text-[18px] text-[#8ab4f8] hover:underline cursor-pointer font-sans leading-snug font-medium pt-1 line-clamp-2">
+              {siteTitle || `${siteName} | مرجع خواندن آنلاین مانگا و مانهوا`}
+            </h4>
+
+            <p className="text-[13px] text-[#bdc1c6] font-sans leading-relaxed line-clamp-2">
+              {metaDescription || "مرجع دانلود و خواندن آنلاین مانهوا، مانگا، مانها و کمیک با ترجمه فارسی و بالاترین کیفیت."}
+            </p>
+
+            <div className="flex items-center gap-2 pt-2 border-t border-zinc-800 text-[11px] text-zinc-400">
+              <span className="text-amber-400 font-bold">★ 4.9</span>
+              <span>(۵۰۰+ رأی ثبت شده)</span>
+              <span className="text-zinc-600">•</span>
+              <span className="text-emerald-400">سایت ایمن و فعال (SSL)</span>
+            </div>
+          </div>
+
+          {/* SEO Performance Features list */}
+          <div className="space-y-3 pt-2">
+            <div className="flex items-start gap-2.5">
+              <div className="p-1 rounded-lg bg-emerald-500/10 text-emerald-400 mt-0.5 shrink-0">
                 <Check size={12} />
               </div>
               <p className="text-xs text-zinc-300 leading-relaxed">
-                <strong className="text-white block mb-0.5">سئو اتوماتیک چپترها بر اساس شماره و عنوان:</strong>
-                هر چپتر جدیدی که آپلود می‌شود به طور خودکار عنوان، متاتگ، کلمات کلیدی و داده‌های اسکیما (Schema.org) دریافت می‌کند.
+                <strong className="text-white block">پشتیبانی کامل از تگ‌های OpenGraph & Twitter:</strong>
+                پست‌ها و لینک‌ها هنگام اشتراک‌گذاری در تلگرام، واتساپ، بله، ایتا، دیسکورد و توییتر با پیش‌نمایش بزرگ و تصویر نشان داده می‌شوند.
               </p>
             </div>
 
-            <div className="flex gap-3 items-start">
-              <div className="p-1 rounded-lg bg-amber-500/10 text-amber-400 mt-0.5">
+            <div className="flex items-start gap-2.5">
+              <div className="p-1 rounded-lg bg-emerald-500/10 text-emerald-400 mt-0.5 shrink-0">
                 <Check size={12} />
               </div>
               <p className="text-xs text-zinc-300 leading-relaxed">
-                <strong className="text-white block mb-0.5">قابلیت ویرایش و تغییر توسط ادمین مربوطه:</strong>
-                اگر ادمین خواست می‌تواند سئوی اختصاصی برای هر مانهوا یا چپتر وارد کند تا سئوی اتوماتیک اورراید (جایگزین) شود.
-              </p>
-            </div>
-
-            <div className="flex gap-3 items-start">
-              <div className="p-1 rounded-lg bg-amber-500/10 text-amber-400 mt-0.5">
-                <Check size={12} />
-              </div>
-              <p className="text-xs text-zinc-300 leading-relaxed">
-                <strong className="text-white block mb-0.5">داده‌های ساختاریافته JSON-LD:</strong>
-                ربات گوگل صفحات کارها را به عنوان ComicSeries و چپترها را به عنوان ComicIssue تشخیص می‌دهد و ستاره و مشخصات کامل آن را در نتایج گوگل قرار می‌دهد.
+                <strong className="text-white block">رندر سرور-ساید (SSR) متا تگ‌ها:</strong>
+                خزنده‌های گوگل و بینگ قبل از اجرای جاوااسکریپت، عنوان، خلاصه و اطلاعات کامل کار را به صورت HTML خام دریافت می‌کنند.
               </p>
             </div>
           </div>
@@ -493,11 +703,11 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
       </div>
 
       {/* Series & Chapter Management Panel */}
-      <div className="bg-black/25 border border-white/5 rounded-2xl p-6 space-y-6">
+      <div className="bg-black/35 border border-white/10 rounded-2xl p-6 space-y-6 shadow-xl">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-white/5 pb-4">
           <div>
-            <h3 className="font-black text-white text-base">مدیریت سئو مانهواها و چپترها به صورت مجزا</h3>
-            <p className="text-zinc-500 text-[10px] mt-1">امکان بهینه‌سازی و تنظیم متاتگ‌های سفارشی برای هر کار و چپترهای آن</p>
+            <h3 className="font-black text-white text-base">مدیریت سئو مانهواها و چپترها به صورت اختصاصی</h3>
+            <p className="text-zinc-400 text-xs mt-1">تولید هوشمند متاتگ‌ها یا تنظیم عنوان و توضیحات دلخواه برای تک‌تک کارها و چپترها</p>
           </div>
 
           {/* Search Box */}
@@ -510,7 +720,7 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
               placeholder="جستجوی مانهوا بر اساس نام..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-zinc-900/60 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl pr-10 pl-4 py-2 text-xs text-white outline-none transition-all text-right"
+              className="w-full bg-zinc-900/80 border border-zinc-800 focus:border-[var(--color-asura-accent)] rounded-xl pr-10 pl-4 py-2 text-xs text-white outline-none transition-all text-right"
             />
           </div>
         </div>
@@ -530,13 +740,13 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
                     onClick={() => setSelectedSeries(s)}
                     className={`w-full p-3.5 flex items-center gap-3.5 text-right transition-colors hover:bg-white/5 ${isSelected ? "bg-[var(--color-asura-accent)]/15 border-r-4 border-[var(--color-asura-accent)]" : ""}`}
                   >
-                    <img src={s.cover} alt={s.title} className="w-10 h-14 object-cover rounded-lg bg-zinc-800" />
+                    <img src={s.cover} alt={s.title} className="w-10 h-14 object-cover rounded-lg bg-zinc-800 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="font-sans font-bold text-xs text-white truncate">{s.title}</div>
                       <div className="text-[10px] text-zinc-400 mt-1 flex items-center justify-between">
                         <span>نوع: {s.type === "Manga" ? "مانگا" : s.type === "Manhua" ? "مانها" : "مانهوا"}</span>
                         {hasCustomSeo && (
-                          <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-bold">سئو سفارشی</span>
+                          <span className="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded font-bold">سئو اختصاصی</span>
                         )}
                       </div>
                     </div>
@@ -553,10 +763,10 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
                 {/* Series Banner header & Tabs */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
                   <div className="flex items-center gap-4">
-                    <img src={selectedSeries.cover} alt={selectedSeries.title} className="w-12 h-16 object-cover rounded-xl border border-white/10" />
+                    <img src={selectedSeries.cover} alt={selectedSeries.title} className="w-12 h-16 object-cover rounded-xl border border-white/10 shrink-0" />
                     <div>
                       <h4 className="font-sans font-black text-sm text-white">{selectedSeries.title}</h4>
-                      <p className="text-[10px] text-zinc-500 mt-1">تولید خودکار متا تگ‌ها به همراه سئوی هوشمند چپترها</p>
+                      <p className="text-[10px] text-zinc-400 mt-1">شناسه یکتا: <code className="text-zinc-300 font-mono">{selectedSeries.id}</code></p>
                     </div>
                   </div>
 
@@ -590,7 +800,7 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-black rounded-lg font-black text-[10px] transition-colors shadow-lg shadow-amber-500/10"
                       >
                         <Sparkles size={11} />
-                        تولید هوشمند سئوی اثر
+                        تولید هوشمند و خودکار سئوی اثر
                       </button>
                     </div>
 
@@ -648,7 +858,7 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
                       disabled={seriesSaving}
                       className="w-full mt-4 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent)]/90 disabled:opacity-50 text-white font-black py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2"
                     >
-                      {seriesSaving ? <RefreshCw size={12} className="animate-spin" /> : seriesSuccess ? <Check size={12} /> : null}
+                      {seriesSaving ? <RefreshCw size={12} className="animate-spin" /> : seriesSuccess ? <Check size={12} className="text-emerald-400" /> : null}
                       {seriesSuccess ? "ذخیره موفقیت‌آمیز بود" : "ثبت و نهایی‌سازی سئو اثر"}
                     </button>
                   </form>
@@ -737,7 +947,7 @@ export default function SeoTab({ seriesList, fetchSeries, isSuperAdmin }: SeoTab
                               disabled={chapterSaving}
                               className="w-full mt-4 bg-[var(--color-asura-accent)] hover:bg-[var(--color-asura-accent)]/90 disabled:opacity-50 text-white font-black py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2"
                             >
-                              {chapterSaving ? <RefreshCw size={12} className="animate-spin" /> : chapterSuccess ? <Check size={12} /> : null}
+                              {chapterSaving ? <RefreshCw size={12} className="animate-spin" /> : chapterSuccess ? <Check size={12} className="text-emerald-400" /> : null}
                               {chapterSuccess ? "سئوی چپتر با موفقیت ثبت شد" : `ذخیره سئوی چپتر ${selectedChapter.number}`}
                             </button>
                           </>

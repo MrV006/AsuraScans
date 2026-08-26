@@ -19,8 +19,10 @@ import { Series } from "../lib/types";
 import { SeriesCardSkeleton, HeroSkeleton } from "../components/Skeletons";
 import { SeriesCard } from "../components/SeriesCard";
 import { SEOHead } from "../components/SEOHead";
+import { useSettings } from "../contexts/SettingsContext";
 
 export default function Home() {
+  const { settings } = useSettings();
   // State for homepage lists (initial loads up to 8 items to detect if there are more than 7)
   const [latestList, setLatestList] = useState<Series[]>([]);
   const [viewsList, setViewsList] = useState<Series[]>([]);
@@ -263,13 +265,15 @@ export default function Home() {
   return (
     <Layout>
       <SEOHead 
-        title="مانگاتا | پلتفرم هوشمند ترجمه، مدیریت و خوانش مانهوا و مانگا"
-        description="مانگاتا (MANGATA) مرجع اصلی و زنده خواندن آنلاین و دانلود مانهوا، مانگا، مانها و کمیک با ترجمه اختصاصی، کیفیت HD و به روزرسانی روزانه."
-        keywords="مانهوا, مانگا, مانها, کمیک, کمیک بوک, انیمه, مانگاتا, خواندن مانهوا, ترجمه مانهوا, mangata"
+        title={settings.siteTitle || (settings.siteName ? `${settings.siteName} | مرجع خواندن آنلاین مانگا و مانهوا` : "مانگاتا | Mangata - مرجع خواندن آنلاین مانگا و مانهوا")}
+        description={settings.seoDescription || settings.metaDescription || "مانگاتا (MANGATA) مرجع اصلی و زنده خواندن آنلاین و دانلود مانهوا، مانگا، مانها و کمیک با ترجمه اختصاصی، کیفیت HD و به روزرسانی روزانه."}
+        keywords={settings.seoKeywords || settings.metaKeywords || "مانهوا, مانگا, مانها, کمیک, کمیک بوک, انیمه, مانگاتا, خواندن مانهوا, ترجمه مانهوا, mangata"}
+        image={settings.seoImage || "/logo.png"}
+        siteName={settings.siteName || "مانگاتا"}
         jsonLd={{
           "@context": "https://schema.org",
           "@type": "WebSite",
-          "name": "مانگاتا",
+          "name": settings.siteName || "مانگاتا",
           "url": window.location.origin,
           "potentialAction": {
             "@type": "SearchAction",

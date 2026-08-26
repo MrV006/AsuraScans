@@ -16,21 +16,40 @@ export function Layout({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   useEffect(() => {
-    if (loading) {
-      document.title = 'loading';
-    } else {
-      document.title = settings.siteName || 'Mangata';
+    const defaultSiteTitle = settings.siteTitle || (settings.siteName ? `${settings.siteName} | مرجع خواندن آنلاین مانگا و مانهوا` : 'مانگاتا | Mangata - مرجع خواندن آنلاین مانگا و مانهوا');
+    if (!loading && (document.title === 'loading' || document.title === 'Loading...' || !document.title)) {
+      document.title = defaultSiteTitle;
     }
-    if (settings.seoDescription) {
+    const desc = settings.seoDescription || settings.metaDescription;
+    if (desc) {
       let meta = document.querySelector('meta[name="description"]');
       if (!meta) {
         meta = document.createElement('meta');
         meta.setAttribute('name', 'description');
         document.head.appendChild(meta);
       }
-      meta.setAttribute('content', settings.seoDescription);
+      meta.setAttribute('content', desc);
     }
-  }, [settings.siteName, settings.seoDescription, loading]);
+    const keywords = settings.seoKeywords || settings.metaKeywords;
+    if (keywords) {
+      let metaKw = document.querySelector('meta[name="keywords"]');
+      if (!metaKw) {
+        metaKw = document.createElement('meta');
+        metaKw.setAttribute('name', 'keywords');
+        document.head.appendChild(metaKw);
+      }
+      metaKw.setAttribute('content', keywords);
+    }
+    if (settings.googleVerification) {
+      let metaGv = document.querySelector('meta[name="google-site-verification"]');
+      if (!metaGv) {
+        metaGv = document.createElement('meta');
+        metaGv.setAttribute('name', 'google-site-verification');
+        document.head.appendChild(metaGv);
+      }
+      metaGv.setAttribute('content', settings.googleVerification);
+    }
+  }, [settings.siteName, settings.siteTitle, settings.seoDescription, settings.metaDescription, settings.seoKeywords, settings.metaKeywords, settings.googleVerification, loading]);
 
   const isStaffOrAdmin = isUserStaffOrAdmin(profile, user);
 

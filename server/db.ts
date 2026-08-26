@@ -5674,6 +5674,32 @@ class DatabaseManager {
     };
   }
 
+  async getAllChaptersForSitemap(): Promise<{ id: string; seriesId: string; number: number; updatedAt?: string; isPending?: boolean }[]> {
+    if (this.isUsingMySQL && this.pool) {
+      try {
+        const [rows] = await this.pool.execute("SELECT id, seriesId, number, updatedAt, isPending FROM chapters WHERE isPending = 0 OR isPending IS NULL ORDER BY updatedAt DESC") as any[];
+        return rows.map((r: any) => ({
+          id: r.id,
+          seriesId: r.seriesId,
+          number: Number(r.number),
+          updatedAt: r.updatedAt,
+          isPending: Boolean(r.isPending)
+        }));
+      } catch (e) {
+        return [];
+      }
+    }
+    return (this.localData.chapters || [])
+      .filter((c: any) => !c.isPending)
+      .map((c: any) => ({
+        id: c.id,
+        seriesId: c.seriesId,
+        number: Number(c.number),
+        updatedAt: c.updatedAt,
+        isPending: Boolean(c.isPending)
+      }));
+  }
+
   private async getAllChaptersRaw(): Promise<Chapter[]> {
     if (this.isUsingMySQL && this.pool) {
       try {

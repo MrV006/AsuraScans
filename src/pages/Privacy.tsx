@@ -3,6 +3,7 @@ import { Layout } from '../components/Layout';
 import { useSettings } from '../contexts/SettingsContext';
 import { Shield, ArrowLeft, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { SEOHead } from '../components/SEOHead';
 
 export default function Privacy() {
   const { settings } = useSettings();
@@ -45,6 +46,12 @@ export default function Privacy() {
 
   return (
     <Layout>
+      <SEOHead 
+        title={`حریم خصوصی کاربران | ${settings?.siteName || 'مانگاتا'}`}
+        description={`سیاست‌ها و قوانین حفظ حریم خصوصی و امنیت اطلاعات کاربران در رسانه ${settings?.siteName || 'مانگاتا'}.`}
+        keywords={`حریم خصوصی, قوانین سایت, امنیت کاربران, ${settings?.siteName || 'مانگاتا'}`}
+        siteName={settings?.siteName || 'مانگاتا'}
+      />
       <div className="min-h-[80vh] bg-[#0b0b0e] py-12 px-4 md:px-8" dir="rtl">
         <div className="max-w-4xl mx-auto">
           {/* Breadcrumbs */}

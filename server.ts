@@ -4360,65 +4360,242 @@ async function getFilesRecursively(dir: string, baseDir: string = dir): Promise<
   });
 
 
-  // Dynamic XML Sitemap Generator for Google Search Console
+  // -----------------------------------------------------------------
+  // SEO, SITEMAP INDEX & SUB-SITEMAPS GENERATORS (Google Search Console)
+  // -----------------------------------------------------------------
+  const escapeXml = (unsafe: string) => {
+    if (!unsafe) return '';
+    return unsafe
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  };
+
+  // Master Sitemap Index (Google Search Console Entry Point)
   app.get('/sitemap.xml', async (req, res) => {
     try {
       const siteUrl = `${req.protocol}://${req.get('host') || 'localhost'}`;
-      const seriesList = await dbManager.getSeries();
+      const isAllRequested = req.query.all === '1' || req.query.all === 'true';
 
-      const escapeXml = (unsafe: string) => unsafe.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+      if (isAllRequested) {
+        // Fallback: Full combined sitemap
+        const [seriesList, chaptersList] = await Promise.all([
+          dbManager.getSeries(),
+          dbManager.getAllChaptersForSitemap()
+        ]);
+
+        let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+        xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n`;
+
+        const staticPages = [
+          { url: '/', priority: '1.0', changefreq: 'daily' },
+          { url: '/search', priority: '0.9', changefreq: 'daily' },
+          { url: '/cooperation', priority: '0.7', changefreq: 'weekly' },
+          { url: '/leaderboard', priority: '0.8', changefreq: 'daily' },
+          { url: '/support', priority: '0.5', changefreq: 'monthly' },
+          { url: '/terms', priority: '0.3', changefreq: 'monthly' },
+          { url: '/privacy', priority: '0.3', changefreq: 'monthly' },
+        ];
+
+        for (const p of staticPages) {
+          xml += `  <url>\n    <loc>${siteUrl}${p.url}</loc>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>\n`;
+        }
+
+        for (const s of (seriesList || [])) {
+          const seriesLoc = `${siteUrl}/series/${s.id}`;
+          const lastMod = s.updatedAt ? new Date(s.updatedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+          xml += `  <url>\n    <loc>${seriesLoc}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n`;
+          if (s.cover) {
+            const coverUrl = s.cover.startsWith('http') ? s.cover : `${siteUrl}${s.cover.startsWith('/') ? '' : '/'}${s.cover}`;
+            xml += `    <image:image>\n      <image:loc>${escapeXml(coverUrl)}</image:loc>\n      <image:title>${escapeXml(s.title)}</image:title>\n    </image:image>\n`;
+          }
+          xml += `  </url>\n`;
+        }
+
+        for (const ch of (chaptersList || [])) {
+          if (ch.isPending) continue;
+          const chapLoc = `${siteUrl}/series/${ch.seriesId}/chapters/${ch.id}`;
+          const chMod = ch.updatedAt ? new Date(ch.updatedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+          xml += `  <url>\n    <loc>${chapLoc}</loc>\n    <lastmod>${chMod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
+        }
+
+        xml += `</urlset>`;
+        res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+        return res.send(xml);
+      }
+
+      // Standard Google Sitemap Index format (Handles 10,000+ works effortlessly)
+      const today = new Date().toISOString().split('T')[0];
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+      xml += `<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+      xml += `  <sitemap>\n    <loc>${siteUrl}/sitemap-main.xml</loc>\n    <lastmod>${today}</lastmod>\n  </sitemap>\n`;
+      xml += `  <sitemap>\n    <loc>${siteUrl}/sitemap-series.xml</loc>\n    <lastmod>${today}</lastmod>\n  </sitemap>\n`;
+      xml += `  <sitemap>\n    <loc>${siteUrl}/sitemap-chapters.xml</loc>\n    <lastmod>${today}</lastmod>\n  </sitemap>\n`;
+      xml += `</sitemapindex>`;
+
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=1800'); // 30 min cache
+      res.send(xml);
+    } catch (err: any) {
+      console.error('Sitemap index generation error:', err);
+      res.status(500).send('Error generating sitemap index');
+    }
+  });
+
+  // Sub-Sitemap: Main / Static Pages
+  app.get('/sitemap-main.xml', (req, res) => {
+    try {
+      const siteUrl = `${req.protocol}://${req.get('host') || 'localhost'}`;
+      const today = new Date().toISOString().split('T')[0];
 
       let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-      xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n`;
+      xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
 
       const staticPages = [
         { url: '/', priority: '1.0', changefreq: 'daily' },
         { url: '/search', priority: '0.9', changefreq: 'daily' },
         { url: '/cooperation', priority: '0.7', changefreq: 'weekly' },
-        { url: '/leaderboard', priority: '0.6', changefreq: 'weekly' },
+        { url: '/leaderboard', priority: '0.8', changefreq: 'daily' },
         { url: '/support', priority: '0.5', changefreq: 'monthly' },
-        { url: '/terms', priority: '0.3', changefreq: 'yearly' },
-        { url: '/privacy', priority: '0.3', changefreq: 'yearly' },
+        { url: '/terms', priority: '0.3', changefreq: 'monthly' },
+        { url: '/privacy', priority: '0.3', changefreq: 'monthly' },
       ];
 
       for (const p of staticPages) {
-        xml += `  <url>\n    <loc>${siteUrl}${p.url}</loc>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>\n`;
+        xml += `  <url>\n    <loc>${siteUrl}${p.url}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>${p.changefreq}</changefreq>\n    <priority>${p.priority}</priority>\n  </url>\n`;
       }
+
+      xml += `</urlset>`;
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.send(xml);
+    } catch (err: any) {
+      console.error('Main sitemap generation error:', err);
+      res.status(500).send('Error generating main sitemap');
+    }
+  });
+
+  // Sub-Sitemap: Series / Manhwa / Manga (With Google Image SEO extension)
+  app.get('/sitemap-series.xml', async (req, res) => {
+    try {
+      const siteUrl = `${req.protocol}://${req.get('host') || 'localhost'}`;
+      const seriesList = await dbManager.getSeries();
+
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+      xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n`;
 
       for (const s of (seriesList || [])) {
         const seriesLoc = `${siteUrl}/series/${s.id}`;
         const lastMod = s.updatedAt ? new Date(s.updatedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
-        xml += `  <url>\n    <loc>${seriesLoc}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.9</priority>\n`;
+        xml += `  <url>\n    <loc>${seriesLoc}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>1.0</priority>\n`;
         if (s.cover) {
           const coverUrl = s.cover.startsWith('http') ? s.cover : `${siteUrl}${s.cover.startsWith('/') ? '' : '/'}${s.cover}`;
           xml += `    <image:image>\n      <image:loc>${escapeXml(coverUrl)}</image:loc>\n      <image:title>${escapeXml(s.title)}</image:title>\n    </image:image>\n`;
         }
         xml += `  </url>\n`;
-
-        try {
-          const chapters = await dbManager.getChapters(s.id);
-          for (const ch of (chapters || [])) {
-            if (ch.isPending) continue;
-            const chapLoc = `${siteUrl}/series/${s.id}/chapters/${ch.id}`;
-            const chMod = ch.updatedAt ? new Date(ch.updatedAt).toISOString().split('T')[0] : lastMod;
-            xml += `  <url>\n    <loc>${chapLoc}</loc>\n    <lastmod>${chMod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
-          }
-        } catch (err) {}
       }
 
       xml += `</urlset>`;
       res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=1800');
       res.send(xml);
     } catch (err: any) {
-      console.error('Sitemap generation error:', err);
-      res.status(500).send('Error generating sitemap');
+      console.error('Series sitemap generation error:', err);
+      res.status(500).send('Error generating series sitemap');
+    }
+  });
+
+  // Sub-Sitemap: All Chapters (Fast, bulk-indexed for thousands of chapters)
+  app.get('/sitemap-chapters.xml', async (req, res) => {
+    try {
+      const siteUrl = `${req.protocol}://${req.get('host') || 'localhost'}`;
+      const chaptersList = await dbManager.getAllChaptersForSitemap();
+
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+      xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
+
+      for (const ch of (chaptersList || [])) {
+        if (ch.isPending) continue;
+        const chapLoc = `${siteUrl}/series/${ch.seriesId}/chapters/${ch.id}`;
+        const chMod = ch.updatedAt ? new Date(ch.updatedAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+        xml += `  <url>\n    <loc>${chapLoc}</loc>\n    <lastmod>${chMod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
+      }
+
+      xml += `</urlset>`;
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=1800');
+      res.send(xml);
+    } catch (err: any) {
+      console.error('Chapters sitemap generation error:', err);
+      res.status(500).send('Error generating chapters sitemap');
+    }
+  });
+
+  // RSS 2.0 / Feed XML for Live Search Engines & Feed Readers
+  app.get(['/rss.xml', '/feed.xml', '/feed'], async (req, res) => {
+    try {
+      const siteUrl = `${req.protocol}://${req.get('host') || 'localhost'}`;
+      const [seriesList, seoSettings, globalSettings] = await Promise.all([
+        dbManager.getSeries(),
+        dbManager.getSettings('seo').catch(() => null),
+        dbManager.getSettings('global').catch(() => null),
+      ]);
+
+      const siteName = seoSettings?.siteName || globalSettings?.siteName || 'مانگاتا';
+      const siteDescription = seoSettings?.metaDescription || globalSettings?.seoDescription || 'مرجع تخصصی ترجمه و خواندن آنلاین مانهوا و مانگا';
+
+      // Sort series by updatedAt descending
+      const sorted = [...(seriesList || [])].sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return timeB - timeA;
+      }).slice(0, 50);
+
+      let rss = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+      rss += `<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n`;
+      rss += `  <channel>\n`;
+      rss += `    <title>${escapeXml(siteName)}</title>\n`;
+      rss += `    <link>${siteUrl}</link>\n`;
+      rss += `    <description>${escapeXml(siteDescription)}</description>\n`;
+      rss += `    <language>fa</language>\n`;
+      rss += `    <atom:link href="${siteUrl}/rss.xml" rel="self" type="application/rss+xml" />\n`;
+
+      for (const s of sorted) {
+        const itemUrl = `${siteUrl}/series/${s.id}`;
+        const pubDate = new Date(s.updatedAt || s.createdAt || Date.now()).toUTCString();
+        const typeLabel = s.type === 'Manga' ? 'مانگا' : s.type === 'Manhua' ? 'مانها' : 'مانهوا';
+        const coverUrl = s.cover ? (s.cover.startsWith('http') ? s.cover : `${siteUrl}${s.cover.startsWith('/') ? '' : '/'}${s.cover}`) : '';
+
+        rss += `    <item>\n`;
+        rss += `      <title>${escapeXml(`[${typeLabel}] ${s.title}`)}</title>\n`;
+        rss += `      <link>${itemUrl}</link>\n`;
+        rss += `      <guid isPermaLink="true">${itemUrl}</guid>\n`;
+        rss += `      <pubDate>${pubDate}</pubDate>\n`;
+        rss += `      <description>${escapeXml(s.synopsis || `${s.title} با ترجمه فارسی اختصاصی`)}</description>\n`;
+        if (coverUrl) {
+          rss += `      <enclosure url="${escapeXml(coverUrl)}" type="image/jpeg" />\n`;
+        }
+        rss += `    </item>\n`;
+      }
+
+      rss += `  </channel>\n`;
+      rss += `</rss>`;
+
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=1800');
+      res.send(rss);
+    } catch (err: any) {
+      console.error('RSS generation error:', err);
+      res.status(500).send('Error generating RSS feed');
     }
   });
 
   // Robots.txt Generator
   app.get('/robots.txt', (req, res) => {
     const siteUrl = `${req.protocol}://${req.get('host') || 'localhost'}`;
-    const txt = `User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\n\nSitemap: ${siteUrl}/sitemap.xml\n`;
+    const txt = `User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\n\nSitemap: ${siteUrl}/sitemap.xml\nSitemap: ${siteUrl}/sitemap-series.xml\nSitemap: ${siteUrl}/sitemap-chapters.xml\nSitemap: ${siteUrl}/sitemap-main.xml\n`;
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.send(txt);
   });
