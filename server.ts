@@ -314,12 +314,12 @@ async function startServer() {
   };
 
   const requireAdmin = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const adminUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.query.adminUid || req.query.uid) as string;
+    const adminUid = (req.headers['x-admin-uid'] || req.headers['x-user-uid'] || req.headers['x-user-email'] || req.query.adminUid || req.query.uid || req.body?.adminUid || req.body?.userId) as string;
     if (!adminUid || adminUid === 'null' || adminUid === 'undefined') {
       return res.status(401).json({ error: 'Unauthorized. Admin credentials required.' });
     }
 
-    const lowerUid = String(adminUid).toLowerCase();
+    const lowerUid = String(adminUid).toLowerCase().trim();
     if (lowerUid === 'admin' || lowerUid === 'super_admin' || lowerUid === 'amirrezaveisi45@gmail.com' || lowerUid === 'mr.v@admin.com' || lowerUid.includes('amirrezaveisi') || lowerUid.includes('mr.v')) {
       return next();
     }

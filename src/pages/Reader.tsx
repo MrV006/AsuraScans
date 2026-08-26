@@ -1,5 +1,6 @@
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { useSeriesOverview } from '../hooks/useSeries';
+import { useSeriesOverview, clearSeriesCache } from '../hooks/useSeries';
+import { clearRatingsCache } from '../hooks/useRatings';
 import { useSettings } from '../contexts/SettingsContext';
 import { useHistory } from '../hooks/useUserActivity';
 import { ChevronLeft, ChevronRight, Menu, Home, ArrowUp, Settings as SettingsIcon, Flag, AlertTriangle, X, Check, Send, RefreshCw, Sparkles } from 'lucide-react';
@@ -404,6 +405,11 @@ export default function Reader() {
       try {
         cleanTarget = decodeURIComponent(targetId).trim();
       } catch (err) {}
+      // Clear cache so fresh data is retrieved without blocking or logging the user out
+      clearSeriesCache(cleanTarget);
+      clearSeriesCache(targetId);
+      clearRatingsCache(cleanTarget);
+      clearRatingsCache(targetId);
       navigate(`/series/${encodeURIComponent(cleanTarget)}`, { state: { initialSeries: series } });
     } else {
       navigate('/');

@@ -15,7 +15,18 @@ export interface RatingSummary {
   starCounts: { 1: number; 2: number; 3: number; 4: number; 5: number };
 }
 
-const ratingsCache = new Map<string, { ratings: Rating[]; summary: RatingSummary | null; timestamp: number }>();
+export const ratingsCache = new Map<string, { ratings: Rating[]; summary: RatingSummary | null; timestamp: number }>();
+
+export function clearRatingsCache(seriesId?: string) {
+  if (seriesId) {
+    ratingsCache.delete(seriesId);
+    try {
+      ratingsCache.delete(decodeURIComponent(seriesId).trim());
+    } catch (e) {}
+  } else {
+    ratingsCache.clear();
+  }
+}
 
 export function useRatings(seriesId?: string) {
   const { user } = useAuth();
